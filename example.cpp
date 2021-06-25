@@ -8,7 +8,7 @@
 
 int main() {
 
-	using types = vtll::tl< int, bool, double, float>;
+	using types = vtll::tl< int, bool, double, float, int>;
 	vllt::VlltTable<types> table;
 
 	return 0;

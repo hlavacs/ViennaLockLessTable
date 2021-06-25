@@ -69,6 +69,10 @@ namespace vllt {
 
 		inline auto size2() noexcept -> size_t;
 
+		template<typename VL, typename... Cs>
+		inline auto push_back2(Cs&&... data) noexcept	-> table_index_t;	///< Push new component data to the end of the table
+
+
 	public:
 		VlltTable(size_t r = 1 << 16, std::pmr::memory_resource* mr = std::pmr::new_delete_resource()) noexcept;
 		~VlltTable() noexcept;
@@ -91,7 +95,11 @@ namespace vllt {
 		//add data
 
 		template<typename... Cs>
-		requires vtll::has_all_types<DATA, vtll::tl<std::decay_t<Cs>...>>::value
+		requires std::is_same_v<vtll::tl<std::decay_t<Cs...>>, DATA>
+		inline auto push_back(Cs&&... data) noexcept			-> table_index_t;	///< Push new component data to the end of the table
+
+		template<typename... Cs>
+		requires (sizeof...(Cs) < vtll::size<DATA>::value && vtll::has_all_types<DATA, vtll::tl<std::decay_t<Cs>...>>::value)
 		inline auto push_back(Cs&&... data) noexcept			-> table_index_t;	///< Push new component data to the end of the table
 
 		//-------------------------------------------------------------------------------------------
@@ -207,15 +215,10 @@ namespace vllt {
 		return f(std::make_index_sequence<vtll::size<DATA>::value>{});
 	};
 
-	/**
-	* \brief Create a new entry at the end of the table.
-	* \param[in] data References to values to be moved or copied to the new row.
-	* \returns the index of the new entry.
-	*/
+
 	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
-	template<typename... Cs>
-	requires vtll::has_all_types<DATA, vtll::tl<std::decay_t<Cs>...>>::value
-	inline auto VlltTable<DATA, N0, ROW, table_index_t>::push_back(Cs&&... data) noexcept -> table_index_t {
+	template<typename VL, typename... Cs>
+	inline auto VlltTable<DATA, N0, ROW, table_index_t>::push_back2(Cs&&... data) noexcept	-> table_index_t {
 		slot_size_t size = m_size_cnt.load();	///< Make sure that no other thread is popping currently
 		while (size.m_next_slot < size.m_size || !m_size_cnt.compare_exchange_weak(size, slot_size_t{ size.m_next_slot + 1, size.m_size })) {
 			if (size.m_next_slot < size.m_size) {
@@ -226,8 +229,8 @@ namespace vllt {
 		auto vector_ptr{ m_seg_vector.load() };					///< Shared pointer to current segment ptr vector, can be nullptr
 		size_t num_seg = vector_ptr ? vector_ptr->size() : 0;	///< Current number of segments
 		if (size.m_next_slot >= N * num_seg) {					///< Do we have enough?
-			auto new_vector_ptr = std::make_shared<seg_vector_t>( std::max( num_seg * 2, 16ULL  ), m_mr);		///< Reallocate
-			for (size_t i = 0; i < num_seg; ++i) { (*new_vector_ptr)[i].store( (*vector_ptr)[i].load() );  };	///< Copy segment pointers
+			auto new_vector_ptr = std::make_shared<seg_vector_t>(std::max(num_seg * 2, 16ULL), m_mr);		///< Reallocate
+			for (size_t i = 0; i < num_seg; ++i) { (*new_vector_ptr)[i].store((*vector_ptr)[i].load()); };	///< Copy segment pointers
 			if (m_seg_vector.compare_exchange_strong(vector_ptr, new_vector_ptr)) {	///< Try to exchange old segment vector with new
 				vector_ptr = new_vector_ptr;					///< Remember for later
 			}
@@ -237,11 +240,21 @@ namespace vllt {
 		auto seg_ptr = (*vector_ptr)[seg_num].load();			///< Does the segment exist yet? If yes, increases use count.
 		if (!seg_ptr) {											///< If not, create one
 			auto new_seg_ptr = std::make_shared<segment_t>();	///< Create a new segment
-			(*vector_ptr)[seg_num].compare_exchange_strong( seg_ptr, new_seg_ptr);	///< Try to put it into seg vector, someone might beat us here
+			(*vector_ptr)[seg_num].compare_exchange_strong(seg_ptr, new_seg_ptr);	///< Try to put it into seg vector, someone might beat us here
 		}
 
 		if constexpr (sizeof...(Cs) > 0) {						///< copy/move the data
-			(update<vtll::index_of<DATA, std::decay_t<Cs>>::value>(table_index_t{ size.m_next_slot }, std::forward<Cs>(data)), ...);
+			//(update<vtll::index_of<DATA, std::decay_t<Cs>>::value>(table_index_t{ size.m_next_slot }, std::forward<Cs>(data)), ...);
+
+			vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
+				[&](auto i) {
+					static const size_t index
+					using type = vtll::Nth_type<DATA, i>;
+					update<i>(table_index_t{ size.m_next_slot }, std::forward<type>(data));
+				}
+			);
+
+
 		}
 
 		slot_size_t new_size = m_size_cnt.load();	///< Increase size to validate the new row
@@ -251,6 +264,28 @@ namespace vllt {
 
 		return table_index_t{ size.m_next_slot };	///< Return index of new entry
 	}
+
+
+	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
+	template<typename... Cs>
+	requires std::is_same_v<vtll::tl<std::decay_t<Cs...>>, DATA>
+	inline auto VlltTable<DATA, N0, ROW, table_index_t>::push_back(Cs&&... data) noexcept -> table_index_t {
+
+	}
+
+
+	/**
+	* \brief Create a new entry at the end of the table.
+	* \param[in] data References to values to be moved or copied to the new row.
+	* \returns the index of the new entry.
+	*/
+	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
+	template<typename... Cs>
+	requires (sizeof...(Cs) < vtll::size<DATA>::value&& vtll::has_all_types<DATA, vtll::tl<std::decay_t<Cs>...>>::value)
+	inline auto VlltTable<DATA, N0, ROW, table_index_t>::push_back(Cs&&... data) noexcept -> table_index_t {
+
+	}
+
 
 	/**
 	* \brief Pop the last row if there is one.
