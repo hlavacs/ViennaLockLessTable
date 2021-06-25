@@ -18,4 +18,8 @@ VLLT is a header-only library, just include it and make sure that VTLL.h can be 
 
 # The VLLT API
 
-VLLT contains only one class, the VlltTable.
+VLLT contains only one class, the VlltTable. The class depends on the following template parameters:
+* DATA: a type list containing the column types that are stored in the table.
+* N0: the minimal size of a segment. VTLL stores its data in segments of size *N*. Here *N* is the smallest power of 2 that is equal or larger than *N0*. So if *N0* is not a power of 2, VTLL will chose the next larger power of 2 as size.
+* ROW: a boolean determining the data layout. If true, the layout is row-oriented. If false, it is column-oriented.
+* table_index_t: a data type that is used for indexing the rows of the table. Its default is *uint32_t*, but you can use your own strong types if you want.
