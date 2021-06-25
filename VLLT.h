@@ -248,9 +248,9 @@ namespace vllt {
 
 			vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 				[&](auto i) {
-					static const size_t index
+					static const size_t index = vtll::Nth_value<VL, i>::value;
 					using type = vtll::Nth_type<DATA, i>;
-					update<i>(table_index_t{ size.m_next_slot }, std::forward<type>(data));
+					update<index>(table_index_t{ size.m_next_slot }, std::forward<type>(data));
 				}
 			);
 
