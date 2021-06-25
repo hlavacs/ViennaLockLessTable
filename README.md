@@ -20,6 +20,13 @@ VLLT is a header-only library, just include it and make sure that VTLL.h can be 
 
 VLLT contains only one class, the VlltTable. The class depends on the following template parameters:
 * DATA: a type list containing the column types that are stored in the table.
-* N0: the minimal size of a segment. VTLL stores its data in segments of size *N*. Here *N* is the smallest power of 2 that is equal or larger than *N0*. So if *N0* is not a power of 2, VTLL will chose the next larger power of 2 as size.
-* ROW: a boolean determining the data layout. If true, the layout is row-oriented. If false, it is column-oriented.
+* N0: the minimal size of a segment. VTLL stores its data in segments of size *N*. Here *N* is the smallest power of 2 that is equal or larger than *N0*. So if *N0* is not a power of 2, VTLL will chose the next larger power of 2 as size. The default value is 1024.
+* ROW: a boolean determining the data layout. If true, the layout is row-oriented. If false, it is column-oriented. The default value is false.
 * table_index_t: a data type that is used for indexing the rows of the table. Its default is *uint32_t*, but you can use your own strong types if you want.
+
+The following is an example of how to create a table:
+
+    using types = vtll::tl< int, bool, double, float, int>;
+    vllt::VlltTable<types> table;
+
+In this example, the table can hold the types in, bool, double, float, int. As can be seen it is not necessary to enforce unique types. However, it is advisable to use unique types, because the operations push_back and update will always use the first type that is found.
