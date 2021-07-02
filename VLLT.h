@@ -69,10 +69,6 @@ namespace vllt {
 
 		inline auto size2() noexcept -> size_t;
 
-		template<typename VL, typename... Cs>
-		inline auto push_back2(Cs&&... data) noexcept	-> table_index_t;	///< Push new component data to the end of the table
-
-
 	public:
 		VlltTable(size_t r = 1 << 16, std::pmr::memory_resource* mr = std::pmr::new_delete_resource()) noexcept;
 		~VlltTable() noexcept;
@@ -95,21 +91,16 @@ namespace vllt {
 		//add data
 
 		template<typename... Cs>
-		requires std::is_same_v<vtll::tl<std::decay_t<Cs...>>, DATA>
-		inline auto push_back(Cs&&... data) noexcept			-> table_index_t;	///< Push new component data to the end of the table
-
-		template<typename... Cs>
-		requires (sizeof...(Cs) < vtll::size<DATA>::value && vtll::has_all_types<DATA, vtll::tl<std::decay_t<Cs>...>>::value)
+		requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, DATA>
 		inline auto push_back(Cs&&... data) noexcept			-> table_index_t;	///< Push new component data to the end of the table
 
 		//-------------------------------------------------------------------------------------------
 		//update data
 
 		template<size_t I, typename C = vtll::Nth_type<DATA, I>>
-		requires vtll::has_type<DATA, std::decay_t<C>>::value
 		inline auto update(table_index_t n, C&& data) noexcept		-> bool;	///< Update a component  for a given row
 
-		template<typename... Cs>
+		template<typename VL, typename... Cs>
 		requires (sizeof...(Cs) > 1 && vtll::has_all_types<DATA, vtll::tl<std::decay_t<Cs>...>>::value)
 		inline auto update(table_index_t n, Cs&&... data) noexcept	-> bool;
 
@@ -217,8 +208,9 @@ namespace vllt {
 
 
 	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
-	template<typename VL, typename... Cs>
-	inline auto VlltTable<DATA, N0, ROW, table_index_t>::push_back2(Cs&&... data) noexcept	-> table_index_t {
+	template<typename... Cs>
+	requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, DATA>
+	inline auto VlltTable<DATA, N0, ROW, table_index_t>::push_back(Cs&&... data) noexcept	-> table_index_t {
 		slot_size_t size = m_size_cnt.load();	///< Make sure that no other thread is popping currently
 		while (size.m_next_slot < size.m_size || !m_size_cnt.compare_exchange_weak(size, slot_size_t{ size.m_next_slot + 1, size.m_size })) {
 			if (size.m_next_slot < size.m_size) {
@@ -243,19 +235,13 @@ namespace vllt {
 			(*vector_ptr)[seg_num].compare_exchange_strong(seg_ptr, new_seg_ptr);	///< Try to put it into seg vector, someone might beat us here
 		}
 
-		if constexpr (sizeof...(Cs) > 0) {						///< copy/move the data
-			//(update<vtll::index_of<DATA, std::decay_t<Cs>>::value>(table_index_t{ size.m_next_slot }, std::forward<Cs>(data)), ...);
-
-			vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
-				[&](auto i) {
-					static const size_t index = vtll::Nth_value<VL, i>::value;
-					using type = vtll::Nth_type<DATA, i>;
-					update<index>(table_index_t{ size.m_next_slot }, std::forward<type>(data));
-				}
-			);
-
-
-		}
+		auto tuple = std::forward_as_tuple(data...);
+		vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
+			[&](auto i) {
+				using type = vtll::Nth_type<DATA, i>;
+				update<i>(table_index_t{ size.m_next_slot }, std::forward<type>(std::get<i>(tuple)));
+			}
+		);
 
 		slot_size_t new_size = m_size_cnt.load();	///< Increase size to validate the new row
 		do {
@@ -263,27 +249,6 @@ namespace vllt {
 		} while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ new_size.m_next_slot, new_size.m_size + 1 }));
 
 		return table_index_t{ size.m_next_slot };	///< Return index of new entry
-	}
-
-
-	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
-	template<typename... Cs>
-	requires std::is_same_v<vtll::tl<std::decay_t<Cs...>>, DATA>
-	inline auto VlltTable<DATA, N0, ROW, table_index_t>::push_back(Cs&&... data) noexcept -> table_index_t {
-
-	}
-
-
-	/**
-	* \brief Create a new entry at the end of the table.
-	* \param[in] data References to values to be moved or copied to the new row.
-	* \returns the index of the new entry.
-	*/
-	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
-	template<typename... Cs>
-	requires (sizeof...(Cs) < vtll::size<DATA>::value&& vtll::has_all_types<DATA, vtll::tl<std::decay_t<Cs>...>>::value)
-	inline auto VlltTable<DATA, N0, ROW, table_index_t>::push_back(Cs&&... data) noexcept -> table_index_t {
-
 	}
 
 
@@ -369,7 +334,6 @@ namespace vllt {
 	*/
 	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
 	template<size_t I, typename C>
-	requires vtll::has_type<DATA, std::decay_t<C>>::value
 	inline auto VlltTable<DATA, N0, ROW, table_index_t>::update(table_index_t n, C&& data) noexcept -> bool {
 		assert(n < size2());
 		if constexpr (std::is_move_assignable_v<std::decay_t<C>> && std::is_rvalue_reference_v<decltype(data)>) {
@@ -392,10 +356,21 @@ namespace vllt {
 	* \returns true if the operation was successful.
 	*/
 	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
-	template<typename... Cs>
+	template<typename VL, typename... Cs>
 	requires (sizeof...(Cs)>1 && vtll::has_all_types<DATA, vtll::tl<std::decay_t<Cs>...>>::value)
 	inline auto VlltTable<DATA, N0, ROW, table_index_t>::update(table_index_t n, Cs&&... data) noexcept -> bool {
-		return (update<vtll::index_of<DATA,std::decay_t<Cs>>::value>(n, std::forward<Cs>(data)) && ... && true);
+
+		auto tuple = std::forward_as_tuple(data...);
+		bool ret = true;
+		vtll::static_for<size_t, 0, vtll::size<VL>::value >(	///< Loop over all components
+			[&](auto i) {
+				using type = vtll::Nth_type<DATA, i>;
+				const size_t index = vtll::Nth_value<i>::value;
+				ret = ret && update<index>(table_index_t{ size.m_next_slot }, std::forward<type>(std::get<index>(tuple)));
+			}
+		);
+
+		return ret;
 	}
 
 	/**
