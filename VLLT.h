@@ -100,7 +100,7 @@ namespace vllt {
 		template<size_t I, typename C = vtll::Nth_type<DATA, I>>
 		inline auto update(table_index_t n, C&& data) noexcept		-> bool;	///< Update a component  for a given row
 
-		template<typename VL, typename... Cs>
+		template<typename VL = vtll::vl<>, typename... Cs>
 		requires (sizeof...(Cs) > 1 && vtll::has_all_types<DATA, vtll::tl<std::decay_t<Cs>...>>::value)
 		inline auto update(table_index_t n, Cs&&... data) noexcept	-> bool;
 
@@ -362,11 +362,14 @@ namespace vllt {
 
 		auto tuple = std::forward_as_tuple(data...);
 		bool ret = true;
-		vtll::static_for<size_t, 0, vtll::size<VL>::value >(	///< Loop over all components
+
+		using value_list = std::conditional_t< (vtll::size_value<VL>::value > 0), VL, vtll::make_value_list<vtll::size<DATA>::value> > ;
+
+		vtll::static_for<size_t, 0, vtll::size_value<value_list>::value >(	///< Loop over all components
 			[&](auto i) {
 				using type = vtll::Nth_type<DATA, i>;
-				const size_t index = vtll::Nth_value<i>::value;
-				ret = ret && update<index>(table_index_t{ size.m_next_slot }, std::forward<type>(std::get<index>(tuple)));
+				const size_t index = vtll::Nth_value<value_list, i>::value;
+				ret = ret && update<index>(table_index_t{ n }, std::forward<type>(std::get<index>(tuple)));
 			}
 		);
 
@@ -445,6 +448,64 @@ namespace vllt {
 				(*vector_ptr)[i].compare_exchange_strong(seg_ptr, new_seg_ptr);	///< Try to put it into seg vector, someone might beat us here
 			}
 		}
+	}
+
+
+
+
+	template<typename DATA, typename table_index_t = uint32_t>
+	class VlltFIFOQueue {
+
+		struct index_pair_t {
+			table_index_t m_first;
+			table_index_t m_last;
+		};
+
+		index_pair_t m_index_pair;
+
+		VlltTable<DATA> m_table;
+		VlltTable<vtll::tl<table_index_t>> m_deleted;
+
+	public:
+		VlltFIFOQueue() {};
+
+		template<typename... Cs>
+		requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, DATA>
+		inline auto push_back(Cs&&... data) noexcept						-> table_index_t;	///< Push new component data to the end of the table
+
+		inline auto pop_back(vtll::to_tuple<DATA>* tup = nullptr) noexcept	-> bool;			///< Remove the last row, call destructor on components
+
+		inline auto clear() noexcept										-> size_t;			///< Set the number if rows to zero - effectively clear the table, call destructors
+	};
+
+
+	template<typename DATA, typename table_index_t>
+	template<typename... Cs>
+	requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, DATA>
+	inline auto VlltFIFOQueue<DATA, table_index_t>::push_back(Cs&&... data) noexcept -> table_index_t {
+		std::tuple<table_index_t> idx;
+		if (!m_deleted.pop_back(&idx)) {
+			std::get<0>(idx) = m_table.push_back(std::forward<Cs>(data)...);
+		}
+		else {
+			m_table.update(std::get<0>(idx), std::forward<Cs>(data)...);
+		}
+		return std::get<0>(idx);
+	}
+
+
+	template<typename DATA, typename table_index_t>
+	inline auto VlltFIFOQueue<DATA, table_index_t>::pop_back(vtll::to_tuple<DATA>* tup) noexcept -> bool {
+		
+		return true;
+	}
+
+
+	template<typename DATA, typename table_index_t>
+	inline auto VlltFIFOQueue<DATA, table_index_t>::clear() noexcept -> size_t {
+		size_t num = 0;
+		while (pop_back()) { ++num; }
+		return num;
 	}
 
 }
