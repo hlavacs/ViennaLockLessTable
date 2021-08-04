@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <type_traits>
 #include "VTLL.h"
+#include "IntType.h"
 
 namespace vllt {
 
@@ -452,16 +453,19 @@ namespace vllt {
 
 
 
-
-	template<typename DATA, typename table_index_t = uint32_t>
+	template<typename DATA>
 	class VlltFIFOQueue {
+
+		using table_index_t = int_type<uint32_t, struct P1, std::numeric_limits<uint32_t>::max() > ;
 
 		struct index_pair_t {
 			table_index_t m_first;
 			table_index_t m_last;
 		};
 
-		index_pair_t m_index_pair;
+		index_pair_t m_first_last;
+
+		using types = vtll::cat< vtll::tl<table_index_t>, DATA >;
 
 		VlltTable<DATA> m_table;
 		VlltTable<vtll::tl<table_index_t>> m_deleted;
@@ -479,10 +483,10 @@ namespace vllt {
 	};
 
 
-	template<typename DATA, typename table_index_t>
+	template<typename DATA>
 	template<typename... Cs>
 	requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, DATA>
-	inline auto VlltFIFOQueue<DATA, table_index_t>::push_back(Cs&&... data) noexcept -> table_index_t {
+	inline auto VlltFIFOQueue<DATA>::push_back(Cs&&... data) noexcept -> table_index_t {
 		std::tuple<table_index_t> idx;
 		if (!m_deleted.pop_back(&idx)) {
 			std::get<0>(idx) = m_table.push_back(std::forward<Cs>(data)...);
@@ -494,15 +498,15 @@ namespace vllt {
 	}
 
 
-	template<typename DATA, typename table_index_t>
-	inline auto VlltFIFOQueue<DATA, table_index_t>::pop_back(vtll::to_tuple<DATA>* tup) noexcept -> bool {
+	template<typename DATA>
+	inline auto VlltFIFOQueue<DATA>::pop_back(vtll::to_tuple<DATA>* tup) noexcept -> bool {
 		
 		return true;
 	}
 
 
-	template<typename DATA, typename table_index_t>
-	inline auto VlltFIFOQueue<DATA, table_index_t>::clear() noexcept -> size_t {
+	template<typename DATA>
+	inline auto VlltFIFOQueue<DATA>::clear() noexcept -> size_t {
 		size_t num = 0;
 		while (pop_back()) { ++num; }
 		return num;
