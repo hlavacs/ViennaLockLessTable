@@ -56,7 +56,13 @@ namespace vllt {
 		using segment_t  = std::conditional_t<ROW, array_tuple_t1, array_tuple_t2>;		///< Memory layout of the table
 
 		using segment_ptr_t = std::shared_ptr<segment_t>;
-		using seg_vector_t = std::pmr::vector<std::atomic<segment_ptr_t>>; ///< A seg_vector_t is a vector holding shared pointers to segments
+		
+		//using seg_vector_t = std::pmr::vector<std::atomic<segment_ptr_t>>; ///< A seg_vector_t is a vector holding shared pointers to segments
+		
+		struct seg_vector_t {
+			std::pmr::vector<std::atomic<segment_ptr_t>> m_segments;
+			size_t m_offset = 0;
+		};
 
 		struct slot_size_t {
 			uint32_t m_next_slot{ 0 };	//index of next free slot
@@ -174,7 +180,7 @@ namespace vllt {
 	inline auto VlltStack<DATA, N0, ROW, table_index_t>::component_ptr(table_index_t n) noexcept -> C* {
 		assert(n < max_size());
 		auto vector_ptr{ m_seg_vector.load() };
-		auto segment_ptr = ((*vector_ptr)[n >> L]).load();
+		auto segment_ptr = (vector_ptr->m_segments[n >> L]).load();
 		if constexpr (ROW) {
 			return &std::get<I>((*segment_ptr)[n & BIT_MASK]);
 		}
@@ -224,20 +230,26 @@ namespace vllt {
 		};
 
 		auto vector_ptr{ m_seg_vector.load() };					///< Shared pointer to current segment ptr vector, can be nullptr
-		size_t num_seg = vector_ptr ? vector_ptr->size() : 0;	///< Current number of segments
-		if (size.m_next_slot >= N * num_seg) {					///< Do we have enough?
-			auto new_vector_ptr = std::make_shared<seg_vector_t>(std::max(num_seg * 2, 16ULL), m_mr);		///< Reallocate
-			for (size_t i = 0; i < num_seg; ++i) { (*new_vector_ptr)[i].store((*vector_ptr)[i].load()); };	///< Copy segment pointers
+		size_t num_seg = vector_ptr ? vector_ptr->m_segments.size() : 0;	///< Current number of segments
+		if (size.m_next_slot >= N * num_seg) {					///< Do we have enough?		
+			auto new_vector_ptr = std::make_shared<seg_vector_t>(
+				seg_vector_t{ std::pmr::vector<std::atomic<segment_ptr_t>>{std::max(num_seg * 2, 16ULL), m_mr }, 0 }
+				);
+
+			for (size_t i = 0; i < num_seg; ++i) { 
+				new_vector_ptr->m_segments[i].store(vector_ptr->m_segments[i].load()); ///< Copy segment pointers
+			};	
+
 			if (m_seg_vector.compare_exchange_strong(vector_ptr, new_vector_ptr)) {	///< Try to exchange old segment vector with new
 				vector_ptr = new_vector_ptr;					///< Remember for later
 			}
 		}
 
 		auto seg_num = size.m_next_slot >> L;					///< Index of segment we need
-		auto seg_ptr = (*vector_ptr)[seg_num].load();			///< Does the segment exist yet? If yes, increases use count.
+		auto seg_ptr = vector_ptr->m_segments[seg_num].load();	///< Does the segment exist yet? If yes, increases use count.
 		if (!seg_ptr) {											///< If not, create one
 			auto new_seg_ptr = std::make_shared<segment_t>();	///< Create a new segment
-			(*vector_ptr)[seg_num].compare_exchange_strong(seg_ptr, new_seg_ptr);	///< Try to put it into seg vector, someone might beat us here
+			vector_ptr->m_segments[seg_num].compare_exchange_strong(seg_ptr, new_seg_ptr);	///< Try to put it into seg vector, someone might beat us here
 		}
 
 		auto tuple = std::forward_as_tuple(data...);
@@ -454,6 +466,62 @@ namespace vllt {
 		}
 	}
 
+
+
+	//----------------------------------------------------------------------------------------------------
+
+
+	/**
+	* \brief VlltFIFOQueue is a FIFO queue that can be ued by multiple threads in parallel
+	*
+	* It has the following properties:
+	* 1) It stores tuples of data
+	* 2) Lockless multithreaded access.
+	*
+	*/
+
+	template<typename DATA, size_t N0 = 1 << 10, bool ROW = true, typename table_index_t = uint32_t>
+	class VlltFIFOQueue : public VlltStack<DATA, N0, ROW, table_index_t> {
+
+	public:
+		VlltFIFOQueue() {};
+
+		template<typename... Cs>
+		requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, DATA>
+		inline auto push_back(Cs&&... data) noexcept						-> table_index_t;	///< Push new component data to the end of the table
+
+		inline auto pop_front(vtll::to_tuple<DATA>* tup = nullptr) noexcept	-> bool;			///< Remove the last row, call destructor on components
+
+		inline auto clear() noexcept										-> size_t;			///< Set the number if rows to zero - effectively clear the table, call destructors
+
+	};
+
+
+	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
+	template<typename... Cs>
+	requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, DATA>
+	inline auto VlltFIFOQueue<DATA, N0, ROW, table_index_t>::push_back(Cs&&... data) noexcept -> table_index_t {
+		table_index_t res = VlltStack<DATA,N0,ROW,table_index_t>::push_back(std::forward<Cs>(data)...);
+
+		return res;
+	}
+
+
+	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
+	inline auto VlltFIFOQueue<DATA, N0, ROW, table_index_t>::pop_front(vtll::to_tuple<DATA>* tup) noexcept -> bool {
+
+		return true;
+	}
+
+
+	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
+	inline auto VlltFIFOQueue<DATA, N0, ROW, table_index_t>::clear() noexcept -> size_t {
+		size_t num = 0;
+		while (pop_front()) { ++num; }
+		return num;
+	}
+
+
 	//----------------------------------------------------------------------------------------------------
 
 	/**
@@ -465,7 +533,7 @@ namespace vllt {
 	*
 	*/
 	template<typename DATA>
-	class VlltFIFOQueue {
+	class VlltFIFOQueue2 {
 
 		using table_index_t = int_type<uint32_t, struct VlltFIFOQueue_table_index_p, std::numeric_limits<uint32_t>::max() >;
 
@@ -482,7 +550,7 @@ namespace vllt {
 		VlltStack<vtll::tl<table_index_t>> m_deleted;
 
 	public:
-		VlltFIFOQueue() {};
+		VlltFIFOQueue2() {};
 
 		template<typename... Cs>
 		requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, DATA>
@@ -497,7 +565,7 @@ namespace vllt {
 	template<typename DATA>
 	template<typename... Cs>
 	requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, DATA>
-	inline auto VlltFIFOQueue<DATA>::push_back(Cs&&... data) noexcept -> table_index_t {
+	inline auto VlltFIFOQueue2<DATA>::push_back(Cs&&... data) noexcept -> table_index_t {
 		std::tuple<table_index_t> idx;
 		auto ridx = std::get<0>(idx);
 		if (!m_deleted.pop_back(&idx)) {
@@ -528,14 +596,14 @@ namespace vllt {
 
 
 	template<typename DATA>
-	inline auto VlltFIFOQueue<DATA>::pop_back(vtll::to_tuple<DATA>* tup) noexcept -> bool {
+	inline auto VlltFIFOQueue2<DATA>::pop_back(vtll::to_tuple<DATA>* tup) noexcept -> bool {
 		
 		return true;
 	}
 
 
 	template<typename DATA>
-	inline auto VlltFIFOQueue<DATA>::clear() noexcept -> size_t {
+	inline auto VlltFIFOQueue2<DATA>::clear() noexcept -> size_t {
 		size_t num = 0;
 		while (pop_back()) { ++num; }
 		return num;
