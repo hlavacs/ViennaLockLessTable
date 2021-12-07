@@ -454,6 +454,7 @@ namespace vllt {
 		}
 	}
 
+	//----------------------------------------------------------------------------------------------------
 
 	/**
 	* \brief VlltFIFOQueue is a FIFO queue that can be ued by multiple threads in parallel
@@ -466,7 +467,7 @@ namespace vllt {
 	template<typename DATA>
 	class VlltFIFOQueue {
 
-		using table_index_t = int_type<uint32_t, struct P1, std::numeric_limits<uint32_t>::max() > ;
+		using table_index_t = int_type<uint32_t, struct VlltFIFOQueue_table_index_p, std::numeric_limits<uint32_t>::max() >;
 
 		struct index_pair_t {
 			table_index_t m_first;	//index of first element in queue

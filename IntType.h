@@ -12,11 +12,16 @@
 */
 template<typename T, typename P, auto D = -1, size_t U = 0>
 struct int_type {
-	static const T L = sizeof(T) * 8 - U; //number of lower bits (if integer is cut into 2 values)
+private:
+	static const size_t L = sizeof(T) * 8 - U; //number of lower bits (if integer is cut into 2 values)
+	const size_t LMASK = (1ULL << L) - 1ULL;
+	const size_t UMASK = ((1ULL << U) - 1ULL) << L;
 
-	static const T null = static_cast<T>(D); //numm value
+	static const T null = static_cast<T>(D); //null value
 
-	T value{null};
+	T m_value{null};
+
+public:
 
 	int_type() = default;
 
@@ -24,72 +29,76 @@ struct int_type {
 	* \brief Constructor.
 	* \param[in] u A POD type that is used for setting the value.
 	*/
-	template<typename U>
-	requires (std::is_convertible_v<std::decay_t<U>, T> && std::is_pod_v<std::decay_t<U>>)
-	explicit int_type(U&& u) noexcept : value{ static_cast<T>(u) } {};
+	template<typename V>
+	requires (std::is_convertible_v<std::decay_t<V>, T> && std::is_pod_v<std::decay_t<V>>)
+	explicit int_type(V&& u) noexcept : m_value{ static_cast<T>(u) } {};
 
 	/**
 	* \brief Copy assignment.
 	* \param[in] rhs Any POD int type.
 	*/
-	template<typename U>
-	requires (std::is_convertible_v<std::decay_t<U>, T> && std::is_pod_v<std::decay_t<U>>)
-	void operator=(U&& rhs) noexcept { value = static_cast<T>(rhs); };
+	template<typename V>
+	requires (std::is_convertible_v<std::decay_t<V>, T> && std::is_pod_v<std::decay_t<V>>)
+	void operator=(V&& rhs) noexcept { m_value = static_cast<T>(rhs); };
 
 	/**
 	* \brief Yield the int value.
 	* \returns the int value.
 	*/
-	operator const T& () const { return value; }
+	operator const T& () const { 
+		return m_value;
+	}
 
 	/**
 	* \brief Yield the int value.
 	* \returns the int value.
 	*/
-	operator T& () { return value; }
+	operator T& () { 
+		return m_value;
+	}
 
 	/**
 	* \brief Comparison operator.
 	* \returns the default comparison.
 	*/
-	auto operator<=>(const int_type<T, P, D>& v) noexcept { return value <=> v.value; };
+	auto operator<=>(const int_type<T, P, D, U>& v) noexcept { return operator () <=> v.operator (); };
 
 	/**
 	* \brief Comparison operator.
 	* \returns the comparison between this value and another int.
 	*/
-	template<typename U>
-	requires std::is_convertible_v<U, T>
-	auto operator<(const U& v) noexcept { return value < static_cast<T>(v); };
+	template<typename V>
+	requires std::is_convertible_v<V, T>
+	auto operator<(const V& v) noexcept { return m_value < static_cast<T>(v); };
 
 	/**
 	* \brief Left shift operator.
 	* \param[in] L Number of bits to left shift.
 	* \returns the value left shifted.
 	*/
-	T operator<<(const size_t L) noexcept { return value << L; };
+	T operator<<(const size_t L) noexcept { return m_value << L; };
 
 	/**
 	* \brief Right shift operator.
 	* \param[in] L Number of bits to right shift.
 	* \returns the value left shifted.
 	*/
-	T operator>>(const size_t L) noexcept { return value >> L; };
+	T operator>>(const size_t L) noexcept { return m_value >> L; };
 
 	/**
 	* \brief And operator.
 	* \param[in] L Number that should be anded bitwise.
 	* \returns the bew value that was anded to the old value.
 	*/
-	T operator&(const size_t L) noexcept { return value & L; };
+	T operator&(const size_t L) noexcept { return m_value & L; };
 
 	/**
 	* \brief Pre-increment operator.
 	* \returns the value increased by 1.
 	*/
-	int_type<T, P, D> operator++() noexcept {
-		value++; 
-		if( !has_value() ) value = 0;
+	int_type<T, P, D, U> operator++() noexcept {
+		m_value++;
+		if( !has_value() ) m_value = 0;
 		return *this;
 	};
 
@@ -97,10 +106,10 @@ struct int_type {
 	* \brief Post-increment operator.
 	* \returns the old value before increasing by 1.
 	*/
-	int_type<T, P, D> operator++(int) noexcept {
-		int_type<T, P, D> res = *this;
-		value++;
-		if (!has_value()) value = 0;
+	int_type<T, P, D, U> operator++(int) noexcept {
+		int_type<T, P, D, U> res = *this;
+		m_value++;
+		if (!has_value()) m_value = 0;
 		return res;
 	};
 
@@ -108,9 +117,9 @@ struct int_type {
 	* \brief Pre-decrement operator.
 	* \returns the value decreased by 1.
 	*/
-	int_type<T, P, D> operator--() noexcept { 
-		--value; 
-		if (!has_value()) --value;
+	int_type<T, P, D, U> operator--() noexcept {
+		--m_value;
+		if (!has_value()) --m_value;
 		return *this;
 	};
 
@@ -118,10 +127,10 @@ struct int_type {
 	* \brief Post-decrement operator.
 	* \returns the value before decreasing by 1.
 	*/
-	int_type<T, P, D> operator--(int) noexcept { 
-		int_type<T, P, D> res = *this;
-		value--;
-		if (!has_value()) value--;
+	int_type<T, P, D, U> operator--(int) noexcept {
+		int_type<T, P, D, U> res = *this;
+		m_value--;
+		if (!has_value()) m_value--;
 		return res;
 	};
 
@@ -133,7 +142,7 @@ struct int_type {
 		* \param[in] tg The input int value.
 		* \returns the hash of the int value.
 		*/
-		std::size_t operator()(const int_type<T, P, D>& tg) const { return std::hash<T>()(tg.value); };
+		std::size_t operator()(const int_type<T, P, D, U>& tg) const { return std::hash<T>()(tg.m_value); };
 	};
 
 	/**
@@ -149,7 +158,7 @@ struct int_type {
 	* \returns true if the value is not null (the default value).
 	*/
 	bool has_value() const {
-		return value != null;
+		return m_value != null;
 	}
 
 	/**
@@ -157,8 +166,7 @@ struct int_type {
 	* \param[in] v New upper value.
 	*/
 	void set_upper(T v) {
-		const T LMASK = (1 << L) - 1;
-		value = (value & LMASK) | (value << L);
+		m_value = (m_value & LMASK) | (v << L);
 	}
 
 	/**
@@ -166,7 +174,7 @@ struct int_type {
 	* \returns the upper value.
 	*/
 	T get_upper() {
-		return (value >> L);
+		return (m_value >> L);
 	}
 
 	/**
@@ -174,9 +182,7 @@ struct int_type {
 	* \param[in] v New lower value.
 	*/
 	void set_lower(T v) {
-		const T LMASK = (1 << L) - 1;
-		const T UMASK = ((1 << U) - 1) << L;
-		value = (value & UMASK) | (v & LMASK);
+		m_value = (m_value & UMASK) | (v & LMASK);
 	}
 
 	/**
@@ -184,8 +190,7 @@ struct int_type {
 	* \returns the lower value.
 	*/
 	T get_lower() {
-		const T LMASK = (1 << L) - 1;
-		return (value & LMASK);
+		return (m_value & LMASK);
 	}
 
 };

@@ -4,9 +4,15 @@
 #include "VLLT.h"
 
 
-
+using it = int_type<uint32_t, struct P1, std::numeric_limits<uint32_t>::max() >;
+void f( it t) {
+	return;
+}
 
 int main() {
+	f(it(10));
+	it val;
+	val = 10;
 
 	using types = vtll::tl<int, double, float, bool, int>;
 	vllt::VlltStack<types> table;
