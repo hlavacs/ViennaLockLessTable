@@ -473,10 +473,12 @@ namespace vllt {
 			table_index_t m_first;	//index of first element in queue
 			table_index_t m_last;	//index of last element in queue
 		};
-
-		index_pair_t m_first_last;
+		
+		std::atomic<index_pair_t> m_first_last;
 
 		using types = vtll::cat< vtll::tl<table_index_t>, DATA >;
+
+		using row_data_t = vtll::cat<DATA, vtll::tl<table_index_t>>;
 
 		VlltStack<DATA> m_table;
 		VlltStack<vtll::tl<table_index_t>> m_deleted;
@@ -505,6 +507,10 @@ namespace vllt {
 		else {
 			m_table.update(std::get<0>(idx), std::forward<Cs>(data)...);
 		}
+
+		//index_pair_t fl = m_first_last.load();
+		//while (!m_first_last.compare_exchange_weak(fl, index_pair_t{} )) {}
+
 		return std::get<0>(idx);
 	}
 

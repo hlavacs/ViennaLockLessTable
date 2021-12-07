@@ -14,16 +14,19 @@ template<typename T, typename P, auto D = -1, size_t U = 0>
 struct int_type {
 private:
 	static const size_t L = sizeof(T) * 8 - U; //number of lower bits (if integer is cut into 2 values)
-	const size_t LMASK = (1ULL << L) - 1ULL;
-	const size_t UMASK = ((1ULL << U) - 1ULL) << L;
+	static const size_t LMASK = (1ULL << L) - 1ULL;
+	static const size_t UMASK = ((1ULL << U) - 1ULL) << L;
 
 	static const T null = static_cast<T>(D); //null value
 
 	T m_value{null};
 
 public:
-
 	int_type() = default;
+	int_type(const int_type<T, P, D, U>& v) noexcept = default;
+	int_type(int_type<T, P, D, U>&& v) noexcept = default;
+	int_type<T, P, D, U>& operator=(const int_type<T, P, D, U>& v) noexcept = default;
+	int_type<T, P, D, U>& operator=(int_type<T, P, D, U>&& v) noexcept = default;
 
 	/**
 	* \brief Constructor.

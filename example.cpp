@@ -11,8 +11,10 @@ void f( it t) {
 
 int main() {
 	f(it(10));
-	it val;
+	it val = it(20);
 	val = 10;
+	val = it(20);
+
 
 	using types = vtll::tl<int, double, float, bool, int>;
 	vllt::VlltStack<types> table;
