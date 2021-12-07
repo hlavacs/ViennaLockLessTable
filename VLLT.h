@@ -40,7 +40,7 @@ namespace vllt {
 	*/
 	template<typename DATA, size_t N0 = 1<<10, bool ROW = true, typename table_index_t = uint32_t>
 	class VlltStack {
-
+	protected:
 		static_assert(std::is_default_constructible_v<DATA>, "Your components are not default constructible!");
 
 		static const size_t N = vtll::smallest_pow2_leq_value< N0 >::value;								///< Force N to be power of 2
@@ -487,12 +487,11 @@ namespace vllt {
 	template<typename DATA, size_t N0 = 1 << 10, bool ROW = true, typename table_index_t = uint32_t>
 	class VlltFIFOQueue : public VlltStack<DATA, N0, ROW, table_index_t> {
 
+		std::atomic<table_index_t> m_first;
+		std::atomic<table_index_t> m_last;
+
 	public:
 		VlltFIFOQueue() {};
-
-		template<typename... Cs>
-		requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, DATA>
-		inline auto push_back(Cs&&... data) noexcept						-> table_index_t;	///< Push new component data to the end of the table
 
 		inline auto pop_front(vtll::to_tuple<DATA>* tup = nullptr) noexcept	-> bool;			///< Remove the last row, call destructor on components
 
@@ -502,17 +501,39 @@ namespace vllt {
 
 
 	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
-	template<typename... Cs>
-	requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, DATA>
-	inline auto VlltFIFOQueue<DATA, N0, ROW, table_index_t>::push_back(Cs&&... data) noexcept -> table_index_t {
-		table_index_t res = VlltStack<DATA,N0,ROW,table_index_t>::push_back(std::forward<Cs>(data)...);
-
-		return res;
-	}
-
-
-	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
 	inline auto VlltFIFOQueue<DATA, N0, ROW, table_index_t>::pop_front(vtll::to_tuple<DATA>* tup) noexcept -> bool {
+
+		typename VlltStack<DATA,N0,ROW,table_index_t>::slot_size_t size = this->m_size_cnt.load();
+		if (size.m_next_slot == 0) return false;	///< Is there a row to pop off?
+
+		/// Make sure that no other thread is currently pushing a new row
+		while (size.m_next_slot > size.m_size || !this->m_size_cnt.compare_exchange_weak(size, typename VlltStack<DATA,N0,ROW,table_index_t>::slot_size_t{ size.m_next_slot - 1, size.m_size })) {
+			if (size.m_next_slot > size.m_size) { size = this->m_size_cnt.load(); }
+			if (size.m_next_slot == 0) return false;	///< Is there a row to pop off?
+		};
+
+		vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
+			[&](auto i) {
+				using type = vtll::Nth_type<DATA, i>;
+				if constexpr (std::is_move_assignable_v<type>) {
+					if (tup != nullptr) { std::get<i>(*tup) = std::move(*component_ptr<i>(table_index_t{ size.m_next_slot - 1 })); }
+				}
+				else if constexpr (std::is_copy_assignable_v<type>) {
+					if (tup != nullptr) { std::get<i>(*tup) = *component_ptr<i>(table_index_t{ size.m_next_slot - 1 }); }
+				}
+				else if constexpr (is_atomic< std::decay_t<type>>::value) {
+					if (tup != nullptr) { std::get<i>(*tup).store(component_ptr<i>(table_index_t{ size.m_next_slot - 1 })->load()); }
+				}
+				if constexpr (std::is_destructible_v<type> && !std::is_trivially_destructible_v<type>) {
+					if (this->del) { component_ptr<i>(table_index_t{ size.m_next_slot - 1 })->~type(); }	///< Call destructor
+				}
+			}
+		);
+
+		typename VlltStack<DATA, N0, ROW, table_index_t>::slot_size_t new_size = this->m_size_cnt.load();	///< Commit the popping of the row
+		do {
+			//new_size.m_size = size.m_next_slot;
+		} while (!this->m_size_cnt.compare_exchange_weak(new_size, typename VlltStack<DATA, N0, ROW, table_index_t>::slot_size_t{ new_size.m_next_slot, new_size.m_size - 1 }));
 
 		return true;
 	}
