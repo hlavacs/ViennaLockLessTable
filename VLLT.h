@@ -477,6 +477,10 @@ namespace vllt {
 	* It has the following properties:
 	* 1) It stores tuples of data
 	* 2) Lockless multithreaded access.
+	* 
+	* The FIFO queue is a stack thet keeps segment pointers in a vector.
+	* Segments that are empty are recycled to the end of the segments vector.
+	* An offset is maintained that is subtracted from a table index.
 	*
 	*/
 
