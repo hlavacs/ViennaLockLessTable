@@ -470,17 +470,15 @@ namespace vllt {
 		using table_index_t = int_type<uint32_t, struct VlltFIFOQueue_table_index_p, std::numeric_limits<uint32_t>::max() >;
 
 		struct index_pair_t {
-			table_index_t m_first;	//index of first element in queue
-			table_index_t m_last;	//index of last element in queue
+			table_index_t m_first;	//index of first element in queue, or next index
+			table_index_t m_second;	//index of last element in queue, or prev index
 		};
 		
 		std::atomic<index_pair_t> m_first_last;
 
-		using types = vtll::cat< vtll::tl<table_index_t>, DATA >;
+		using types = vtll::cat< vtll::tl<index_pair_t>, DATA >; //next, prev, data
 
-		using row_data_t = vtll::cat<DATA, vtll::tl<table_index_t>>;
-
-		VlltStack<DATA> m_table;
+		VlltStack<types> m_table;
 		VlltStack<vtll::tl<table_index_t>> m_deleted;
 
 	public:
@@ -501,17 +499,31 @@ namespace vllt {
 	requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, DATA>
 	inline auto VlltFIFOQueue<DATA>::push_back(Cs&&... data) noexcept -> table_index_t {
 		std::tuple<table_index_t> idx;
+		auto ridx = std::get<0>(idx);
 		if (!m_deleted.pop_back(&idx)) {
-			std::get<0>(idx) = m_table.push_back(std::forward<Cs>(data)...);
+			ridx = m_table.push_back(index_pair_t{}, std::forward<Cs>(data)...);
 		}
 		else {
-			m_table.update(std::get<0>(idx), std::forward<Cs>(data)...);
+			m_table.update(ridx, index_pair_t{}, std::forward<Cs>(data)...);
 		}
 
-		//index_pair_t fl = m_first_last.load();
-		//while (!m_first_last.compare_exchange_weak(fl, index_pair_t{} )) {}
+		index_pair_t fl = m_first_last.load();
 
-		return std::get<0>(idx);
+		auto compute_fl = [&]() -> index_pair_t {
+			if (!fl.m_first.has_value()) {
+				return {ridx, ridx};
+			}
+			return {ridx, fl.m_second};
+		};
+
+		m_table.update<0>(ridx, fl);
+		index_pair_t new_fl = compute_fl();
+		while (!m_first_last.compare_exchange_weak(fl, new_fl)) {
+			m_table.update<0>(ridx, fl);
+			new_fl = compute_fl();
+		}
+
+		return ridx;
 	}
 
 
