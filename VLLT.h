@@ -76,6 +76,7 @@ namespace vllt {
 
 		inline auto max_size() noexcept -> size_t;
 
+		inline auto get_data(table_index_t idx, vtll::to_tuple<DATA>* tup = nullptr, bool del = true) noexcept -> void;	///< move data then call destructor
 		inline virtual auto shift_segments( std::shared_ptr<seg_vector_t> & ptr ) -> void {};
 
 	public:
@@ -140,6 +141,28 @@ namespace vllt {
 	*/
 	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
 	inline VlltStack<DATA, N0, ROW, table_index_t>::~VlltStack() noexcept { clear(); };
+
+
+	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
+	inline auto VlltStack<DATA, N0, ROW, table_index_t>::get_data(table_index_t idx, vtll::to_tuple<DATA>* tup, bool del) noexcept -> void {
+		vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
+			[&](auto i) {
+				using type = vtll::Nth_type<DATA, i>;
+				if constexpr (std::is_move_assignable_v<type>) {
+					if (tup != nullptr) { std::get<i>(*tup) = std::move(*component_ptr<i>(idx)); }
+				}
+				else if constexpr (std::is_copy_assignable_v<type>) {
+					if (tup != nullptr) { std::get<i>(*tup) = *component_ptr<i>(idx); }
+				}
+				else if constexpr (is_atomic< std::decay_t<type>>::value) {
+					if (tup != nullptr) { std::get<i>(*tup).store(component_ptr<i>(idx)->load()); }
+				}
+				if constexpr (std::is_destructible_v<type> && !std::is_trivially_destructible_v<type>) {
+					if (del) { component_ptr<i>(idx)->~type(); }	///< Call destructor
+				}
+			}
+		);
+	}
 
 	/**
 	* \brief Return number of rows when growing including new rows not yet established.
@@ -290,23 +313,7 @@ namespace vllt {
 			if (size.m_next_slot == 0) return false;	///< Is there a row to pop off?
 		};
 
-		vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
-			[&](auto i) {
-				using type = vtll::Nth_type<DATA, i>;
-				if constexpr (std::is_move_assignable_v<type>) {
-					if (tup != nullptr) { std::get<i>(*tup) = std::move(*component_ptr<i>(table_index_t{ size.m_next_slot - 1 })); }
-				}
-				else if constexpr (std::is_copy_assignable_v<type>) {
-					if (tup != nullptr) { std::get<i>(*tup) = *component_ptr<i>(table_index_t{ size.m_next_slot - 1 }); }
-				}
-				else if constexpr (is_atomic< std::decay_t<type>>::value) {
-					if (tup != nullptr) { std::get<i>(*tup).store(component_ptr<i>(table_index_t{ size.m_next_slot - 1 })->load()); }
-				}
-				if constexpr (std::is_destructible_v<type> && !std::is_trivially_destructible_v<type>) {
-					if (del) { component_ptr<i>(table_index_t{ size.m_next_slot - 1 })->~type(); }	///< Call destructor
-				}
-			}
-		);
+		get_data(table_index_t{ size.m_next_slot - 1 }, tup, del);
 
 		slot_size_t new_size = m_size_cnt.load();	///< Commit the popping of the row
 		do {
@@ -554,29 +561,13 @@ namespace vllt {
 	inline auto VlltFIFOQueue<DATA, N0, ROW, table_index_t>::pop_front(vtll::to_tuple<DATA>* tup) noexcept -> bool {
 
 		auto next_slot = m_first.fetch_add(1);
-		if (next_slot ==  VlltStack<DATA, N0, ROW, table_index_t>::m_size_cnt.m_next_slot) return false;	///< the queue is empty
+		if (next_slot ==  VlltStack<DATA, N0, ROW, table_index_t>::m_size_cnt.load().m_next_slot) return false;	///< the queue is empty
 
-		vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
-			[&](auto i) {
-				using type = vtll::Nth_type<DATA, i>;
-				if constexpr (std::is_move_assignable_v<type>) {
-					if (tup != nullptr) { std::get<i>(*tup) = std::move(*component_ptr<i>(table_index_t{ next_slot - 1 })); }
-				}
-				else if constexpr (std::is_copy_assignable_v<type>) {
-					if (tup != nullptr) { std::get<i>(*tup) = *component_ptr<i>(table_index_t{ next_slot - 1 }); }
-				}
-				else if constexpr (is_atomic< std::decay_t<type>>::value) {
-					if (tup != nullptr) { std::get<i>(*tup).store(component_ptr<i>(table_index_t{ next_slot - 1 })->load()); }
-				}
-				if constexpr (std::is_destructible_v<type> && !std::is_trivially_destructible_v<type>) {
-					if (this->del) { component_ptr<i>(table_index_t{ next_slot - 1 })->~type(); }	///< Call destructor
-				}
-			}
-		);
+		VlltStack<DATA, N0, ROW, table_index_t>::get_data(next_slot, tup, true);
 
-		auto committed = next_slot - 1;
+		auto committed = next_slot > 0 ? next_slot - 1 : 0;
 		do {
-			committed = next_slot - 1;
+			committed = next_slot > 0 ? next_slot - 1 : 0;
 		} while (!m_committed.compare_exchange_weak(committed, next_slot));
 
 		return true;
