@@ -76,7 +76,7 @@ namespace vllt {
 
 		inline auto max_size() noexcept -> size_t;
 
-		inline virtual auto shift_segments() -> void {};
+		inline virtual auto shift_segments( std::shared_ptr<seg_vector_t> & ptr ) -> void {};
 
 	public:
 		VlltStack(size_t r = 1 << 16, std::pmr::memory_resource* mr = std::pmr::new_delete_resource()) noexcept;
@@ -226,16 +226,16 @@ namespace vllt {
 		inline auto VlltStack<DATA, N0, ROW, table_index_t>::push_back(Cs&&... data) noexcept	-> table_index_t {
 		slot_size_t size = m_size_cnt.load();	///< Make sure that no other thread is popping currently
 		while (size.m_next_slot < size.m_size || !m_size_cnt.compare_exchange_weak(size, slot_size_t{ size.m_next_slot + 1, size.m_size })) {
-			if (size.m_next_slot < size.m_size) {
+			if (size.m_next_slot < size.m_size) { //here compare_exchange_weak was NOT called to copy manually
 				size = m_size_cnt.load();
 			}
 		};
 
-		auto vector_ptr{ m_seg_vector.load() };					///< Shared pointer to current segment ptr vector, can be nullptr
-		size_t num_seg = vector_ptr ? vector_ptr->m_segments.size() : 0;	///< Current number of segments
-		if (size.m_next_slot >= N * num_seg) {					///< Do we have enough?		
+		auto vector_ptr{ m_seg_vector.load() };													///< Shared pointer to current segment ptr vector, can be nullptr
+		size_t num_seg = vector_ptr ? vector_ptr->m_segments.size() - vector_ptr->m_offset : 0;	///< Current number of segments
+		while (size.m_next_slot >= N * num_seg) {												///< Do we have enough?		
 			auto new_vector_ptr = std::make_shared<seg_vector_t>(
-				seg_vector_t{ std::pmr::vector<std::atomic<segment_ptr_t>>{std::max(num_seg * 2, 16ULL), m_mr }, 0 }
+				seg_vector_t{ std::pmr::vector<std::atomic<segment_ptr_t>>{std::max(num_seg * 2, 16ULL), m_mr }, 0 } //new segment vector
 			);
 
 			for (size_t i = 0; i < num_seg; ++i) {
@@ -243,14 +243,17 @@ namespace vllt {
 			};
 
 			if (m_seg_vector.compare_exchange_strong(vector_ptr, new_vector_ptr)) {	///< Try to exchange old segment vector with new
-				vector_ptr = new_vector_ptr;					///< Remember for later
+				vector_ptr = new_vector_ptr;										///< Remember for later
 			}
+			num_seg = vector_ptr->m_segments.size() - vector_ptr->m_offset;			///< Current number of segments
 		}
+	
+		shift_segments(vector_ptr);
 
-		auto seg_num = size.m_next_slot >> L;					///< Index of segment we need
-		auto seg_ptr = vector_ptr->m_segments[seg_num].load();	///< Does the segment exist yet? If yes, increases use count.
-		if (!seg_ptr) {											///< If not, create one
-			auto new_seg_ptr = std::make_shared<segment_t>();	///< Create a new segment
+		auto seg_num = (size.m_next_slot >> L) - vector_ptr->m_offset;	///< Index of segment we need
+		auto seg_ptr = vector_ptr->m_segments[seg_num].load();			///< Does the segment exist yet? If yes, increases use count.
+		if (!seg_ptr) {													///< If not, create one
+			auto new_seg_ptr = std::make_shared<segment_t>();			///< Create a new segment
 			vector_ptr->m_segments[seg_num].compare_exchange_strong(seg_ptr, new_seg_ptr);	///< Try to put it into seg vector, someone might beat us here
 		}
 
@@ -492,9 +495,8 @@ namespace vllt {
 
 		std::atomic<table_index_t>	m_first;		//next element to be taken out of the queue
 		std::atomic<table_index_t>	m_committed;	//last element that was taken out and fully read and destroyed
-		std::atomic<table_index_t>	m_end;			//next element to be written to with a new element
 
-		inline virtual auto shift_segments() -> void;
+		inline virtual auto shift_segments(std::shared_ptr<VlltStack<DATA,N0,ROW,table_index_t>::seg_vector_t>& vector_ptr) -> void;
 
 	public:
 		VlltFIFOQueue() {};
@@ -532,45 +534,49 @@ namespace vllt {
 
 
 	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
-	inline auto VlltFIFOQueue<DATA, N0, ROW, table_index_t>::shift_segments() -> void {
+	inline auto VlltFIFOQueue<DATA, N0, ROW, table_index_t>::shift_segments(std::shared_ptr<VlltStack<DATA, N0, ROW, table_index_t>::seg_vector_t>& vector_ptr) -> void {
+		auto seg_num		= (m_committed >> VlltStack<DATA, N0, ROW, table_index_t>::L) - vector_ptr->m_offset;		///< Index of segment that containes the last committed slot
+		auto max_seg_num	= (m_committed >> VlltStack<DATA, N0, ROW, table_index_t>::L) - VlltStack<DATA, N0, ROW, table_index_t>::m_size_cnt.load().m_next_slot;	///< Index of last segment that containes an entry
 
+		if (seg_num > vector_ptr->m_offset) {
+			for (size_t i = 0; i < seg_num; ++i) {	//copy stale segement pointers from start to end of vector
+				vector_ptr->m_segments[i + max_seg_num].store( vector_ptr->m_segments[i].load() );
+			}
+			for (size_t i = 0; i < max_seg_num + seg_num;  ++i) {	//copy all segment pointers to start of vector, including stale at the end
+				vector_ptr->m_segments[i].store(vector_ptr->m_segments[i + seg_num].load());
+			}
+		}
+		vector_ptr->m_offset += seg_num;
 	};
 
 
 	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
 	inline auto VlltFIFOQueue<DATA, N0, ROW, table_index_t>::pop_front(vtll::to_tuple<DATA>* tup) noexcept -> bool {
 
-		typename VlltStack<DATA, N0, ROW, table_index_t>::slot_size_t size = this->m_size_cnt.load();
-		if (size.m_next_slot == 0) return false;	///< Is there a row to pop off?
-
-		/// Make sure that no other thread is currently pushing a new row
-		while (size.m_next_slot > size.m_size || !this->m_size_cnt.compare_exchange_weak(size, typename VlltStack<DATA, N0, ROW, table_index_t>::slot_size_t{ size.m_next_slot - 1, size.m_size })) {
-			if (size.m_next_slot > size.m_size) { size = this->m_size_cnt.load(); }
-			if (size.m_next_slot == 0) return false;	///< Is there a row to pop off?
-		};
+		auto next_slot = m_first.fetch_add(1);
 
 		vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 			[&](auto i) {
 				using type = vtll::Nth_type<DATA, i>;
 				if constexpr (std::is_move_assignable_v<type>) {
-					if (tup != nullptr) { std::get<i>(*tup) = std::move(*component_ptr<i>(table_index_t{ size.m_next_slot - 1 })); }
+					if (tup != nullptr) { std::get<i>(*tup) = std::move(*component_ptr<i>(table_index_t{ next_slot - 1 })); }
 				}
 				else if constexpr (std::is_copy_assignable_v<type>) {
-					if (tup != nullptr) { std::get<i>(*tup) = *component_ptr<i>(table_index_t{ size.m_next_slot - 1 }); }
+					if (tup != nullptr) { std::get<i>(*tup) = *component_ptr<i>(table_index_t{ next_slot - 1 }); }
 				}
 				else if constexpr (is_atomic< std::decay_t<type>>::value) {
-					if (tup != nullptr) { std::get<i>(*tup).store(component_ptr<i>(table_index_t{ size.m_next_slot - 1 })->load()); }
+					if (tup != nullptr) { std::get<i>(*tup).store(component_ptr<i>(table_index_t{ next_slot - 1 })->load()); }
 				}
 				if constexpr (std::is_destructible_v<type> && !std::is_trivially_destructible_v<type>) {
-					if (this->del) { component_ptr<i>(table_index_t{ size.m_next_slot - 1 })->~type(); }	///< Call destructor
+					if (this->del) { component_ptr<i>(table_index_t{ next_slot - 1 })->~type(); }	///< Call destructor
 				}
 			}
 		);
 
-		typename VlltStack<DATA, N0, ROW, table_index_t>::slot_size_t new_size = this->m_size_cnt.load();	///< Commit the popping of the row
+		auto committed = next_slot - 1;
 		do {
-			//new_size.m_size = size.m_next_slot;
-		} while (!this->m_size_cnt.compare_exchange_weak(new_size, typename VlltStack<DATA, N0, ROW, table_index_t>::slot_size_t{ new_size.m_next_slot, new_size.m_size - 1 }));
+			committed = next_slot - 1;
+		} while (!m_committed.compare_exchange_weak(committed, next_slot));
 
 		return true;
 	}
