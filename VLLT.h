@@ -554,6 +554,7 @@ namespace vllt {
 	inline auto VlltFIFOQueue<DATA, N0, ROW, table_index_t>::pop_front(vtll::to_tuple<DATA>* tup) noexcept -> bool {
 
 		auto next_slot = m_first.fetch_add(1);
+		if (next_slot ==  VlltStack<DATA, N0, ROW, table_index_t>::m_size_cnt.m_next_slot) return false;	///< the queue is empty
 
 		vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 			[&](auto i) {
