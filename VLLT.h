@@ -52,7 +52,7 @@ namespace vllt {
 		~VlltBase() noexcept {};
 
 		template<size_t I, typename C = vtll::Nth_type<DATA, I>>
-		inline auto component_base_ptr(table_index_t n) noexcept	-> C*;		///< \returns a pointer to a component
+		inline auto component_base_ptr(table_index_t n) noexcept -> C*;		///< \returns a pointer to a component
 	};
 
 
@@ -119,13 +119,14 @@ namespace vllt {
 		VlltStack(size_t r = 1 << 16, std::pmr::memory_resource* mr = std::pmr::new_delete_resource()) noexcept;
 		~VlltStack() noexcept;
 
-		inline auto size() noexcept -> size_t; ///< \returns the current numbers of rows in the table
-
 		//-------------------------------------------------------------------------------------------
 		//read data
 
+		inline auto size() noexcept -> size_t; ///< \returns the current numbers of rows in the table
+
 		template<size_t I, typename C = vtll::Nth_type<DATA, I>>
 		inline auto component_ptr(table_index_t n) noexcept	-> C*;		///< \returns a pointer to a component
+
 		inline auto tuple_ptr(table_index_t n) noexcept	-> tuple_ptr_t;	///< \returns a tuple with pointers to all components
 
 		//-------------------------------------------------------------------------------------------
@@ -139,9 +140,9 @@ namespace vllt {
 		//remove and swap data
 
 		inline auto pop_back(vtll::to_tuple<DATA>* tup = nullptr, bool del = true) noexcept -> bool;	///< Remove the last row, call destructor on components
-		inline auto clear() noexcept		-> size_t;			///< Set the number if rows to zero - effectively clear the table, call destructors
-		inline auto compress() noexcept		-> void;			///< Deallocate unused segments
-		inline auto swap(table_index_t n1, table_index_t n2) noexcept			-> bool;	///< Swap contents of two rows
+		inline auto clear() noexcept	-> size_t;			///< Set the number if rows to zero - effectively clear the table, call destructors
+		inline auto compress() noexcept	-> void;			///< Deallocate unused segments
+		inline auto swap(table_index_t n1, table_index_t n2) noexcept -> bool;	///< Swap contents of two rows
 	};
 
 
@@ -188,6 +189,7 @@ namespace vllt {
 	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
 	template<size_t I, typename C>
 	inline auto VlltStack<DATA, N0, ROW, table_index_t>::component_ptr(table_index_t n) noexcept -> C* {
+		assert(n < size());
 		if (n >= size()) return nullptr;
 		return component_base_ptr<I, C>(n);
 	};
@@ -290,7 +292,8 @@ namespace vllt {
 				if		constexpr (std::is_move_assignable_v<type>) { if (tup != nullptr) { std::get<i>(*tup) = std::move(*component_base_ptr<i>(idx)); } }
 				else if constexpr (std::is_copy_assignable_v<type>) { if (tup != nullptr) { std::get<i>(*tup) = *component_base_ptr<i>(idx); } }
 				else if constexpr (is_atomic< std::decay_t<type>>::value) { if (tup != nullptr) { std::get<i>(*tup).store(component_base_ptr<i>(idx)->load()); } }
-				if		constexpr (std::is_destructible_v<type> && !std::is_trivially_destructible_v<type>) { if (del) { component_base_ptr<i>(idx)->~type(); } }	///< Call destructor
+
+				if constexpr (std::is_destructible_v<type> && !std::is_trivially_destructible_v<type>) { component_base_ptr<i>(idx)->~type(); }	///< Call destructor
 			}
 		);
 
