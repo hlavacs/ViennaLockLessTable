@@ -22,7 +22,7 @@ namespace vllt {
 
 	template<typename DATA, size_t N0 = 1 << 10, bool ROW = true, typename table_index_t = uint64_t>
 	class VlltBase {
-	protected:
+	public:
 		static_assert(std::is_default_constructible_v<DATA>, "Your components are not default constructible!");
 
 		static const size_t N = vtll::smallest_pow2_leq_value< N0 >::value;									///< Force N to be power of 2
@@ -42,31 +42,22 @@ namespace vllt {
 			size_t m_offset = 0;										///<Offset for FIFO queue
 		};
 
-		std::pmr::memory_resource*						m_mr;					///< Memory resource for allocating segments
-		std::pmr::polymorphic_allocator<seg_vector_t>	m_allocator;			///< use this allocator
-		std::atomic<std::shared_ptr<seg_vector_t>>		m_seg_vector;			///< Atomic shared ptr to the vector of segments
-
-	public:
 		VlltBase(size_t r = 1 << 16, std::pmr::memory_resource* mr = std::pmr::new_delete_resource()) noexcept 
 			: m_mr{ mr }, m_allocator{ mr }, m_seg_vector{ nullptr } {};
 		~VlltBase() noexcept {};
 
 		template<size_t I, typename C = vtll::Nth_type<DATA, I>>
-		inline auto component_base_ptr(table_index_t n) noexcept -> C*;		///< \returns a pointer to a component
-	};
+		inline auto component_base_ptr(table_index_t n) noexcept -> C* {		///< \returns a pointer to a component
+			auto vector_ptr{ m_seg_vector.load() };
+			auto segment_ptr = (vector_ptr->m_segments[n >> L]).load();
+			if constexpr (ROW) { return &std::get<I>((*segment_ptr)[n & BIT_MASK]); }
+			else { return &std::get<I>(*segment_ptr)[n & BIT_MASK]; }
+		}
 
-	/////
-	// \brief Get a pointer to a particular component with index I.
-	// \param[in] n Index to the entry.
-	// \returns a pointer to the Ith component of entry n.
-	///
-	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
-	template<size_t I, typename C>
-	inline auto VlltBase<DATA, N0, ROW, table_index_t>::component_base_ptr(table_index_t n) noexcept -> C* {
-		auto vector_ptr{ m_seg_vector.load() };
-		auto segment_ptr = (vector_ptr->m_segments[n >> L]).load();
-		if constexpr (ROW)	{ return &std::get<I>((*segment_ptr)[n & BIT_MASK]); }
-		else				{ return &std::get<I>(*segment_ptr)[n & BIT_MASK]; }
+	protected:
+		std::pmr::memory_resource*						m_mr;					///< Memory resource for allocating segments
+		std::pmr::polymorphic_allocator<seg_vector_t>	m_allocator;			///< use this allocator
+		std::atomic<std::shared_ptr<seg_vector_t>>		m_seg_vector;			///< Atomic shared ptr to the vector of segments
 	};
 
 
@@ -91,8 +82,9 @@ namespace vllt {
 	//
 	///
 	template<typename DATA, size_t N0 = 1 << 10, bool ROW = true, typename table_index_t = uint32_t>
-	class VlltStack : public VlltBase<DATA, N0, ROW, table_index_t>{
-	protected:
+	class VlltStack : public VlltBase<DATA, N0, ROW, table_index_t> {
+
+	public:
 		using VlltBase<DATA, N0, ROW, table_index_t>::N;
 		using VlltBase<DATA, N0, ROW, table_index_t>::L;
 		using VlltBase<DATA, N0, ROW, table_index_t>::m_mr;
@@ -104,16 +96,6 @@ namespace vllt {
 		using typename VlltBase<DATA, N0, ROW, table_index_t>::segment_ptr_t;
 		using typename VlltBase<DATA, N0, ROW, table_index_t>::seg_vector_t;
 
-		struct slot_size_t {
-			uint32_t m_next_slot{ 0 };	//index of next free slot
-			uint32_t m_size{ 0 };		//number of valid entries
-		};
-
-		std::atomic<slot_size_t> m_size_cnt{ {0,0} };	///< Next slot and size as atomic
-
-		inline auto max_size() noexcept -> size_t;
-
-	public:
 		VlltStack(size_t r = 1 << 16, std::pmr::memory_resource* mr = std::pmr::new_delete_resource()) noexcept;
 		~VlltStack() noexcept;
 
@@ -144,8 +126,19 @@ namespace vllt {
 
 		inline auto pop_back(vtll::to_tuple<DATA>* tup = nullptr) noexcept	-> bool;	///< Remove the last row, call destructor on components
 		inline auto swap(table_index_t n1, table_index_t n2) noexcept		-> bool;	///< Swap contents of two rows
-		inline auto clear() noexcept	-> size_t;			///< Set the number if rows to zero - effectively clear the table, call destructors
-		inline auto compress() noexcept	-> void;			///< Deallocate unused segments
+		inline auto clear() noexcept	-> size_t;	///< Set the number if rows to zero - effectively clear the table, call destructors
+		inline auto compress() noexcept	-> void;	///< Deallocate unused segments
+
+	protected:
+
+		struct slot_size_t {
+			uint32_t m_next_slot{ 0 };	//index of next free slot
+			uint32_t m_size{ 0 };		//number of valid entries
+		};
+
+		std::atomic<slot_size_t> m_size_cnt{ {0,0} };	///< Next slot and size as atomic
+
+		inline auto max_size() noexcept -> size_t;
 	};
 
 	/////
@@ -190,7 +183,6 @@ namespace vllt {
 	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
 	template<size_t I, typename C>
 	inline auto VlltStack<DATA, N0, ROW, table_index_t>::component_ptr(table_index_t n) noexcept -> C* {
-		assert(n < size());
 		if (n >= size()) return nullptr;
 		return component_base_ptr<I, C>(n);
 	};
@@ -202,10 +194,7 @@ namespace vllt {
 	///
 	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
 	inline auto VlltStack<DATA, N0, ROW, table_index_t>::tuple_ptr(table_index_t n) noexcept -> tuple_ptr_t {
-		assert(n < size());
-		auto f = [&]<size_t... Is>(std::index_sequence<Is...>) {
-			return std::make_tuple(component_ptr<Is>(n)...);
-		};
+		auto f = [&]<size_t... Is>(std::index_sequence<Is...>) { return std::make_tuple(component_ptr<Is>(n)...); };
 		return f(std::make_index_sequence<vtll::size<DATA>::value>{});
 	};
 
@@ -289,9 +278,9 @@ namespace vllt {
 		vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 			[&](auto i) {
 				using type = vtll::Nth_type<DATA, i>;
-				if		constexpr (std::is_move_assignable_v<type>) { if (tup != nullptr) { std::get<i>(*tup) = std::move(*component_base_ptr<i>(idx)); } }
-				else if constexpr (std::is_copy_assignable_v<type>) { if (tup != nullptr) { std::get<i>(*tup) = *component_base_ptr<i>(idx); } }
-				else if constexpr (is_atomic< std::decay_t<type>>::value) { if (tup != nullptr) { std::get<i>(*tup).store(component_base_ptr<i>(idx)->load()); } }
+				if		constexpr (std::is_move_assignable_v<type>) { if (tup != nullptr) { std::get<i>(*tup) = std::move(*component_base_ptr<i>(idx)); } } //move
+				else if constexpr (std::is_copy_assignable_v<type>) { if (tup != nullptr) { std::get<i>(*tup) = *component_base_ptr<i>(idx); } }			//copy
+				else if constexpr (is_atomic<type>::value) { if (tup != nullptr) { std::get<i>(*tup).store(component_base_ptr<i>(idx)->load()); } }			//atomic
 
 				if constexpr (std::is_destructible_v<type> && !std::is_trivially_destructible_v<type>) { component_base_ptr<i>(idx)->~type(); }	///< Call destructor
 			}
