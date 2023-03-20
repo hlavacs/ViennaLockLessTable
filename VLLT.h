@@ -55,7 +55,6 @@ namespace vllt {
 		inline auto component_base_ptr(table_index_t n) noexcept -> C*;		///< \returns a pointer to a component
 	};
 
-
 	/////
 	// \brief Get a pointer to a particular component with index I.
 	// \param[in] n Index to the entry.
@@ -69,7 +68,6 @@ namespace vllt {
 		if constexpr (ROW)	{ return &std::get<I>((*segment_ptr)[n & BIT_MASK]); }
 		else				{ return &std::get<I>(*segment_ptr)[n & BIT_MASK]; }
 	};
-
 
 
 	//---------------------------------------------------------------------------------------------------
@@ -127,6 +125,11 @@ namespace vllt {
 		template<size_t I, typename C = vtll::Nth_type<DATA, I>>
 		inline auto component_ptr(table_index_t n) noexcept	-> C*;		///< \returns a pointer to a component
 
+		template<typename C>
+		inline auto component_ptr(table_index_t n) noexcept	-> C* {		///< \returns a pointer to a component
+			return component_ptr<vtll::index_of<DATA,C>, C>(n);
+		}
+
 		inline auto tuple_ptr(table_index_t n) noexcept	-> tuple_ptr_t;	///< \returns a tuple with pointers to all components
 
 		//-------------------------------------------------------------------------------------------
@@ -139,12 +142,11 @@ namespace vllt {
 		//-------------------------------------------------------------------------------------------
 		//remove and swap data
 
-		inline auto pop_back(vtll::to_tuple<DATA>* tup = nullptr, bool del = true) noexcept -> bool;	///< Remove the last row, call destructor on components
+		inline auto pop_back(vtll::to_tuple<DATA>* tup = nullptr) noexcept	-> bool;	///< Remove the last row, call destructor on components
+		inline auto swap(table_index_t n1, table_index_t n2) noexcept		-> bool;	///< Swap contents of two rows
 		inline auto clear() noexcept	-> size_t;			///< Set the number if rows to zero - effectively clear the table, call destructors
 		inline auto compress() noexcept	-> void;			///< Deallocate unused segments
-		inline auto swap(table_index_t n1, table_index_t n2) noexcept -> bool;	///< Swap contents of two rows
 	};
-
 
 	/////
 	// \brief Constructor of class VlltStack.
@@ -180,7 +182,6 @@ namespace vllt {
 		return std::min(size.m_next_slot, size.m_size);
 	};
 
-
 	/////
 	// \brief Get a pointer to a particular component with index I.
 	// \param[in] n Index to the entry.
@@ -193,7 +194,6 @@ namespace vllt {
 		if (n >= size()) return nullptr;
 		return component_base_ptr<I, C>(n);
 	};
-
 
 	/////
 	// \brief Get a tuple with pointers to all components of an entry.
@@ -275,7 +275,7 @@ namespace vllt {
 	// \returns true if a row was popped.
 	///
 	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
-	inline auto VlltStack<DATA, N0, ROW, table_index_t>::pop_back(vtll::to_tuple<DATA>* tup, bool del) noexcept -> bool {
+	inline auto VlltStack<DATA, N0, ROW, table_index_t>::pop_back(vtll::to_tuple<DATA>* tup ) noexcept -> bool {
 		slot_size_t size = m_size_cnt.load();
 		if (size.m_next_slot == 0) return false;	///< Is there a row to pop off?
 
@@ -303,7 +303,6 @@ namespace vllt {
 		return true;
 	}
 
-
 	/////
 	// \brief Pop all rows and call the destructors.
 	// \returns number of popped rows.
@@ -311,10 +310,9 @@ namespace vllt {
 	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
 	inline auto VlltStack<DATA, N0, ROW, table_index_t>::clear() noexcept -> size_t {
 		size_t num = 0;
-		while (pop_back(nullptr, true)) { ++num; }
+		while (pop_back(nullptr)) { ++num; }
 		return num;
 	}
-
 
 	/////
 	// \brief Swap the values of two rows.
@@ -363,7 +361,6 @@ namespace vllt {
 			}
 		}
 	}
-
 
 
 	//----------------------------------------------------------------------------------------------------
