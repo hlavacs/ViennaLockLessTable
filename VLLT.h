@@ -65,18 +65,10 @@ namespace vllt {
 		vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 			[&](auto i) {
 				using type = vtll::Nth_type<DATA, i>;
-				if constexpr (std::is_move_assignable_v<type>) {
-					if (tup != nullptr) { std::get<i>(*tup) = std::move(*component_ptr<i>(idx)); }
-				}
-				else if constexpr (std::is_copy_assignable_v<type>) {
-					if (tup != nullptr) { std::get<i>(*tup) = *component_ptr<i>(idx); }
-				}
-				else if constexpr (is_atomic< std::decay_t<type>>::value) {
-					if (tup != nullptr) { std::get<i>(*tup).store(component_ptr<i>(idx)->load()); }
-				}
-				if constexpr (std::is_destructible_v<type> && !std::is_trivially_destructible_v<type>) {
-					if (del) { component_ptr<i>(idx)->~type(); }	///< Call destructor
-				}
+				if		constexpr (std::is_move_assignable_v<type>) { if (tup != nullptr) { std::get<i>(*tup) = std::move(*component_ptr<i>(idx)); }}
+				else if constexpr (std::is_copy_assignable_v<type>) { if (tup != nullptr) { std::get<i>(*tup) = *component_ptr<i>(idx); }}
+				else if constexpr (is_atomic< std::decay_t<type>>::value) { if (tup != nullptr) { std::get<i>(*tup).store(component_ptr<i>(idx)->load()); }}
+				if		constexpr (std::is_destructible_v<type> && !std::is_trivially_destructible_v<type>) { if (del) { component_ptr<i>(idx)->~type(); }}	///< Call destructor
 			}
 		);
 	}
@@ -87,15 +79,9 @@ namespace vllt {
 		vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 			[&](auto i) {
 				using type = vtll::Nth_type<DATA, i>;
-				if constexpr (std::is_move_assignable_v<type>) {
-					*component_ptr<i>(idx) = std::move(std::get<i>(tup));
-				}
-				else if constexpr (std::is_copy_assignable_v<type>) {
-					*component_ptr<i>(idx) = std::get<i>(tup);
-				}
-				else if constexpr (is_atomic< std::decay_t<type>>::value) {
-					component_ptr<i>(idx)->store(std::get<i>(tup).load());
-				}
+				if		constexpr (std::is_move_assignable_v<type>) { *component_ptr<i>(idx) = std::move(std::get<i>(tup)); }
+				else if constexpr (std::is_copy_assignable_v<type>) { *component_ptr<i>(idx) = std::get<i>(tup); }
+				else if constexpr (is_atomic< std::decay_t<type>>::value) { component_ptr<i>(idx)->store(std::get<i>(tup).load()); }
 			}
 		);
 	}
@@ -111,12 +97,8 @@ namespace vllt {
 	inline auto VlltBase<DATA, N0, ROW, table_index_t>::component_ptr(table_index_t n) noexcept -> C* {
 		auto vector_ptr{ m_seg_vector.load() };
 		auto segment_ptr = (vector_ptr->m_segments[n >> L]).load();
-		if constexpr (ROW) {
-			return &std::get<I>((*segment_ptr)[n & BIT_MASK]);
-		}
-		else {
-			return &std::get<I>(*segment_ptr)[n & BIT_MASK];
-		}
+		if constexpr (ROW)	{ return &std::get<I>((*segment_ptr)[n & BIT_MASK]); }
+		else				{ return &std::get<I>(*segment_ptr)[n & BIT_MASK]; }
 	};
 
 
@@ -143,12 +125,18 @@ namespace vllt {
 	template<typename DATA, size_t N0 = 1 << 10, bool ROW = true, typename table_index_t = uint32_t>
 	class VlltStack : public VlltBase<DATA, N0, ROW, table_index_t>{
 	protected:
+		using VlltBase<DATA, N0, ROW, table_index_t>::N;
+		using VlltBase<DATA, N0, ROW, table_index_t>::L;
+		using VlltBase<DATA, N0, ROW, table_index_t>::m_mr;
 		using VlltBase<DATA, N0, ROW, table_index_t>::m_seg_vector;
-		using tuple_ptr_t	= VlltBase<DATA, N0, ROW, table_index_t>::tuple_ptr_t;
-		using tuple_ref_t	= VlltBase<DATA, N0, ROW, table_index_t>::tuple_ref_t;
-		using segment_t		= VlltBase<DATA, N0, ROW, table_index_t>::segment_t;
-		using segment_ptr_t = VlltBase<DATA, N0, ROW, table_index_t>::segment_ptr_t;
-		using seg_vector_t	= VlltBase<DATA, N0, ROW, table_index_t>::seg_vector_t;
+		using VlltBase<DATA, N0, ROW, table_index_t>::component_ptr;
+		using VlltBase<DATA, N0, ROW, table_index_t>::get_data;
+
+		using typename VlltBase<DATA, N0, ROW, table_index_t>::tuple_ptr_t;
+		using typename VlltBase<DATA, N0, ROW, table_index_t>::tuple_ref_t;
+		using typename VlltBase<DATA, N0, ROW, table_index_t>::segment_t;
+		using typename VlltBase<DATA, N0, ROW, table_index_t>::segment_ptr_t;
+		using typename VlltBase<DATA, N0, ROW, table_index_t>::seg_vector_t;
 
 		struct slot_size_t {
 			uint32_t m_next_slot{ 0 };	//index of next free slot
@@ -195,12 +183,12 @@ namespace vllt {
 		//move and remove data
 
 		inline auto pop_back(vtll::to_tuple<DATA>* tup = nullptr, bool del = true) noexcept -> bool;	///< Remove the last row, call destructor on components
-		inline auto clear() noexcept			-> size_t;			///< Set the number if rows to zero - effectively clear the table, call destructors
-		inline auto remove_back(vtll::to_tuple<DATA>* tup = nullptr)	noexcept	-> bool;			///< Remove the last row - no destructor called
-		inline auto remove_all()	noexcept	-> size_t;			///< Remove all rows - no destructor called
-		inline auto move(table_index_t idst, table_index_t isrc) noexcept	-> bool;	///< Move contents of a row to another row
-		inline auto swap(table_index_t n1, table_index_t n2) noexcept		-> bool;	///< Swap contents of two rows
-		inline auto compress() noexcept			-> void;		///< Deallocate unsused segements
+		inline auto clear() noexcept		-> size_t;			///< Set the number if rows to zero - effectively clear the table, call destructors
+		inline auto remove_all() noexcept	-> size_t;			///< Remove all rows - no destructor called
+		inline auto compress() noexcept		-> void;			///< Deallocate unused segments
+		inline auto remove_back(vtll::to_tuple<DATA>* tup = nullptr) noexcept	-> bool;			///< Remove the last row - no destructor called
+		inline auto move(table_index_t idst, table_index_t isrc) noexcept		-> bool;	///< Move contents of a row to another row
+		inline auto swap(table_index_t n1, table_index_t n2) noexcept			-> bool;	///< Swap contents of two rows
 	};
 
 
@@ -246,7 +234,7 @@ namespace vllt {
 	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
 	template<size_t I, typename C>
 	inline auto VlltStack<DATA, N0, ROW, table_index_t>::component(table_index_t n) noexcept -> C& {
-		return *VlltBase<DATA, N0, ROW, table_index_t>::component_ptr<I>(n);
+		return *component_ptr<I>(n);
 	}
 
 
@@ -295,9 +283,9 @@ namespace vllt {
 		//make sure there is enough space in the segment VECTOR - if not then change the old vector to a larger vector
 		auto vector_ptr{ m_seg_vector.load() };	///< Shared pointer to current segment ptr vector, can be nullptr
 		size_t num_seg = vector_ptr ? vector_ptr->m_segments.size() - vector_ptr->m_offset : 0;	///< Current number of segments
-		while (size.m_next_slot >= VlltBase<DATA, N0, ROW, table_index_t>::N * num_seg) {		///< Do we have enough?		
+		while (size.m_next_slot >= N * num_seg) {		///< Do we have enough?		
 			auto new_vector_ptr = std::make_shared<seg_vector_t>(
-				seg_vector_t{ std::pmr::vector<std::atomic<segment_ptr_t>>{std::max(num_seg * 2, 16ULL), VlltBase<DATA, N0, ROW, table_index_t>::m_mr }, 0 } //new segment vector
+				seg_vector_t{ std::pmr::vector<std::atomic<segment_ptr_t>>{std::max(num_seg * 2, 16ULL), m_mr }, 0 } //new segment vector
 			);
 
 			for (size_t i = 0; i < num_seg; ++i) {
@@ -311,7 +299,7 @@ namespace vllt {
 		} //another thread could have beaten us here, so go back and retry
 	
 		//Test if we have enough segments yet to hold the new slot - if not then create a new segment
-		auto seg_num = (size.m_next_slot >> VlltBase<DATA, N0, ROW, table_index_t>::L) - vector_ptr->m_offset;	///< Index of segment we need
+		auto seg_num = (size.m_next_slot >> L) - vector_ptr->m_offset;	///< Index of segment we need
 		auto seg_ptr = vector_ptr->m_segments[seg_num].load();			///< Does the segment exist yet? If yes, increases use count.
 		if (!seg_ptr) {													///< If not, create one
 			auto new_seg_ptr = std::make_shared<segment_t>();			///< Create a new segment
@@ -328,9 +316,7 @@ namespace vllt {
 		);
 
 		slot_size_t new_size = m_size_cnt.load();	///< Increase size to validate the new row
-		do {
-			//new_size.m_size = size.m_next_slot;
-		} while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ new_size.m_next_slot, new_size.m_size + 1 }));
+		while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ new_size.m_next_slot, new_size.m_size + 1 }));
 
 		return table_index_t{ size.m_next_slot };	///< Return index of new entry
 	}
@@ -352,12 +338,10 @@ namespace vllt {
 			if (size.m_next_slot == 0) return false;	///< Is there a row to pop off?
 		};
 
-		VlltBase<DATA, N0, ROW, table_index_t>::get_data(table_index_t{ size.m_next_slot - 1 }, tup, del);
+		get_data(table_index_t{ size.m_next_slot - 1 }, tup, del);
 
 		slot_size_t new_size = m_size_cnt.load();	///< Commit the popping of the row
-		do {
-			//new_size.m_size = size.m_next_slot;
-		} while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ new_size.m_next_slot, new_size.m_size - 1 }));
+		while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ new_size.m_next_slot, new_size.m_size - 1 }));
 
 		return true;
 	}
@@ -404,7 +388,7 @@ namespace vllt {
 	inline auto VlltStack<DATA, N0, ROW, table_index_t>::update(table_index_t n, C&& data) noexcept -> bool {
 		assert(n < max_size());
 		if constexpr (std::is_move_assignable_v<std::decay_t<C>> && std::is_rvalue_reference_v<decltype(data)>) {
-			component<I>(n) = std::move(data);
+			component<I>(n) = std::forward<decltype(data)>(data);
 		}
 		else if constexpr (std::is_copy_assignable_v<std::decay_t<C>>) {
 			component<I>(n) = data;
@@ -424,8 +408,8 @@ namespace vllt {
 	///
 	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
 	template<typename VL, typename... Cs>
-	requires (sizeof...(Cs) > 1 && vtll::has_all_types<DATA, vtll::tl<std::decay_t<Cs>...>>::value)
-		inline auto VlltStack<DATA, N0, ROW, table_index_t>::update(table_index_t n, Cs&&... data) noexcept -> bool {
+		requires (sizeof...(Cs) > 1 && vtll::has_all_types<DATA, vtll::tl<std::decay_t<Cs>...>>::value)
+	inline auto VlltStack<DATA, N0, ROW, table_index_t>::update(table_index_t n, Cs&&... data) noexcept -> bool {
 
 		auto tuple = std::forward_as_tuple(data...);
 		bool ret = true;
@@ -508,10 +492,10 @@ namespace vllt {
 	inline auto VlltStack<DATA, N0, ROW, table_index_t>::compress() noexcept -> void {
 		auto vector_ptr{ VlltBase<DATA, N0, ROW, table_index_t>::m_seg_vector.load() };
 		if (!vector_ptr) return;
-		for (size_t i = vector_ptr->size() - 1; i > (max_size() >> VlltBase<DATA, N0, ROW, table_index_t>::L); --i) {
+		for (size_t i = vector_ptr->size() - 1; i > (max_size() >> L); --i) {
 			auto seg_ptr = (*vector_ptr)[i].load();
 			if (seg_ptr && seg_ptr.use_count() == 2) {
-				std::shared_ptr<VlltBase<DATA, N0, ROW, table_index_t>::segment_t> new_seg_ptr;
+				std::shared_ptr<segment_t> new_seg_ptr;
 				(*vector_ptr)[i].compare_exchange_strong(seg_ptr, new_seg_ptr);	///< Try to put it into seg vector, someone might beat us here
 			}
 		}
