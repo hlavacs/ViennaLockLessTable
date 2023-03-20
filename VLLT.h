@@ -107,10 +107,8 @@ namespace vllt {
 		template<size_t I, typename C = vtll::Nth_type<DATA, I>>
 		inline auto component_ptr(table_index_t n) noexcept	-> C*;		///< \returns a pointer to a component
 
-		template<typename C>
-		inline auto component_ptr(table_index_t n) noexcept	-> C* {		///< \returns a pointer to a component
-			return component_ptr<vtll::index_of<DATA,C>, C>(n);
-		}
+		template<typename C>											///< \returns a pointer to a component
+		inline auto component_ptr(table_index_t n) noexcept	-> C* {	return component_ptr<vtll::index_of<DATA,C>, C>(n); }
 
 		inline auto tuple_ptr(table_index_t n) noexcept	-> tuple_ptr_t;	///< \returns a tuple with pointers to all components
 
@@ -354,7 +352,7 @@ namespace vllt {
 
 	//----------------------------------------------------------------------------------------------------
 
-	/*
+	
 	///
 	// \brief VlltFIFOQueue is a FIFO queue that can be ued by multiple threads in parallel
 	//
@@ -372,8 +370,6 @@ namespace vllt {
 	class VlltFIFOQueue : public VlltBase<DATA, N0, ROW, table_index_t> {
 	protected:
 		using VlltBase<DATA, N0, ROW, table_index_t>::m_seg_vector;
-		using tuple_ptr_t	= VlltBase<DATA, N0, ROW, table_index_t>::tuple_ptr_t;
-		using tuple_ref_t	= VlltBase<DATA, N0, ROW, table_index_t>::tuple_ref_t;
 		using segment_t		= VlltBase<DATA, N0, ROW, table_index_t>::segment_t;
 		using segment_ptr_t = VlltBase<DATA, N0, ROW, table_index_t>::segment_ptr_t;
 		using seg_vector_t	= VlltBase<DATA, N0, ROW, table_index_t>::seg_vector_t;
@@ -381,7 +377,7 @@ namespace vllt {
 		std::atomic<table_index_t>	m_first;		//next element to be taken out of the queue
 		std::atomic<table_index_t>	m_consumed;		//last element that was taken out and fully read and destroyed
 		std::atomic<table_index_t>	m_next_slot;	//next element to write over
-		std::atomic<table_index_t>	m_produced;		//last element that has been produced
+		std::atomic<table_index_t>	m_last;			//last element that has been produced
 
 		inline virtual auto shift_segments(std::shared_ptr<typename VlltBase<DATA, N0, ROW, table_index_t>::seg_vector_t>& vector_ptr) -> void;
 
@@ -389,7 +385,7 @@ namespace vllt {
 		VlltFIFOQueue() {};
 
 		template<typename... Cs>
-		requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, DATA>
+			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, DATA>
 		inline auto push_back(Cs&&... data) noexcept						-> table_index_t;	///< Push new component data to the end of the table
 
 		inline auto pop_front(vtll::to_tuple<DATA>* tup = nullptr) noexcept	-> bool;			///< Remove the last row, call destructor on components
@@ -455,9 +451,7 @@ namespace vllt {
 		VlltBase<DATA, N0, ROW, table_index_t>::put_data(next_slot, tuple);
 
 		auto new_size = next_slot - 1;	///< Increase size to validate the new row
-		do {
-			//new_size.m_size = size.m_next_slot;
-		} while (!m_produced.compare_exchange_weak(new_size, next_slot));
+		while (!m_last.compare_exchange_weak(new_size, next_slot));
 
 		return table_index_t{ m_next_slot };	///< Return index of new entry
 	}
@@ -466,14 +460,23 @@ namespace vllt {
 	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
 	inline auto VlltFIFOQueue<DATA, N0, ROW, table_index_t>::pop_front(vtll::to_tuple<DATA>* tup) noexcept -> bool {
 		auto next_slot = m_first.fetch_add(1);
-		if (next_slot ==  m_next_slot) return false;	///< the queue is empty
+		if (next_slot == m_next_slot) return false;	///< the queue is empty
 
-		VlltBase<DATA, N0, ROW, table_index_t>::get_data(next_slot, tup, true);
+		vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
+			[&](auto i) {
+				using type = vtll::Nth_type<DATA, i>;
+				if		constexpr (std::is_move_assignable_v<type>) { if (tup != nullptr) { std::get<i>(*tup) = std::move(*component_base_ptr<i>(next_slot)); } } //move
+				else if constexpr (std::is_copy_assignable_v<type>) { if (tup != nullptr) { std::get<i>(*tup) = *component_base_ptr<i>(next_slot); } }			//copy
+				else if constexpr (is_atomic<type>::value) { if (tup != nullptr) { std::get<i>(*tup).store(component_base_ptr<i>(next_slot)->load()); } }			//atomic
 
-		auto committed = next_slot > 0 ? next_slot - 1 : 0;
-		do {
+				if constexpr (std::is_destructible_v<type> && !std::is_trivially_destructible_v<type>) { component_base_ptr<i>(next_slot)->~type(); }	///< Call destructor
+			}
+		);
+
+		auto committed = next_slot > 0 ? next_slot - 1 : 0;		
+		while (!m_consumed.compare_exchange_weak(committed, next_slot)) {
 			committed = next_slot > 0 ? next_slot - 1 : 0;
-		} while (!m_consumed.compare_exchange_weak(committed, next_slot));
+		}
 		
 		return true;
 	}
@@ -486,7 +489,6 @@ namespace vllt {
 		return num;
 	}
 
-	*/
 
 }
 
