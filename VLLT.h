@@ -30,7 +30,6 @@ namespace vllt {
 		static const uint64_t BIT_MASK = N - 1;			///< Bit mask to mask off lower bits to get index inside segment
 
 		using tuple_value_t = vtll::to_tuple<DATA>;		///< Tuple holding the entries as value
-		using tuple_ref_t = vtll::to_ref_tuple<DATA>;	///< Tuple holding the entries as references
 		using tuple_ptr_t = vtll::to_ptr_tuple<DATA>;	///< Tuple holding ptrs to the entries
 
 		using array_tuple_t1 = std::array<tuple_value_t, N>;								///< ROW: an array of tuples
@@ -47,44 +46,14 @@ namespace vllt {
 		std::pmr::polymorphic_allocator<seg_vector_t>	m_allocator;			///< use this allocator
 		std::atomic<std::shared_ptr<seg_vector_t>>		m_seg_vector;			///< Atomic shared ptr to the vector of segments
 
-		inline auto get_data(table_index_t idx, vtll::to_tuple<DATA>* tup = nullptr, bool del = true) noexcept -> void;	///< move data then call destructor
-		inline auto put_data(table_index_t idx, vtll::to_ref_tuple<DATA>& tup = nullptr) noexcept -> void;	///< move data to slot
-
 	public:
 		VlltBase(size_t r = 1 << 16, std::pmr::memory_resource* mr = std::pmr::new_delete_resource()) noexcept 
 			: m_mr{ mr }, m_allocator{ mr }, m_seg_vector{ nullptr } {};
 		~VlltBase() noexcept {};
 
 		template<size_t I, typename C = vtll::Nth_type<DATA, I>>
-		inline auto component_ptr(table_index_t n) noexcept	-> C*;		///< \returns a pointer to a component
+		inline auto component_base_ptr(table_index_t n) noexcept	-> C*;		///< \returns a pointer to a component
 	};
-
-
-	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
-	inline auto VlltBase<DATA, N0, ROW, table_index_t>::get_data(table_index_t idx, vtll::to_tuple<DATA>* tup, bool del) noexcept -> void {
-		vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
-			[&](auto i) {
-				using type = vtll::Nth_type<DATA, i>;
-				if		constexpr (std::is_move_assignable_v<type>) { if (tup != nullptr) { std::get<i>(*tup) = std::move(*component_ptr<i>(idx)); }}
-				else if constexpr (std::is_copy_assignable_v<type>) { if (tup != nullptr) { std::get<i>(*tup) = *component_ptr<i>(idx); }}
-				else if constexpr (is_atomic< std::decay_t<type>>::value) { if (tup != nullptr) { std::get<i>(*tup).store(component_ptr<i>(idx)->load()); }}
-				if		constexpr (std::is_destructible_v<type> && !std::is_trivially_destructible_v<type>) { if (del) { component_ptr<i>(idx)->~type(); }}	///< Call destructor
-			}
-		);
-	}
-
-
-	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
-	inline auto VlltBase<DATA, N0, ROW, table_index_t>::put_data(table_index_t idx, vtll::to_ref_tuple<DATA>& tup) noexcept -> void {
-		vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
-			[&](auto i) {
-				using type = vtll::Nth_type<DATA, i>;
-				if		constexpr (std::is_move_assignable_v<type>) { *component_ptr<i>(idx) = std::move(std::get<i>(tup)); }
-				else if constexpr (std::is_copy_assignable_v<type>) { *component_ptr<i>(idx) = std::get<i>(tup); }
-				else if constexpr (is_atomic< std::decay_t<type>>::value) { component_ptr<i>(idx)->store(std::get<i>(tup).load()); }
-			}
-		);
-	}
 
 
 	/////
@@ -94,12 +63,13 @@ namespace vllt {
 	///
 	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
 	template<size_t I, typename C>
-	inline auto VlltBase<DATA, N0, ROW, table_index_t>::component_ptr(table_index_t n) noexcept -> C* {
+	inline auto VlltBase<DATA, N0, ROW, table_index_t>::component_base_ptr(table_index_t n) noexcept -> C* {
 		auto vector_ptr{ m_seg_vector.load() };
 		auto segment_ptr = (vector_ptr->m_segments[n >> L]).load();
 		if constexpr (ROW)	{ return &std::get<I>((*segment_ptr)[n & BIT_MASK]); }
 		else				{ return &std::get<I>(*segment_ptr)[n & BIT_MASK]; }
 	};
+
 
 
 	//---------------------------------------------------------------------------------------------------
@@ -129,11 +99,9 @@ namespace vllt {
 		using VlltBase<DATA, N0, ROW, table_index_t>::L;
 		using VlltBase<DATA, N0, ROW, table_index_t>::m_mr;
 		using VlltBase<DATA, N0, ROW, table_index_t>::m_seg_vector;
-		using VlltBase<DATA, N0, ROW, table_index_t>::component_ptr;
-		using VlltBase<DATA, N0, ROW, table_index_t>::get_data;
+		using VlltBase<DATA, N0, ROW, table_index_t>::component_base_ptr;
 
 		using typename VlltBase<DATA, N0, ROW, table_index_t>::tuple_ptr_t;
-		using typename VlltBase<DATA, N0, ROW, table_index_t>::tuple_ref_t;
 		using typename VlltBase<DATA, N0, ROW, table_index_t>::segment_t;
 		using typename VlltBase<DATA, N0, ROW, table_index_t>::segment_ptr_t;
 		using typename VlltBase<DATA, N0, ROW, table_index_t>::seg_vector_t;
@@ -157,9 +125,7 @@ namespace vllt {
 		//read data
 
 		template<size_t I, typename C = vtll::Nth_type<DATA, I>>
-		inline auto component(table_index_t n) noexcept		-> C&;		///< \returns a reference to a component
-
-		inline auto tuple(table_index_t n) noexcept	-> tuple_ref_t;		///< \returns a tuple with references of all components
+		inline auto component_ptr(table_index_t n) noexcept	-> C*;		///< \returns a pointer to a component
 		inline auto tuple_ptr(table_index_t n) noexcept	-> tuple_ptr_t;	///< \returns a tuple with pointers to all components
 
 		//-------------------------------------------------------------------------------------------
@@ -170,24 +136,11 @@ namespace vllt {
 		inline auto push_back(Cs&&... data) noexcept -> table_index_t;	///< Push new component data to the end of the table
 
 		//-------------------------------------------------------------------------------------------
-		//update data
-
-		template<size_t I, typename C = vtll::Nth_type<DATA, I>>
-		inline auto update(table_index_t n, C&& data) noexcept		-> bool;	///< Update a component  for a given row
-
-		template<typename VL = vtll::vl<>, typename... Cs>
-			requires (sizeof...(Cs) > 1 && vtll::has_all_types<DATA, vtll::tl<std::decay_t<Cs>...>>::value)
-		inline auto update(table_index_t n, Cs&&... data) noexcept	-> bool;
-
-		//-------------------------------------------------------------------------------------------
-		//move and remove data
+		//remove and swap data
 
 		inline auto pop_back(vtll::to_tuple<DATA>* tup = nullptr, bool del = true) noexcept -> bool;	///< Remove the last row, call destructor on components
 		inline auto clear() noexcept		-> size_t;			///< Set the number if rows to zero - effectively clear the table, call destructors
-		inline auto remove_all() noexcept	-> size_t;			///< Remove all rows - no destructor called
 		inline auto compress() noexcept		-> void;			///< Deallocate unused segments
-		inline auto remove_back(vtll::to_tuple<DATA>* tup = nullptr) noexcept	-> bool;			///< Remove the last row - no destructor called
-		inline auto move(table_index_t idst, table_index_t isrc) noexcept		-> bool;	///< Move contents of a row to another row
 		inline auto swap(table_index_t n1, table_index_t n2) noexcept			-> bool;	///< Swap contents of two rows
 	};
 
@@ -226,27 +179,19 @@ namespace vllt {
 		return std::min(size.m_next_slot, size.m_size);
 	};
 
+
 	/////
-	// \brief Return reference to a component with index I.
+	// \brief Get a pointer to a particular component with index I.
 	// \param[in] n Index to the entry.
-	// \returns reference to a component with index I.
+	// \returns a pointer to the Ith component of entry n.
 	///
 	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
 	template<size_t I, typename C>
-	inline auto VlltStack<DATA, N0, ROW, table_index_t>::component(table_index_t n) noexcept -> C& {
-		return *component_ptr<I>(n);
-	}
-
-
-	/////
-	// \brief Get a tuple with references to all components of a row.
-	// \param[in] n Index to the entry.
-	// \returns a tuple with references to all components of a row.
-	///
-	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
-	inline auto VlltStack<DATA, N0, ROW, table_index_t>::tuple(table_index_t n) noexcept -> tuple_ref_t {
-		return vtll::ptr_to_ref_tuple(tuple_ptr(n));
+	inline auto VlltStack<DATA, N0, ROW, table_index_t>::component_ptr(table_index_t n) noexcept -> C* {
+		if (n >= size()) return nullptr;
+		return component_base_ptr<I, C>(n);
 	};
+
 
 	/////
 	// \brief Get a tuple with pointers to all components of an entry.
@@ -254,7 +199,7 @@ namespace vllt {
 	// \returns a tuple with pointers to all components of entry n.
 	///
 	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
-	inline auto VlltStack<DATA, N0, ROW, table_index_t>::tuple_ptr(table_index_t n) noexcept ->tuple_ptr_t {
+	inline auto VlltStack<DATA, N0, ROW, table_index_t>::tuple_ptr(table_index_t n) noexcept -> tuple_ptr_t {
 		assert(n < size());
 		auto f = [&]<size_t... Is>(std::index_sequence<Is...>) {
 			return std::make_tuple(component_ptr<Is>(n)...);
@@ -311,7 +256,7 @@ namespace vllt {
 		vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 			[&](auto i) {
 				using type = vtll::Nth_type<DATA, i>;
-				update<i>(table_index_t{ size.m_next_slot }, std::forward<type>(std::get<i>(tuple)));	//update
+				*component_base_ptr<i>(table_index_t{ size.m_next_slot }) = std::forward<type>(std::get<i>(tuple));	//update
 			}
 		);
 
@@ -338,7 +283,16 @@ namespace vllt {
 			if (size.m_next_slot == 0) return false;	///< Is there a row to pop off?
 		};
 
-		get_data(table_index_t{ size.m_next_slot - 1 }, tup, del);
+		auto idx = size.m_next_slot - 1;
+		vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
+			[&](auto i) {
+				using type = vtll::Nth_type<DATA, i>;
+				if		constexpr (std::is_move_assignable_v<type>) { if (tup != nullptr) { std::get<i>(*tup) = std::move(*component_base_ptr<i>(idx)); } }
+				else if constexpr (std::is_copy_assignable_v<type>) { if (tup != nullptr) { std::get<i>(*tup) = *component_base_ptr<i>(idx); } }
+				else if constexpr (is_atomic< std::decay_t<type>>::value) { if (tup != nullptr) { std::get<i>(*tup).store(component_base_ptr<i>(idx)->load()); } }
+				if		constexpr (std::is_destructible_v<type> && !std::is_trivially_destructible_v<type>) { if (del) { component_base_ptr<i>(idx)->~type(); } }	///< Call destructor
+			}
+		);
 
 		slot_size_t new_size = m_size_cnt.load();	///< Commit the popping of the row
 		while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ new_size.m_next_slot, new_size.m_size - 1 }));
@@ -346,25 +300,6 @@ namespace vllt {
 		return true;
 	}
 
-	/////
-	// \brief Remove the last row if there is one.
-	// \returns true if a row was popped.
-	///
-	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
-	inline auto VlltStack<DATA, N0, ROW, table_index_t>::remove_back(vtll::to_tuple<DATA>* tup) noexcept -> bool {
-		return pop_back(tup, false);
-	}
-
-	/////
-	// \brief Remove all rows.
-	// \returns number of removed rows.
-	///
-	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
-	inline auto VlltStack<DATA, N0, ROW, table_index_t>::remove_all() noexcept -> size_t {
-		size_t num = 0;
-		while (remove_back()) { ++num; }
-		return num;
-	}
 
 	/////
 	// \brief Pop all rows and call the destructors.
@@ -377,81 +312,6 @@ namespace vllt {
 		return num;
 	}
 
-	/////
-	// \brief Update the component with index I of an entry.
-	// \param[in] n Index of entry holding the component.
-	// \param[in] C Universal reference to the component holding the data.
-	// \returns true if the operation was successful.
-	///
-	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
-	template<size_t I, typename C>
-	inline auto VlltStack<DATA, N0, ROW, table_index_t>::update(table_index_t n, C&& data) noexcept -> bool {
-		assert(n < max_size());
-		if constexpr (std::is_move_assignable_v<std::decay_t<C>> && std::is_rvalue_reference_v<decltype(data)>) {
-			component<I>(n) = std::forward<decltype(data)>(data);
-		}
-		else if constexpr (std::is_copy_assignable_v<std::decay_t<C>>) {
-			component<I>(n) = data;
-		}
-		else if constexpr (is_atomic< std::decay_t<C>>::value) {
-			component<I>(n).store(data.load());
-		}
-
-		return true;
-	}
-
-	/////
-	// \brief Update components of an entry.
-	// \param[in] n Index of entry holding the component.
-	// \param[in] C Universal reference to tuple holding the components with the data.
-	// \returns true if the operation was successful.
-	///
-	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
-	template<typename VL, typename... Cs>
-		requires (sizeof...(Cs) > 1 && vtll::has_all_types<DATA, vtll::tl<std::decay_t<Cs>...>>::value)
-	inline auto VlltStack<DATA, N0, ROW, table_index_t>::update(table_index_t n, Cs&&... data) noexcept -> bool {
-
-		auto tuple = std::forward_as_tuple(data...);
-		bool ret = true;
-
-		using value_list = std::conditional_t< (vtll::size_value<VL>::value > 0), VL, vtll::make_value_list<vtll::size<DATA>::value> >;
-
-		vtll::static_for<size_t, 0, vtll::size_value<value_list>::value >(	///< Loop over all components
-			[&](auto i) {
-				using type = vtll::Nth_type<DATA, i>;
-				const size_t index = vtll::Nth_value<value_list, i>::value;
-				ret = ret && update<index>(table_index_t{ n }, std::forward<type>(std::get<index>(tuple)));
-			}
-		);
-
-		return ret;
-	}
-
-	/////
-	// \brief Move one row to another row.
-	// \param[in] idst Index of destination row.
-	// \param[in] isrc Index of source row.
-	// \returns true if the operation was successful.
-	///
-	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
-	inline auto VlltStack<DATA, N0, ROW, table_index_t>::move(table_index_t idst, table_index_t isrc) noexcept -> bool {
-		if (idst >= size() || isrc >= size()) return false;
-		auto src = tuple_ptr(isrc);
-		auto dst = tuple_ptr(idst);
-		vtll::static_for<size_t, 0, vtll::size<DATA>::value >([&](auto i) {
-			using type = vtll::Nth_type<DATA, i>;
-			if constexpr (std::is_move_assignable_v<type>) {
-				*std::get<i>(dst) = std::move(*std::get<i>(src));
-			}
-			else if constexpr (std::is_copy_assignable_v<type>) {
-				*std::get<i>(dst) = *std::get<i>(src);
-			}
-			else if constexpr (is_atomic<type>::value) {
-				std::get<i>(dst).store(std::get<i>(src).load());
-			}
-			});
-		return true;
-	}
 
 	/////
 	// \brief Swap the values of two rows.
@@ -480,7 +340,7 @@ namespace vllt {
 				std::get<i>(src)->store(std::get<i>(dst)->load());
 				std::get<i>(dst)->store(tmp->load());
 			}
-			});
+		});
 		return true;
 	}
 
