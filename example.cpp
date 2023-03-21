@@ -36,13 +36,21 @@ int main() {
 	auto data = stack.pop_back();
 	bool hv = data.has_value();
 
+	data = stack.pop_back();
+	hv = data.has_value();
+
+	data = stack.pop_back();
+	hv = data.has_value();
+
 	vllt::VlltFIFOQueue<types> queue;
 
 	queue.push_back(0, 0.3, 1.4f, true, 'C');
 	queue.push_back(1, 0.4, 2.4f, true, 'D');
 
 	auto fdata = queue.pop_front();
-	
+	fdata = queue.pop_front();
+	fdata = queue.pop_front();
+	bool hv1 = fdata.has_value();
 
 	return 0;
 }

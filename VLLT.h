@@ -476,15 +476,15 @@ namespace vllt {
 	inline auto VlltFIFOQueue<DATA, N0, ROW, table_index_t>::push_back(Cs&&... data) noexcept -> table_index_t {
 		auto next_slot = m_next_slot.fetch_add(1);
 		auto vector_ptr{ m_seg_vector.load() };		///< Shared pointer to current segment ptr vector, can be nullptr
-		resize_vector(m_next_slot, vector_ptr);
+		resize_vector(next_slot, vector_ptr);
 		shift_segments(vector_ptr);
-		allocate_segment(m_next_slot, vector_ptr);
-		move_data( m_next_slot, std::forward<Cs>(data)...);
+		allocate_segment(next_slot, vector_ptr);
+		move_data( next_slot, std::forward<Cs>(data)...);
 
-		auto new_size = next_slot - 1;	///< Increase size to validate the new row
+		auto new_size = next_slot;	///< Increase size to validate the new row
 		while (!m_last.compare_exchange_weak(new_size, next_slot));
 
-		return table_index_t{ m_next_slot };	///< Return index of new entry
+		return table_index_t{ next_slot };	///< Return index of new entry
 	}
 
 
