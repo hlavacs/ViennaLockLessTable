@@ -59,10 +59,14 @@ namespace vllt {
 		}
 		
 		/// <summary>
-		/// Make sure there are enough segments in the vector to store a new slot.
+		/// Insert a new row at the end of the table. Make sure that there are enough segments to store the new data.
+		/// If not allocate a new vector to hold the segements, or allocate new segments.
 		/// </summary>
 		/// <param name="slot">Slot number in the table.</param>
 		/// <param name="vector_ptr">Shared pointer to the vector.</param>
+		/// <param name="first_seg">Index of first segment that holds information.</param>
+		/// <param name="last_seg">Index of the last segment that holds informaton.</param>
+		/// <param name="data">The data for the new row.</param>
 		template<typename... Cs>
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
 		void insert(table_index_t slot, std::shared_ptr<seg_vector_t>& vector_ptr, size_t first_seg, size_t last_seg, Cs&&... data ) {
@@ -82,6 +86,7 @@ namespace vllt {
 				num_seg = vector_ptr->m_segments.capacity() + vector_ptr->m_offset;		///< Current max number of segments
 			} //another thread could have beaten us here, so go back and retry
 
+			//If need be, allocate a new segment and store it in the vector
 			auto seg_num = (slot >> L) - vector_ptr->m_offset;				///< Index of segment we need
 			auto seg_ptr = vector_ptr->m_segments[seg_num].load();			///< Does the segment exist yet? If yes, increases use count.
 			if (!seg_ptr) {													///< If not, create one
@@ -89,6 +94,7 @@ namespace vllt {
 				vector_ptr->m_segments[seg_num].compare_exchange_strong(seg_ptr, new_seg_ptr);	///< Try to put it into seg vector, someone might beat us here
 			}
 
+			//copy of move the data to the new slot, using a recursive templated lambda
 			auto f = [&]<size_t I, typename T, typename... Ts>(auto && fun, T && dat, Ts&&... dats) {
 				if constexpr (vtll::is_atomic<T>::value) component_ptr<I>(slot)->store(dat);	//copy value for atomic
 				else *component_ptr<I>(slot) = std::forward<T>(dat);							//move or copy
