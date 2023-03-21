@@ -60,7 +60,7 @@ namespace vllt {
 		
 		/// <summary>
 		/// Insert a new row at the end of the table. Make sure that there are enough segments to store the new data.
-		/// If not allocate a new vector to hold the segements, or allocate new segments.
+		/// If not allocate a new vector to hold the segements, and allocate new segments.
 		/// </summary>
 		/// <param name="slot">Slot number in the table.</param>
 		/// <param name="vector_ptr">Shared pointer to the vector.</param>
