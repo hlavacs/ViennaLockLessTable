@@ -16,7 +16,7 @@ int main() {
 	val = it(20);
 
 
-	using types = vtll::tl<int, double, float, bool, char>;
+	using types = vtll::tl<int, double, float, std::atomic<bool>, char>;
 	vllt::VlltStack<types> stack;
 
 	stack.push_back(0, 0.3, 1.4f, true, 'A');
@@ -27,6 +27,11 @@ int main() {
 	auto tup1 = stack.get_tuple(0);
 	std::get<0>(tup1) = 2;
 	auto tup2 = stack.get_tuple(0);
+
+	stack.swap(0,1);
+
+	auto tup3 = stack.get_tuple(0);
+	auto tup4 = stack.get_tuple(1);
 
 	auto data = stack.pop_back();
 
