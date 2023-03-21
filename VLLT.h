@@ -63,15 +63,15 @@ namespace vllt {
 		/// </summary>
 		/// <param name="slot">Slot number in the table.</param>
 		/// <param name="vector_ptr">Shared pointer to the vector.</param>
-		void resize_vector(table_index_t slot, std::shared_ptr<seg_vector_t>& vector_ptr ) {
+		void resize_vector(table_index_t slot, std::shared_ptr<seg_vector_t>& vector_ptr, size_t first_seg, size_t last_seg ) {
 			size_t num_seg = vector_ptr ? vector_ptr->m_segments.capacity() + vector_ptr->m_offset : 0;	///< Current max number of segments
 			while (slot >= N * num_seg) {		///< Do we have enough?		
 				auto new_vector_ptr = std::make_shared<seg_vector_t>(
 					seg_vector_t{ std::pmr::vector<std::atomic<segment_ptr_t>>{std::max(num_seg * 2, 16ULL), m_mr }, 0 } //new segment vector
 				);
 
-				for (size_t i = 0; num_seg > 0 && i < vector_ptr->m_segments.size(); ++i) {
-					new_vector_ptr->m_segments[i].store(vector_ptr->m_segments[i].load()); ///< Copy segment pointers
+				for (size_t i = 0; num_seg > 0 && i < last_seg - first_seg + 1; ++i) {
+					new_vector_ptr->m_segments[i].store(vector_ptr->m_segments[first_seg + i].load()); ///< Copy segment pointers
 				};
 
 				if (m_seg_vector.compare_exchange_strong(vector_ptr, new_vector_ptr)) {	///< Try to exchange old segment vector with new
@@ -289,7 +289,7 @@ namespace vllt {
 
 		//make sure there is enough space in the segment VECTOR - if not then change the old vector to a larger vector
 		auto vector_ptr{ m_seg_vector.load() };	///< Shared pointer to current segment ptr vector, can be nullptr
-		resize_vector(size.m_next_slot, vector_ptr);			///< Make sure there are enough slots for segments
+		resize_vector(size.m_next_slot, vector_ptr, 0, vector_ptr ? vector_ptr->m_segments.size() - 1 : 0); ///< Make sure there are enough slots for segments
 		allocate_segment(size.m_next_slot, vector_ptr);			///< Allocate new segments if needed
 		move_data(size.m_next_slot, std::forward<Cs>(data)...);	///< Move the data to the slot in a segment
 
@@ -434,8 +434,6 @@ namespace vllt {
 		std::atomic<table_index_t>	m_next_slot;	//next element to write over
 		std::atomic<table_index_t>	m_last;			//last element that has been produced and fully constructed
 
-		inline virtual auto shift_segments(std::shared_ptr<seg_vector_t>& vector_ptr) -> void;
-
 	public:
 		VlltFIFOQueue() {};
 
@@ -445,23 +443,6 @@ namespace vllt {
 
 		inline auto pop_front() noexcept -> tuple_opt_t;	///< Remove the last row, call destructor on components
 		inline auto clear() noexcept	 -> size_t;			///< Set the number if rows to zero - effectively clear the table, call destructors
-	};
-
-
-	///
-	// 
-	///
-	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
-	inline auto VlltFIFOQueue<DATA, N0, ROW, table_index_t>::shift_segments(std::shared_ptr<seg_vector_t>& vector_ptr) -> void {
-		auto seg_num		= (m_first >> L) - vector_ptr->m_offset;	///< Index of segment that containes the first item in queue
-		auto max_seg_num	= (m_last >> L)  - vector_ptr->m_offset;	///< Index of segment that containes the last item in queue
-
-		if (seg_num > 0) {
-			for (size_t i = 0; i < max_seg_num - seg_num + 1;  ++i) {	//copy active segment pointers to start of vector
-				vector_ptr->m_segments[i].store(vector_ptr->m_segments[seg_num + i].load());
-			}
-		}
-		vector_ptr->m_offset += seg_num;
 	};
 
 
@@ -476,8 +457,12 @@ namespace vllt {
 	inline auto VlltFIFOQueue<DATA, N0, ROW, table_index_t>::push_back(Cs&&... data) noexcept -> table_index_t {
 		auto next_slot = m_next_slot.fetch_add(1);			///< Slot number to put the new data into
 		auto vector_ptr{ m_seg_vector.load() };				///< Shared pointer to current segment ptr vector, can be nullptr
-		resize_vector(next_slot, vector_ptr);				///< Make sure there are enough slots for segments
-		shift_segments(vector_ptr);							///< Get rid of old segments that are no longer needed
+
+		if (vector_ptr) {
+			resize_vector(next_slot, vector_ptr, (m_first >> L) - vector_ptr->m_offset, (m_last >> L) - vector_ptr->m_offset);	///< Make sure there are enough slots for segments
+		}
+		else { resize_vector(next_slot, vector_ptr, 0, 0); } ///< Make sure there are enough slots for segments
+		
 		allocate_segment(next_slot, vector_ptr);			///< Allocate new segments if needed
 		move_data( next_slot, std::forward<Cs>(data)...);	///< Move the data to the slot in a segment
 
