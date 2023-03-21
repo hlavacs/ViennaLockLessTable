@@ -30,7 +30,7 @@ namespace vllt {
 		static const uint64_t BIT_MASK = N - 1;			///< Bit mask to mask off lower bits to get index inside segment
 
 		using tuple_value_t = vtll::to_tuple<DATA>;		///< Tuple holding the entries as value
-		using tuple_ptr_t = vtll::to_ptr_tuple<DATA>;	///< Tuple holding ptrs to the entries
+		using tuple_ref_t = vtll::to_ref_tuple<DATA>;	///< Tuple holding ptrs to the entries
 
 		using array_tuple_t1 = std::array<tuple_value_t, N>;								///< ROW: an array of tuples
 		using array_tuple_t2 = vtll::to_tuple<vtll::transform_size_t<DATA, std::array, N>>;	///< COLUMN: a tuple of arrays
@@ -47,7 +47,7 @@ namespace vllt {
 		~VlltBase() noexcept {};
 
 		template<size_t I, typename C = vtll::Nth_type<DATA, I>>
-		inline auto component_base_ptr(table_index_t n) noexcept -> C* {		///< \returns a pointer to a component
+		inline auto component_ptr(table_index_t n) noexcept -> C* {		///< \returns a pointer to a component
 			auto vector_ptr{ m_seg_vector.load() };
 			auto segment_ptr = (vector_ptr->m_segments[n >> L]).load();
 			if constexpr (ROW) { return &std::get<I>((*segment_ptr)[n & BIT_MASK]); }
@@ -89,9 +89,10 @@ namespace vllt {
 		using VlltBase<DATA, N0, ROW, table_index_t>::L;
 		using VlltBase<DATA, N0, ROW, table_index_t>::m_mr;
 		using VlltBase<DATA, N0, ROW, table_index_t>::m_seg_vector;
-		using VlltBase<DATA, N0, ROW, table_index_t>::component_base_ptr;
+		using VlltBase<DATA, N0, ROW, table_index_t>::component_ptr;
 
-		using typename VlltBase<DATA, N0, ROW, table_index_t>::tuple_ptr_t;
+		using typename VlltBase<DATA, N0, ROW, table_index_t>::tuple_ref_t;
+		using tuple_opt_t = std::optional<VlltBase<DATA, N0, ROW, table_index_t>::tuple_value_t>;
 		using typename VlltBase<DATA, N0, ROW, table_index_t>::segment_t;
 		using typename VlltBase<DATA, N0, ROW, table_index_t>::segment_ptr_t;
 		using typename VlltBase<DATA, N0, ROW, table_index_t>::seg_vector_t;
@@ -105,12 +106,12 @@ namespace vllt {
 		inline auto size() noexcept -> size_t; ///< \returns the current numbers of rows in the table
 
 		template<size_t I, typename C = vtll::Nth_type<DATA, I>>
-		inline auto component_ptr(table_index_t n) noexcept	-> C*;		///< \returns a pointer to a component
+		inline auto get(table_index_t n) noexcept -> C&;		///< \returns a ref to a component
 
-		template<typename C>											///< \returns a pointer to a component
-		inline auto component_ptr(table_index_t n) noexcept	-> C* {	return component_ptr<vtll::index_of<DATA,C>, C>(n); }
+		template<typename C>									///< \returns a ref to a component
+		inline auto get(table_index_t n) noexcept -> C& requires vtll::unique<DATA>::value { return get<vtll::index_of<DATA, C>::value>(n); }
 
-		inline auto tuple_ptr(table_index_t n) noexcept	-> tuple_ptr_t;	///< \returns a tuple with pointers to all components
+		inline auto get_tuple(table_index_t n) noexcept	-> tuple_ref_t;	///< \returns a tuple with refs to all components
 
 		//-------------------------------------------------------------------------------------------
 		//add data
@@ -122,10 +123,10 @@ namespace vllt {
 		//-------------------------------------------------------------------------------------------
 		//remove and swap data
 
-		inline auto pop_back(vtll::to_tuple<DATA>* tup = nullptr) noexcept	-> bool;	///< Remove the last row, call destructor on components
-		inline auto swap(table_index_t n1, table_index_t n2) noexcept		-> bool;	///< Swap contents of two rows
+		inline auto pop_back() noexcept	-> tuple_opt_t;	///< Remove the last row, call destructor on components
 		inline auto clear() noexcept	-> size_t;	///< Set the number if rows to zero - effectively clear the table, call destructors
 		inline auto compress() noexcept	-> void;	///< Deallocate unused segments
+		inline auto swap(table_index_t n1, table_index_t n2) noexcept -> bool;	///< Swap contents of two rows
 
 	protected:
 
@@ -180,9 +181,8 @@ namespace vllt {
 	///
 	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
 	template<size_t I, typename C>
-	inline auto VlltStack<DATA, N0, ROW, table_index_t>::component_ptr(table_index_t n) noexcept -> C* {
-		if (n >= size()) return nullptr;
-		return component_base_ptr<I, C>(n);
+	inline auto VlltStack<DATA, N0, ROW, table_index_t>::get(table_index_t n) noexcept -> C& {
+		return *component_ptr<I, C>(n);
 	};
 
 	/////
@@ -191,8 +191,8 @@ namespace vllt {
 	// \returns a tuple with pointers to all components of entry n.
 	///
 	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
-	inline auto VlltStack<DATA, N0, ROW, table_index_t>::tuple_ptr(table_index_t n) noexcept -> tuple_ptr_t {
-		auto f = [&]<size_t... Is>(std::index_sequence<Is...>) { return std::make_tuple(component_ptr<Is>(n)...); };
+	inline auto VlltStack<DATA, N0, ROW, table_index_t>::get_tuple(table_index_t n) noexcept -> tuple_ref_t {
+		auto f = [&]<size_t... Is>(std::index_sequence<Is...>) { return std::tie(get<Is>(n)...); };
 		return f(std::make_index_sequence<vtll::size<DATA>::value>{});
 	};
 
@@ -245,7 +245,7 @@ namespace vllt {
 		vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 			[&](auto i) {
 				using type = vtll::Nth_type<DATA, i>;
-				*component_base_ptr<i>(table_index_t{ size.m_next_slot }) = std::forward<type>(std::get<i>(tuple));	//update
+				*component_ptr<i>(table_index_t{ size.m_next_slot }) = std::forward<type>(std::get<i>(tuple));	//update
 			}
 		);
 
@@ -262,32 +262,34 @@ namespace vllt {
 	// \returns true if a row was popped.
 	///
 	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
-	inline auto VlltStack<DATA, N0, ROW, table_index_t>::pop_back(vtll::to_tuple<DATA>* tup ) noexcept -> bool {
+	inline auto VlltStack<DATA, N0, ROW, table_index_t>::pop_back() noexcept -> tuple_opt_t {
+		vtll::to_tuple<DATA> ret{};
+
 		slot_size_t size = m_size_cnt.load();
-		if (size.m_next_slot == 0) return false;	///< Is there a row to pop off?
+		if (size.m_next_slot == 0) return std::nullopt;	///< Is there a row to pop off?
 
 		/// Make sure that no other thread is currently pushing a new row
 		while (size.m_next_slot > size.m_size || !m_size_cnt.compare_exchange_weak(size, slot_size_t{ size.m_next_slot - 1, size.m_size })) {
 			if (size.m_next_slot > size.m_size) { size = m_size_cnt.load(); }
-			if (size.m_next_slot == 0) return false;	///< Is there a row to pop off?
+			if (size.m_next_slot == 0) return std::nullopt;	///< Is there a row to pop off?
 		};
 
 		auto idx = size.m_next_slot - 1;
 		vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 			[&](auto i) {
 				using type = vtll::Nth_type<DATA, i>;
-				if		constexpr (std::is_move_assignable_v<type>) { if (tup != nullptr) { std::get<i>(*tup) = std::move(*component_base_ptr<i>(idx)); } } //move
-				else if constexpr (std::is_copy_assignable_v<type>) { if (tup != nullptr) { std::get<i>(*tup) = *component_base_ptr<i>(idx); } }			//copy
-				else if constexpr (is_atomic<type>::value) { if (tup != nullptr) { std::get<i>(*tup).store(component_base_ptr<i>(idx)->load()); } }			//atomic
+				if		constexpr (std::is_move_assignable_v<type>) { std::get<i>(ret) = std::move(*component_ptr<i>(idx)); }	//move
+				else if constexpr (std::is_copy_assignable_v<type>) { std::get<i>(ret) = *component_ptr<i>(idx); }				//copy
+				else if constexpr (is_atomic<type>::value) { std::get<i>(ret).store(component_ptr<i>(idx)->load()); }			//atomic
 
-				if constexpr (std::is_destructible_v<type> && !std::is_trivially_destructible_v<type>) { component_base_ptr<i>(idx)->~type(); }	///< Call destructor
+				if constexpr (std::is_destructible_v<type> && !std::is_trivially_destructible_v<type>) { component_ptr<i>(idx)->~type(); }	///< Call destructor
 			}
 		);
 
 		slot_size_t new_size = m_size_cnt.load();	///< Commit the popping of the row
 		while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ new_size.m_next_slot, new_size.m_size - 1 }));
 
-		return true;
+		return ret;
 	}
 
 	/////
@@ -297,7 +299,7 @@ namespace vllt {
 	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
 	inline auto VlltStack<DATA, N0, ROW, table_index_t>::clear() noexcept -> size_t {
 		size_t num = 0;
-		while (pop_back(nullptr)) { ++num; }
+		while (pop_back().has_value()) { ++num; }
 		return num;
 	}
 
@@ -465,11 +467,11 @@ namespace vllt {
 		vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 			[&](auto i) {
 				using type = vtll::Nth_type<DATA, i>;
-				if		constexpr (std::is_move_assignable_v<type>) { if (tup != nullptr) { std::get<i>(*tup) = std::move(*component_base_ptr<i>(next_slot)); } } //move
-				else if constexpr (std::is_copy_assignable_v<type>) { if (tup != nullptr) { std::get<i>(*tup) = *component_base_ptr<i>(next_slot); } }			//copy
-				else if constexpr (is_atomic<type>::value) { if (tup != nullptr) { std::get<i>(*tup).store(component_base_ptr<i>(next_slot)->load()); } }			//atomic
+				if		constexpr (std::is_move_assignable_v<type>) { if (tup != nullptr) { std::get<i>(*tup) = std::move(*component_ptr<i>(next_slot)); } } //move
+				else if constexpr (std::is_copy_assignable_v<type>) { if (tup != nullptr) { std::get<i>(*tup) = *component_ptr<i>(next_slot); } }			//copy
+				else if constexpr (is_atomic<type>::value) { if (tup != nullptr) { std::get<i>(*tup).store(component_ptr<i>(next_slot)->load()); } }			//atomic
 
-				if constexpr (std::is_destructible_v<type> && !std::is_trivially_destructible_v<type>) { component_base_ptr<i>(next_slot)->~type(); }	///< Call destructor
+				if constexpr (std::is_destructible_v<type> && !std::is_trivially_destructible_v<type>) { component_ptr<i>(next_slot)->~type(); }	///< Call destructor
 			}
 		);
 

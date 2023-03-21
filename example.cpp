@@ -16,15 +16,19 @@ int main() {
 	val = it(20);
 
 
-	using types = vtll::tl<int, double, float, bool, int>;
-	vllt::VlltStack<types> table;
+	using types = vtll::tl<int, double, float, bool, char>;
+	vllt::VlltStack<types> stack;
 
-	table.push_back(0, 0.3, 1.4f, true, 3);
-	table.push_back(1, 0.4, 2.4f, true, 4);
+	stack.push_back(0, 0.3, 1.4f, true, 'A');
+	stack.push_back(1, 0.4, 2.4f, true, 'B');
 
-	vtll::to_tuple<types> data;
+	auto i = stack.get<int>(0);
 
-	table.pop_back(&data);
+	auto tup1 = stack.get_tuple(0);
+	std::get<0>(tup1) = 2;
+	auto tup2 = stack.get_tuple(0);
+
+	auto data = stack.pop_back();
 
 	/*vllt::VlltFIFOQueue<types> queue;
 
