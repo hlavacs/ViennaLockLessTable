@@ -63,7 +63,9 @@ namespace vllt {
 		/// </summary>
 		/// <param name="slot">Slot number in the table.</param>
 		/// <param name="vector_ptr">Shared pointer to the vector.</param>
-		void resize_vector(table_index_t slot, std::shared_ptr<seg_vector_t>& vector_ptr, size_t first_seg, size_t last_seg ) {
+		template<typename... Cs>
+			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
+		void insert(table_index_t slot, std::shared_ptr<seg_vector_t>& vector_ptr, size_t first_seg, size_t last_seg, Cs&&... data ) {
 			size_t num_seg = vector_ptr ? vector_ptr->m_segments.capacity() + vector_ptr->m_offset : 0;	///< Current max number of segments
 			while (slot >= N * num_seg) {		///< Do we have enough?		
 				auto new_vector_ptr = std::make_shared<seg_vector_t>(
@@ -79,31 +81,14 @@ namespace vllt {
 				} //Note: if we were beaten by other thread, then compare_exchange_strong itself puts the new value into vector_ptr
 				num_seg = vector_ptr->m_segments.capacity() + vector_ptr->m_offset;		///< Current max number of segments
 			} //another thread could have beaten us here, so go back and retry
-		}
-		
-		/// <summary>
-		/// Test if we have enough segments yet to hold the new slot - if not then create a new segment.
-		/// </summary>
-		/// <param name="slot">Slot number in the table.</param>
-		/// <param name="vector_ptr">Shared pointer to the vector.</param>
-		void allocate_segment(table_index_t slot, std::shared_ptr<seg_vector_t>& vector_ptr ) {
+
 			auto seg_num = (slot >> L) - vector_ptr->m_offset;				///< Index of segment we need
 			auto seg_ptr = vector_ptr->m_segments[seg_num].load();			///< Does the segment exist yet? If yes, increases use count.
 			if (!seg_ptr) {													///< If not, create one
 				auto new_seg_ptr = std::make_shared<segment_t>();			///< Create a new segment
 				vector_ptr->m_segments[seg_num].compare_exchange_strong(seg_ptr, new_seg_ptr);	///< Try to put it into seg vector, someone might beat us here
 			}
-		}
 
-		/// <summary>
-		/// Move data to a new slot. This is done with a templated lambda recursion.
-		/// </summary>
-		/// <typeparam name="...Cs">Types of the data items.</typeparam>
-		/// <param name="slot">Slot in the table to move the data to.</param>
-		/// <param name="...data">The new data.</param>
-		template<typename... Cs>
-			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
-		void move_data(table_index_t slot, Cs&&... data) {
 			auto f = [&]<size_t I, typename T, typename... Ts>(auto && fun, T && dat, Ts&&... dats) {
 				if constexpr (vtll::is_atomic<T>::value) component_ptr<I>(slot)->store(dat);	//copy value for atomic
 				else *component_ptr<I>(slot) = std::forward<T>(dat);							//move or copy
@@ -148,9 +133,7 @@ namespace vllt {
 		using VlltTable<DATA, N0, ROW, table_index_t>::m_mr;
 		using VlltTable<DATA, N0, ROW, table_index_t>::m_seg_vector;
 		using VlltTable<DATA, N0, ROW, table_index_t>::component_ptr;
-		using VlltTable<DATA, N0, ROW, table_index_t>::resize_vector;
-		using VlltTable<DATA, N0, ROW, table_index_t>::allocate_segment;
-		using VlltTable<DATA, N0, ROW, table_index_t>::move_data;
+		using VlltTable<DATA, N0, ROW, table_index_t>::insert;
 
 		using tuple_opt_t = std::optional< vtll::to_tuple< vtll::remove_atomic<DATA> > >;
 		using typename VlltTable<DATA, N0, ROW, table_index_t>::tuple_ref_t;
@@ -278,7 +261,6 @@ namespace vllt {
 	template<typename... Cs>
 		requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
 	inline auto VlltStack<DATA, N0, ROW, table_index_t>::push_back(Cs&&... data) noexcept	-> table_index_t {
-
 		//increase m_next_slot to announce your demand for a new slot -> slot is now reserved for you
 		slot_size_t size = m_size_cnt.load();	///< Make sure that no other thread is popping currently
 		while (size.m_next_slot < size.m_size || !m_size_cnt.compare_exchange_weak(size, slot_size_t{ size.m_next_slot + 1, size.m_size })) {
@@ -289,9 +271,7 @@ namespace vllt {
 
 		//make sure there is enough space in the segment VECTOR - if not then change the old vector to a larger vector
 		auto vector_ptr{ m_seg_vector.load() };	///< Shared pointer to current segment ptr vector, can be nullptr
-		resize_vector(size.m_next_slot, vector_ptr, 0, vector_ptr ? vector_ptr->m_segments.size() - 1 : 0); ///< Make sure there are enough slots for segments
-		allocate_segment(size.m_next_slot, vector_ptr);			///< Allocate new segments if needed
-		move_data(size.m_next_slot, std::forward<Cs>(data)...);	///< Move the data to the slot in a segment
+		insert(size.m_next_slot, vector_ptr, 0, vector_ptr ? vector_ptr->m_segments.size() - 1 : 0, std::forward<Cs>(data)...); ///< Make sure there are enough slots for segments
 
 		slot_size_t new_size = m_size_cnt.load();	///< Increase size to validate the new row
 		while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ new_size.m_next_slot, new_size.m_size + 1 }));
@@ -420,9 +400,7 @@ namespace vllt {
 		using VlltTable<DATA, N0, ROW, table_index_t>::m_seg_vector;
 		using VlltTable<DATA, N0, ROW, table_index_t>::m_mr;
 		using VlltTable<DATA, N0, ROW, table_index_t>::component_ptr;
-		using VlltTable<DATA, N0, ROW, table_index_t>::resize_vector;
-		using VlltTable<DATA, N0, ROW, table_index_t>::allocate_segment;
-		using VlltTable<DATA, N0, ROW, table_index_t>::move_data;
+		using VlltTable<DATA, N0, ROW, table_index_t>::insert;
 
 		using tuple_opt_t = std::optional< vtll::to_tuple< vtll::remove_atomic<DATA> > >;
 		using segment_t		= VlltTable<DATA, N0, ROW, table_index_t>::segment_t;
@@ -458,13 +436,8 @@ namespace vllt {
 		auto next_slot = m_next_slot.fetch_add(1);			///< Slot number to put the new data into
 		auto vector_ptr{ m_seg_vector.load() };				///< Shared pointer to current segment ptr vector, can be nullptr
 
-		if (vector_ptr) {
-			resize_vector(next_slot, vector_ptr, (m_first >> L) - vector_ptr->m_offset, (m_last >> L) - vector_ptr->m_offset);	///< Make sure there are enough slots for segments
-		}
-		else { resize_vector(next_slot, vector_ptr, 0, 0); } ///< Make sure there are enough slots for segments
-		
-		allocate_segment(next_slot, vector_ptr);			///< Allocate new segments if needed
-		move_data( next_slot, std::forward<Cs>(data)...);	///< Move the data to the slot in a segment
+		insert(	next_slot, vector_ptr, vector_ptr ? (m_first.load() >> L) - vector_ptr->m_offset : 0
+				, vector_ptr ? (m_last.load() >> L) - vector_ptr->m_offset : 0, std::forward<Cs>(data)...);
 
 		auto new_size = next_slot;
 		while (!m_last.compare_exchange_weak(new_size, next_slot));	///< Increase size to validate the new row
