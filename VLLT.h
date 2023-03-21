@@ -152,8 +152,8 @@ namespace vllt {
 		using VlltTable<DATA, N0, ROW, table_index_t>::allocate_segment;
 		using VlltTable<DATA, N0, ROW, table_index_t>::move_data;
 
-		using typename VlltTable<DATA, N0, ROW, table_index_t>::tuple_ref_t;
 		using tuple_opt_t = std::optional< vtll::to_tuple< vtll::remove_atomic<DATA> > >;
+		using typename VlltTable<DATA, N0, ROW, table_index_t>::tuple_ref_t;
 		using typename VlltTable<DATA, N0, ROW, table_index_t>::segment_t;
 		using typename VlltTable<DATA, N0, ROW, table_index_t>::segment_ptr_t;
 		using typename VlltTable<DATA, N0, ROW, table_index_t>::seg_vector_t;
@@ -307,7 +307,7 @@ namespace vllt {
 	///
 	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
 	inline auto VlltStack<DATA, N0, ROW, table_index_t>::pop_back() noexcept -> tuple_opt_t {
-		vtll::to_tuple<DATA> ret{};
+		vtll::to_tuple<vtll::remove_atomic<DATA>> ret{};
 
 		slot_size_t size = m_size_cnt.load();
 		if (size.m_next_slot == 0) return std::nullopt;	///< Is there a row to pop off?
@@ -324,6 +324,7 @@ namespace vllt {
 				using type = vtll::Nth_type<DATA, i>;
 				if		constexpr (std::is_move_assignable_v<type>) { std::get<i>(ret) = std::move(*component_ptr<i>(idx)); }	//move
 				else if constexpr (std::is_copy_assignable_v<type>) { std::get<i>(ret) = *component_ptr<i>(idx); }				//copy
+				else if constexpr (vtll::is_atomic<type>::value)    { std::get<i>(ret) = component_ptr<i>(idx)->load(); } 		//atomic
 
 				if constexpr (std::is_destructible_v<type> && !std::is_trivially_destructible_v<type>) { component_ptr<i>(idx)->~type(); }	///< Call destructor
 			}
@@ -418,10 +419,12 @@ namespace vllt {
 		using VlltTable<DATA, N0, ROW, table_index_t>::L;
 		using VlltTable<DATA, N0, ROW, table_index_t>::m_seg_vector;
 		using VlltTable<DATA, N0, ROW, table_index_t>::m_mr;
+		using VlltTable<DATA, N0, ROW, table_index_t>::component_ptr;
 		using VlltTable<DATA, N0, ROW, table_index_t>::resize_vector;
 		using VlltTable<DATA, N0, ROW, table_index_t>::allocate_segment;
 		using VlltTable<DATA, N0, ROW, table_index_t>::move_data;
 
+		using tuple_opt_t = std::optional< vtll::to_tuple< vtll::remove_atomic<DATA> > >;
 		using segment_t		= VlltTable<DATA, N0, ROW, table_index_t>::segment_t;
 		using segment_ptr_t = VlltTable<DATA, N0, ROW, table_index_t>::segment_ptr_t;
 		using seg_vector_t	= VlltTable<DATA, N0, ROW, table_index_t>::seg_vector_t;
@@ -440,8 +443,8 @@ namespace vllt {
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
 		inline auto push_back(Cs&&... data) noexcept -> table_index_t;	///< Push new component data to the end of the table
 
-		inline auto pop_front(vtll::to_tuple<DATA>* tup = nullptr) noexcept	-> bool;			///< Remove the last row, call destructor on components
-		inline auto clear() noexcept										-> size_t;			///< Set the number if rows to zero - effectively clear the table, call destructors
+		inline auto pop_front() noexcept -> tuple_opt_t;	///< Remove the last row, call destructor on components
+		inline auto clear() noexcept	 -> size_t;			///< Set the number if rows to zero - effectively clear the table, call destructors
 	};
 
 
@@ -486,16 +489,18 @@ namespace vllt {
 
 
 	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
-	inline auto VlltFIFOQueue<DATA, N0, ROW, table_index_t>::pop_front(vtll::to_tuple<DATA>* tup) noexcept -> bool {
+	inline auto VlltFIFOQueue<DATA, N0, ROW, table_index_t>::pop_front() noexcept -> tuple_opt_t {
+		vtll::to_tuple<vtll::remove_atomic<DATA>> ret{};
+
 		auto next_slot = m_first.fetch_add(1);
-		if (next_slot == m_next_slot) return false;	///< the queue is empty
+		if (next_slot == m_next_slot) return std::nullopt;	///< the queue is empty
 
 		vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 			[&](auto i) {
 				using type = vtll::Nth_type<DATA, i>;
-				if		constexpr (std::is_move_assignable_v<type>) { if (tup != nullptr) { std::get<i>(*tup) = std::move(*component_ptr<i>(next_slot)); } } //move
-				else if constexpr (std::is_copy_assignable_v<type>) { if (tup != nullptr) { std::get<i>(*tup) = *component_ptr<i>(next_slot); } }			//copy
-				else if constexpr (vtll::is_atomic<type>::value) { if (tup != nullptr) { std::get<i>(*tup).store(component_ptr<i>(next_slot)->load()); } }			//atomic
+				if		constexpr (std::is_move_assignable_v<type>) { std::get<i>(ret) = std::move(*component_ptr<i>(next_slot)); } //move
+				else if constexpr (std::is_copy_assignable_v<type>) { std::get<i>(ret) = *component_ptr<i>(next_slot); } 			//copy
+				else if constexpr (vtll::is_atomic<type>::value)    { std::get<i>(ret) = component_ptr<i>(next_slot)->load(); } 	//atomic
 
 				if constexpr (std::is_destructible_v<type> && !std::is_trivially_destructible_v<type>) { component_ptr<i>(next_slot)->~type(); }	///< Call destructor
 			}
@@ -506,14 +511,14 @@ namespace vllt {
 			committed = next_slot > 0 ? next_slot - 1 : 0;
 		}
 		
-		return true;
+		return ret;		//RVO?
 	}
 
 
 	template<typename DATA, size_t N0, bool ROW, typename table_index_t>
 	inline auto VlltFIFOQueue<DATA, N0, ROW, table_index_t>::clear() noexcept -> size_t {
 		size_t num = 0;
-		while (pop_front()) { ++num; }
+		while (pop_front().has_value()) { ++num; }
 		return num;
 	}
 

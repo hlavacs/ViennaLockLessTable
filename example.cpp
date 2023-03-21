@@ -34,14 +34,15 @@ int main() {
 	auto tup4 = stack.get_tuple(1);
 
 	auto data = stack.pop_back();
+	bool hv = data.has_value();
 
-	/*vllt::VlltFIFOQueue<types> queue;
+	vllt::VlltFIFOQueue<types> queue;
 
-	queue.push_back(0, 0.3, 1.4f, true, 3);
-	queue.push_back(1, 0.4, 2.4f, true, 4);
+	queue.push_back(0, 0.3, 1.4f, true, 'C');
+	queue.push_back(1, 0.4, 2.4f, true, 'D');
 
-	queue.pop_front(&data);
-	*/
+	auto fdata = queue.pop_front();
+	
 
 	return 0;
 }
