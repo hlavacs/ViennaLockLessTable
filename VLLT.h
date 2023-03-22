@@ -456,7 +456,7 @@ namespace vllt {
 		requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
 	inline auto VlltFIFOQueue<DATA, N0, ROW>::push_back(Cs&&... data) noexcept -> table_index_t {
 		auto next_slot = m_next_slot.load();
-		while (!m_next_slot.compare_exchange_strong(next_slot, table_index_t{ next_slot + 1 }));///< Slot number to put the new data into	
+		while (!m_next_slot.compare_exchange_weak(next_slot, table_index_t{ next_slot + 1 }));///< Slot number to put the new data into	
 
 		auto vector_ptr{ m_seg_vector.load() };				///< Shared pointer to current segment ptr vector, can be nullptr
 
