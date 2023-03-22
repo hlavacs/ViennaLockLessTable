@@ -24,6 +24,7 @@ set(SOURCE example.cpp)
 set(HEADERS
 	VTLL.h
 	VLLT.h
+  VSTY.h
 )
 
 add_executable(${TARGET} ${SOURCE} ${HEADERS})
