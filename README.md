@@ -7,13 +7,26 @@ The Vienna Lock Less Table (VLLT) is a C++20 container that like std::vector all
 * Lockless operations. VLLT does not use mutexes, only compare and swap (CAS).
 * Can be used as basis to create more advanced containers.
 
-VLLT uses another project for setting its template parameters, the Vienna Type List Library (VTLL), see https://github.com/hlavacs/ViennaTypeListLibrary. Just put the header files into the same directory.
+VLLT uses other projects:
+* Vienna Strong Type (VSTY), see https://github.com/hlavacs/ViennaStrongType.git
+* Vienna Type List Library (VTLL), see https://github.com/hlavacs/ViennaTypeListLibrary.
+The are included as Git submodules! So you must first init and udate them - see below!
 
 VLLT is meant as a building block to create more complex containers for multithreaded access. VLLT does not use mutexes and provides internal synchronization only if you use it as a stack-like container (push_back, pop_back). An example for such a more complex container is the partner project Vienna Entity Component System (VECS), see https://github.com/hlavacs/ViennaEntityComponentSystem. VECS uses an adaptor to additionally enable erasing arbitrary rows without using mutexes.
 
+## Cloning VLLT
+
+For cloning VLLT, do the following:
+
+git clone https://github.com/hlavacs/ViennaLockLessTable.git
+cd ViennaLockLessTable
+git submodule init
+git submodule update
+
+
 ## Using VLLT
 
-VLLT is a header-only library, just include it and make sure that VTLL.h can be found as well.
+VLLT is a header-only library. Include ViennaStrongType/VSTY.h, ViennaTypeListLibrary/VLLT.h and VLLT.h into your project.
 
 
 ## The VLLT API
