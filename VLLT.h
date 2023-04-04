@@ -35,11 +35,13 @@ namespace vllt {
 		using array_tuple_t2 = vtll::to_tuple<vtll::transform_size_t<DATA, std::array, N>>;	///< COLUMN: a tuple of arrays
 		using segment_t = std::conditional_t<ROW, array_tuple_t1, array_tuple_t2>;			///< Memory layout of the table
 
-		using segment_ptr_t = std::shared_ptr<segment_t>;				///<Shared pointer to a segment
+		using segment_ptr_t = std::shared_ptr<segment_t>;						///<Shared pointer to a segment
+		using segment_idx_t = vsty::strong_integral_t<size_t, vsty::counter<>>; ///<strong integer type for indexing segments, 0 to size vector-1
 		struct seg_vector_t {
 			std::pmr::vector<std::atomic<segment_ptr_t>> m_segments;	///<Vector of atomic shared pointers to the segments
-			size_t m_offset = 0;										///<Segment offset for FIFO queue (offsets segments NOT rows)
+			segment_idx_t m_seg_offset = 0;								///<Segment offset for FIFO queue (offsets segments NOT rows)
 		};
+
 
 	public:
 		VlltTable(size_t r = 1 << 16, std::pmr::memory_resource* mr = std::pmr::new_delete_resource()) noexcept 
@@ -72,7 +74,7 @@ namespace vllt {
 		/// <param name="data">The data for the new row.</param>
 		template<typename... Cs>
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
-		void insert(table_index_t slot, std::shared_ptr<seg_vector_t>& vector_ptr, size_t first_seg, size_t last_seg, Cs&&... data ) {
+		void insert(table_index_t slot, std::shared_ptr<seg_vector_t>& vector_ptr, segment_idx_t first_seg, segment_idx_t last_seg, Cs&&... data ) {
 			resize(slot, vector_ptr, first_seg, last_seg); //if need be, grow the vector of segments
 			allocate(slot, vector_ptr); //If need be, allocate a new segment and store it in the vector
 
@@ -96,24 +98,24 @@ namespace vllt {
 		/// <param name="first_seg">Index of first segment that currently holds information.</param>
 		/// <param name="last_seg">Index of the last segment that currently holds informaton.</param>
 		/// <returns></returns>
-		inline auto resize(table_index_t slot, std::shared_ptr<seg_vector_t>& vector_ptr, size_t first_seg, size_t last_seg) {
-			size_t num_seg = vector_ptr ? vector_ptr->m_segments.size() + vector_ptr->m_offset : 0;	///< Current max number of segments
+		inline auto resize(table_index_t slot, std::shared_ptr<seg_vector_t>& vector_ptr, segment_idx_t first_seg, segment_idx_t last_seg) {
+			size_t num_seg = vector_ptr ? vector_ptr->m_segments.size() + vector_ptr->m_seg_offset : 0;	///< Current max number of segments
 			while (slot >= N * num_seg) {		///< Do we have enough?		
 				auto new_vector_ptr = std::make_shared<seg_vector_t>( //vector has always as many slots as its capacity is -> size==capacity
 					vector_ptr ? 
-						  seg_vector_t{ std::pmr::vector<std::atomic<segment_ptr_t>>{vector_ptr->m_segments.size() * 2, m_mr}, vector_ptr->m_offset } //increase existing one
-						: seg_vector_t{ std::pmr::vector<std::atomic<segment_ptr_t>>{16, m_mr}, 0 } //create a new one with 16 segment slots
+						  seg_vector_t{ std::pmr::vector<std::atomic<segment_ptr_t>>{vector_ptr->m_segments.size() * 2, m_mr}, vector_ptr->m_seg_offset } //increase existing one
+						: seg_vector_t{ std::pmr::vector<std::atomic<segment_ptr_t>>{16, m_mr}, segment_idx_t{ 0 } } //create a new one with 16 segment slots
 				);
 
 				for (size_t i = 0; num_seg > 0 && i < last_seg - first_seg + 1; ++i) {
 					new_vector_ptr->m_segments[i].store(vector_ptr->m_segments[first_seg + i].load()); ///< Copy segment pointers
 				};
-				new_vector_ptr->m_offset += first_seg; //shift the used segments, account for spent segments
+				new_vector_ptr->m_seg_offset += first_seg; //shift the used segments, account for spent segments
 
 				if (m_seg_vector.compare_exchange_strong(vector_ptr, new_vector_ptr)) {	///< Try to exchange old segment vector with new
 					vector_ptr = new_vector_ptr;										///< If success, remember for later
 				} //Note: if we were beaten by other thread, then compare_exchange_strong itself puts the new value into vector_ptr
-				num_seg = vector_ptr->m_segments.size() + vector_ptr->m_offset;		///< Current max number of segments
+				num_seg = vector_ptr->m_segments.size() + vector_ptr->m_seg_offset;		///< Current max number of segments
 			} //another thread could have beaten us here, so go back and retry
 		}
 
@@ -126,7 +128,7 @@ namespace vllt {
 		/// <param name="vector_ptr">Shared pointer to the segment vector.</param>
 		/// <returns></returns>
 		inline auto allocate(table_index_t slot, std::shared_ptr<seg_vector_t>& vector_ptr) {
-			auto seg_idx = (slot >> L) - vector_ptr->m_offset;				///< Index of segment we need
+			auto seg_idx = (slot >> L) - vector_ptr->m_seg_offset;				///< Index of segment we need
 			auto seg_ptr = vector_ptr->m_segments[seg_idx].load();			///< Does the segment exist yet? If yes, increases use count.
 			if (!seg_ptr) {													///< If not, create one
 				auto new_seg_ptr = std::make_shared<segment_t>();			///< Create a new segment
@@ -182,6 +184,7 @@ namespace vllt {
 		using typename VlltTable<DATA, N0, ROW, table_index_t>::segment_t;
 		using typename VlltTable<DATA, N0, ROW, table_index_t>::segment_ptr_t;
 		using typename VlltTable<DATA, N0, ROW, table_index_t>::seg_vector_t;
+		using typename VlltTable<DATA, N0, ROW, table_index_t>::segment_idx_t;
 
 		VlltStack(size_t r = 1 << 16, std::pmr::memory_resource* mr = std::pmr::new_delete_resource()) noexcept;
 		~VlltStack() noexcept;
@@ -313,7 +316,7 @@ namespace vllt {
 
 		//make sure there is enough space in the segment VECTOR - if not then change the old vector to a larger vector
 		auto vector_ptr{ m_seg_vector.load() };	///< Shared pointer to current segment ptr vector, can be nullptr
-		insert(size.m_next_slot, vector_ptr, 0, size.m_size >> L, std::forward<Cs>(data)...); ///< Make sure there are enough slots for segments
+		insert(size.m_next_slot, vector_ptr, segment_idx_t{ 0 }, segment_idx_t{ size.m_size >> L }, std::forward<Cs>(data)...); ///< Make sure there are enough slots for segments
 
 		slot_size_t new_size = m_size_cnt.load();	///< Increase size to validate the new row
 		while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ new_size.m_next_slot, table_index_t{ new_size.m_size + 1} }));
@@ -452,9 +455,10 @@ namespace vllt {
 		using VlltTable<DATA, N0, ROW, table_index_t>::insert;
 
 		using tuple_opt_t = std::optional< vtll::to_tuple< vtll::remove_atomic<DATA> > >;
-		using segment_t		= VlltTable<DATA, N0, ROW, table_index_t>::segment_t;
-		using segment_ptr_t = VlltTable<DATA, N0, ROW, table_index_t>::segment_ptr_t;
-		using seg_vector_t	= VlltTable<DATA, N0, ROW, table_index_t>::seg_vector_t;
+		using typename VlltTable<DATA, N0, ROW, table_index_t>::segment_t;
+		using typename VlltTable<DATA, N0, ROW, table_index_t>::segment_ptr_t;
+		using typename VlltTable<DATA, N0, ROW, table_index_t>::seg_vector_t;
+		using typename VlltTable<DATA, N0, ROW, table_index_t>::segment_idx_t;
 
 		VlltFIFOQueue() {};
 
@@ -486,11 +490,12 @@ namespace vllt {
 		while (!m_next_slot.compare_exchange_weak(next_slot, table_index_t{ next_slot + 1 }));///< Slot number to put the new data into	
 
 		auto vector_ptr{ m_seg_vector.load() };				///< Shared pointer to current segment ptr vector, can be nullptr
-
-		insert(	next_slot, vector_ptr
-				, vector_ptr ? (m_first.load() >> L) - vector_ptr->m_offset : 0
-				, vector_ptr ? (m_last.load()  >> L) - vector_ptr->m_offset : 0
-				, std::forward<Cs>(data)...);
+		vector_ptr ? 
+			insert(	next_slot, vector_ptr
+				, segment_idx_t{ (m_first.load() >> L) } - vector_ptr->m_seg_offset
+				, segment_idx_t{ (m_last.load() >> L) } - vector_ptr->m_seg_offset
+				, std::forward<Cs>(data)...) :
+			insert(next_slot, vector_ptr, segment_idx_t{ 0 }, segment_idx_t{ 0 }, std::forward<Cs>(data)...);
 
 		auto new_size = next_slot;
 		while (!m_last.compare_exchange_weak(new_size, next_slot));	///< Increase size to validate the new row
