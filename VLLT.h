@@ -42,7 +42,6 @@ namespace vllt {
 			segment_idx_t m_seg_offset = 0;								///<Segment offset for FIFO queue (offsets segments NOT rows)
 		};
 
-
 	public:
 		VlltTable(size_t r = 1 << 16, std::pmr::memory_resource* mr = std::pmr::new_delete_resource()) noexcept 
 			: m_mr{ mr }, m_allocator{ mr }, m_seg_vector{ nullptr } {};
