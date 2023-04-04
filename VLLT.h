@@ -21,7 +21,7 @@ namespace vllt {
 	//
 	template<typename DATA, size_t N0 = 1 << 10, bool ROW = true, typename table_index_t = uint64_t>
 	class VlltTable {
-	public:
+	protected:
 		static_assert(std::is_default_constructible_v<DATA>, "Your components are not default constructible!");
 
 		static const size_t N = vtll::smallest_pow2_leq_value< N0 >::value;									///< Force N to be power of 2
@@ -38,9 +38,10 @@ namespace vllt {
 		using segment_ptr_t = std::shared_ptr<segment_t>;				///<Shared pointer to a segment
 		struct seg_vector_t {
 			std::pmr::vector<std::atomic<segment_ptr_t>> m_segments;	///<Vector of atomic shared pointers to the segments
-			size_t m_offset = 0;										///<Segment offset for FIFO queue
+			size_t m_offset = 0;										///<Segment offset for FIFO queue (offsets segments NOT rows)
 		};
 
+	public:
 		VlltTable(size_t r = 1 << 16, std::pmr::memory_resource* mr = std::pmr::new_delete_resource()) noexcept 
 			: m_mr{ mr }, m_allocator{ mr }, m_seg_vector{ nullptr } {};
 		~VlltTable() noexcept {};
@@ -65,17 +66,41 @@ namespace vllt {
 		/// If not allocate a new vector to hold the segements, and allocate new segments.
 		/// </summary>
 		/// <param name="slot">Slot number in the table.</param>
-		/// <param name="vector_ptr">Shared pointer to the vector.</param>
+		/// <param name="vector_ptr">Shared pointer to the segment vector.</param>
 		/// <param name="first_seg">Index of first segment that currently holds information.</param>
 		/// <param name="last_seg">Index of the last segment that currently holds informaton.</param>
 		/// <param name="data">The data for the new row.</param>
 		template<typename... Cs>
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
 		void insert(table_index_t slot, std::shared_ptr<seg_vector_t>& vector_ptr, size_t first_seg, size_t last_seg, Cs&&... data ) {
+			resize(slot, vector_ptr, first_seg, last_seg); //if need be, grow the vector of segments
+			allocate(slot, vector_ptr); //If need be, allocate a new segment and store it in the vector
+
+			//copy of move the data to the new slot, using a recursive templated lambda
+			auto f = [&]<size_t I, typename T, typename... Ts>(auto && fun, T && dat, Ts&&... dats) {
+				if constexpr (vtll::is_atomic<T>::value) component_ptr<I>(slot)->store(dat);	//copy value for atomic
+				else *component_ptr<I>(slot) = std::forward<T>(dat);							//move or copy
+				if constexpr (sizeof...(dats) > 0) { fun.template operator() < I + 1 > (fun, std::forward<Ts>(dats)...); } //recurse
+			};
+			f.template operator() < 0 > (f, std::forward<Cs>(data)...);
+		}
+
+	protected:
+		/// <summary>
+		/// If the vector of segments is too small, allocate a larger one and copy the previous segment pointers into it.
+		/// Then make one CAS attempt. If the attempt succeeds, then remember the new segment vector.
+		/// If the CAS fails because another thread beat us, then CAS will copy the new pointer so we can use it.
+		/// </summary>
+		/// <param name="slot">Slot number in the table.</param>
+		/// <param name="vector_ptr">Shared pointer to the segment vector.</param>
+		/// <param name="first_seg">Index of first segment that currently holds information.</param>
+		/// <param name="last_seg">Index of the last segment that currently holds informaton.</param>
+		/// <returns></returns>
+		inline auto resize(table_index_t slot, std::shared_ptr<seg_vector_t>& vector_ptr, size_t first_seg, size_t last_seg) {
 			size_t num_seg = vector_ptr ? vector_ptr->m_segments.size() + vector_ptr->m_offset : 0;	///< Current max number of segments
 			while (slot >= N * num_seg) {		///< Do we have enough?		
 				auto new_vector_ptr = std::make_shared<seg_vector_t>( //vector has always as many slots as its capacity is -> size==capacity
-					seg_vector_t{ std::pmr::vector<std::atomic<segment_ptr_t>>{vector_ptr ? vector_ptr->m_segments.size()*2 : 16, m_mr }, 0 } //new segment vector, at least 16 slots
+					seg_vector_t{ std::pmr::vector<std::atomic<segment_ptr_t>>{vector_ptr ? vector_ptr->m_segments.size() * 2 : 16, m_mr }, 0 } //new segment vector, at least 16 slots
 				);
 
 				for (size_t i = 0; num_seg > 0 && i < last_seg - first_seg + 1; ++i) {
@@ -88,25 +113,25 @@ namespace vllt {
 				} //Note: if we were beaten by other thread, then compare_exchange_strong itself puts the new value into vector_ptr
 				num_seg = vector_ptr->m_segments.size() + vector_ptr->m_offset;		///< Current max number of segments
 			} //another thread could have beaten us here, so go back and retry
+		}
 
-			//If need be, allocate a new segment and store it in the vector
+		/// <summary>
+		/// If there are not enough segments allocated, then allocate a new segment and try to CAS it.
+		/// If this fails because we were beaten, then the newly allocated segment will be dealloacted atuomatically
+		/// by the smart pointer.
+		/// </summary>
+		/// <param name="slot">Slot number in the table.</param>
+		/// <param name="vector_ptr">Shared pointer to the segment vector.</param>
+		/// <returns></returns>
+		inline auto allocate(table_index_t slot, std::shared_ptr<seg_vector_t>& vector_ptr) {
 			auto seg_num = (slot >> L) - vector_ptr->m_offset;				///< Index of segment we need
 			auto seg_ptr = vector_ptr->m_segments[seg_num].load();			///< Does the segment exist yet? If yes, increases use count.
 			if (!seg_ptr) {													///< If not, create one
 				auto new_seg_ptr = std::make_shared<segment_t>();			///< Create a new segment
 				vector_ptr->m_segments[seg_num].compare_exchange_strong(seg_ptr, new_seg_ptr);	///< Try to put it into seg vector, someone might beat us here
 			}
-
-			//copy of move the data to the new slot, using a recursive templated lambda
-			auto f = [&]<size_t I, typename T, typename... Ts>(auto && fun, T && dat, Ts&&... dats) {
-				if constexpr (vtll::is_atomic<T>::value) component_ptr<I>(slot)->store(dat);	//copy value for atomic
-				else *component_ptr<I>(slot) = std::forward<T>(dat);							//move or copy
-				if constexpr (sizeof...(dats) > 0) { fun.template operator() < I + 1 > (fun, std::forward<Ts>(dats)...); } //recurse
-			};
-			f.template operator() < 0 > (f, std::forward<Cs>(data)...);
 		}
 
-	protected:
 		std::pmr::memory_resource*						m_mr;					///< Memory resource for allocating segments
 		std::pmr::polymorphic_allocator<seg_vector_t>	m_allocator;			///< use this allocator
 		std::atomic<std::shared_ptr<seg_vector_t>>		m_seg_vector;			///< Atomic shared ptr to the vector of segments
