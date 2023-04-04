@@ -100,7 +100,9 @@ namespace vllt {
 			size_t num_seg = vector_ptr ? vector_ptr->m_segments.size() + vector_ptr->m_offset : 0;	///< Current max number of segments
 			while (slot >= N * num_seg) {		///< Do we have enough?		
 				auto new_vector_ptr = std::make_shared<seg_vector_t>( //vector has always as many slots as its capacity is -> size==capacity
-					seg_vector_t{ std::pmr::vector<std::atomic<segment_ptr_t>>{vector_ptr ? vector_ptr->m_segments.size() * 2 : 16, m_mr }, 0 } //new segment vector, at least 16 slots
+					vector_ptr ? 
+						  seg_vector_t{ std::pmr::vector<std::atomic<segment_ptr_t>>{vector_ptr->m_segments.size() * 2, m_mr}, vector_ptr->m_offset } //increase existing one
+						: seg_vector_t{ std::pmr::vector<std::atomic<segment_ptr_t>>{16, m_mr}, 0 } //create a new one with 16 segment slots
 				);
 
 				for (size_t i = 0; num_seg > 0 && i < last_seg - first_seg + 1; ++i) {
@@ -124,11 +126,11 @@ namespace vllt {
 		/// <param name="vector_ptr">Shared pointer to the segment vector.</param>
 		/// <returns></returns>
 		inline auto allocate(table_index_t slot, std::shared_ptr<seg_vector_t>& vector_ptr) {
-			auto seg_num = (slot >> L) - vector_ptr->m_offset;				///< Index of segment we need
-			auto seg_ptr = vector_ptr->m_segments[seg_num].load();			///< Does the segment exist yet? If yes, increases use count.
+			auto seg_idx = (slot >> L) - vector_ptr->m_offset;				///< Index of segment we need
+			auto seg_ptr = vector_ptr->m_segments[seg_idx].load();			///< Does the segment exist yet? If yes, increases use count.
 			if (!seg_ptr) {													///< If not, create one
 				auto new_seg_ptr = std::make_shared<segment_t>();			///< Create a new segment
-				vector_ptr->m_segments[seg_num].compare_exchange_strong(seg_ptr, new_seg_ptr);	///< Try to put it into seg vector, someone might beat us here
+				vector_ptr->m_segments[seg_idx].compare_exchange_strong(seg_ptr, new_seg_ptr);	///< Try to put it into seg vector, someone might beat us here
 			}
 		}
 
