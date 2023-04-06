@@ -99,11 +99,17 @@ namespace vllt {
 		/// <returns></returns>
 		inline auto resize(table_index_t slot, std::shared_ptr<seg_vector_t>& vector_ptr, segment_idx_t first_seg, segment_idx_t last_seg) {
 			size_t num_seg = vector_ptr ? vector_ptr->m_segments.size() + vector_ptr->m_seg_offset : 0;	///< Current max number of segments
-			while (slot >= N * num_seg) {		///< Do we have enough?		
+			while (slot >= N * num_seg) {		///< Do we have enough?					
+				size_t new_size = SLOTS;
+				segment_idx_t offset{ 0 };
+				if (vector_ptr) {
+					offset = vector_ptr->m_seg_offset;
+					size_t num_segments = vector_ptr->m_segments.size();
+					new_size = first_seg < (num_segments >> 1) ? num_segments * 2 : num_segments;
+				}
+				
 				auto new_vector_ptr = std::make_shared<seg_vector_t>( //vector has always as many slots as its capacity is -> size==capacity
-					vector_ptr ? 
-						  seg_vector_t{ std::pmr::vector<std::atomic<segment_ptr_t>>{vector_ptr->m_segments.size() * 2, m_mr}, vector_ptr->m_seg_offset } //increase existing one
-						: seg_vector_t{ std::pmr::vector<std::atomic<segment_ptr_t>>{SLOTS, m_mr}, segment_idx_t{ 0 } } //create a new one with 16 segment slots
+					seg_vector_t{ std::pmr::vector<std::atomic<segment_ptr_t>>{new_size, m_mr}, offset } //increase existing one
 				);
 
 				for (size_t i = 0; num_seg > 0 && i < last_seg - first_seg + 1; ++i) {

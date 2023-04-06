@@ -49,28 +49,43 @@ int main() {
 	vllt::VlltFIFOQueue<types, 1 << 10,true,16,size_t> queue;
 	using idx_queue_t = decltype(queue)::table_index_t;
 
-	for (size_t i = 0; i < MAX; ++i) {
-		queue.push_back(i, 2.0 * i, 3.0f * i, true, 'A');
-	}
+	auto push = [&](size_t start, size_t max, size_t f = 1 ) {
+		for (size_t i = start; i < max; ++i) {
+			queue.push_back(f*i, f*2.0 * i, f*3.0f * i, true, 'A');
+		}
+	};
 
-	auto v = queue.pop_front();
-	size_t j = 0;
-	while (v.has_value()) {
-		assert(std::get<0>(v.value()) == j);
-		j++;
-		v = queue.pop_front();
-	}
+	auto pull = [&](size_t start = 0, int64_t n = -1ll, size_t f = 1) {
+		if (n < 0) {
+			auto v = queue.pop_front();
+			size_t j = start;
+			while (v.has_value()) {
+				assert(std::get<0>(v.value()) == f*j);
+				j++;
+				v = queue.pop_front();
+			}
+		} 
+		else {
+			for (size_t j = start; j < (size_t)n; ++j) {
+				auto v = queue.pop_front();
+				assert(std::get<0>(v.value()) == f*j);
+			}
+		}
+	};
 
-	for (size_t i = 0; i < MAX; ++i) {
-		queue.push_back(10*i, 20.0 * i, 30.0f * i, true, 'A');
-	}
+	push(0, MAX);
+	pull();
 
-	for (size_t j = 0; j < MAX / 2; ++j) {
-		auto v = queue.pop_front();
-		assert(std::get<0>(v.value()) == 10*j);
-	}
+	push(0, MAX, 10);
+	pull(0, MAX / 2, 10);
 
 	queue.clear();
+	pull();
 	assert(queue.size() == 0);
+
+	push(MAX/2, MAX, 100);
+	pull(MAX/2, MAX, 100);
+
+
 	return 0;
 }
