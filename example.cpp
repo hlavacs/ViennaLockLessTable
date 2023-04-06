@@ -46,10 +46,10 @@ int main() {
 	//----------------------------------------------------------------------------
 
 
-	vllt::VlltFIFOQueue<types,10,true,16,size_t> queue;
+	vllt::VlltFIFOQueue<types, 1 << 10,true,16,size_t> queue;
 	using idx_queue_t = decltype(queue)::table_index_t;
 
-	for (size_t i = 0; i < 5; ++i) {
+	for (size_t i = 0; i < MAX; ++i) {
 		queue.push_back(i, 2.0 * i, 3.0f * i, true, 'A');
 	}
 
@@ -62,8 +62,12 @@ int main() {
 		v = queue.pop_front();
 	}
 
-	for (size_t i = 0; i < 5; ++i) {
-		queue.push_back(i, 2.0 * i, 3.0f * i, true, 'A');
+	for (size_t i = 0; i < MAX; ++i) {
+		if (i == 262144 - MAX) {
+			std::cout << "\n";
+		}
+
+		queue.push_back(10*i, 20.0 * i, 30.0f * i, true, 'A');
 	}
 	queue.clear();
 	assert(queue.size() == 0);

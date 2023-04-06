@@ -57,7 +57,7 @@ namespace vllt {
 		template<size_t I, typename C = vtll::Nth_type<DATA, I>>
 		inline auto component_ptr(table_index_t n) noexcept -> C* {		///< \returns a pointer to a component
 			auto vector_ptr{ m_seg_vector.load() };						///< Access the segment vector
-			auto segment_ptr = (vector_ptr->m_segments[n >> L]).load();	///< Access the segment holding the slot
+			auto segment_ptr = (vector_ptr->m_segments[(n >> L) - vector_ptr->m_seg_offset]).load();	///< Access the segment holding the slot
 			if constexpr (ROW) { return &std::get<I>((*segment_ptr)[n & BIT_MASK]); }
 			else { return &std::get<I>(*segment_ptr)[n & BIT_MASK]; }
 		}
