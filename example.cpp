@@ -56,19 +56,20 @@ int main() {
 	auto v = queue.pop_front();
 	size_t j = 0;
 	while (v.has_value()) {
-		auto val = std::get<0>(v.value());
-		assert( val == j);
+		assert(std::get<0>(v.value()) == j);
 		j++;
 		v = queue.pop_front();
 	}
 
 	for (size_t i = 0; i < MAX; ++i) {
-		if (i == 262144 - MAX) {
-			std::cout << "\n";
-		}
-
 		queue.push_back(10*i, 20.0 * i, 30.0f * i, true, 'A');
 	}
+
+	for (size_t j = 0; j < MAX / 2; ++j) {
+		auto v = queue.pop_front();
+		assert(std::get<0>(v.value()) == 10*j);
+	}
+
 	queue.clear();
 	assert(queue.size() == 0);
 	return 0;
