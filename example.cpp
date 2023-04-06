@@ -21,12 +21,12 @@ int main() {
 
 	using table_index_t = decltype(stack)::table_index_t;
 
-	const size_t MAX = 1024*16;
+	const size_t MAX = 1024*16*10;
 	for (table_index_t i = table_index_t{ 0 }; i < MAX; ++i) {
 		stack.push_back(static_cast<size_t>(i.value()), 2.0 * i, 3.0f * i, true, 'A');
 	}
 
-	stack.push_back(MAX, 2.0 * MAX, 3.0f * MAX, true, 'A');
+	//stack.push_back(MAX, 2.0 * MAX, 3.0f * MAX, true, 'A');
 
 
 	for (table_index_t i = table_index_t{ 0 }; i < stack.size(); ++i) {
