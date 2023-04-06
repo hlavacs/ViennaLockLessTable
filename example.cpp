@@ -85,7 +85,7 @@ int main() {
 
 	push(MAX/2, MAX, 100);
 	pull(MAX/2, MAX, 100);
-
+	assert(queue.size() == 0);
 
 	return 0;
 }
