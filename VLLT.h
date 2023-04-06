@@ -292,8 +292,7 @@ namespace vllt {
 	///
 	template<typename DATA, size_t N0, bool ROW, size_t SLOTS>
 	inline auto VlltStack<DATA, N0, ROW, SLOTS>::get_tuple(table_index_t n) noexcept -> tuple_ref_t {
-		auto f = [&]<size_t... Is>(std::index_sequence<Is...>) { return std::tie(get<Is>(n)...); };
-		return f(std::make_index_sequence<vtll::size<DATA>::value>{});
+		return [&]<size_t... Is>(std::index_sequence<Is...>) { return std::tie(get<Is>(n)...); }(std::make_index_sequence<vtll::size<DATA>::value>{});
 	};
 
 	/////

@@ -16,6 +16,8 @@ int main() {
 		stack.push_back(static_cast<size_t>(i.value()), 2.0 * i, 3.0f * i, true, 'A');
 	}
 
+	auto tup = stack.get_tuple(idx_stack_t{0});
+
 	for (idx_stack_t i = idx_stack_t{ 0 }; i < stack.size(); ++i) {
 		auto v = stack.get<size_t>(i);
 		assert(v == i);
