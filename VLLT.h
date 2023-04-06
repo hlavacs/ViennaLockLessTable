@@ -19,7 +19,7 @@ namespace vllt {
 	// \brief VlltTable is the base class for some classes, enabling management of tables that can be
 	// appended in parallel.
 	//
-	template<typename DATA, size_t N0 = 1 << 10, bool ROW = true, typename table_index_t = uint64_t>
+	template<typename DATA, size_t N0 = 1 << 10, bool ROW = true, typename table_index_t = size_t>
 	class VlltTable {
 	protected:
 		static_assert(std::is_default_constructible_v<DATA>, "Your components are not default constructible!");
