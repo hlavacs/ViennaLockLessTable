@@ -405,17 +405,21 @@ namespace vllt {
 
 	/////
 	// \brief Deallocate segments that are currently not used.
-	// No parallel processing allowed when calling this function.
+	// Is lockless and threadsafe.
 	///
 	template<typename DATA, size_t N0, bool ROW, size_t SLOTS>
 	inline auto VlltStack<DATA, N0, ROW, SLOTS>::compress() noexcept -> void {
-		auto vector_ptr{ VlltTable<DATA, N0, ROW, table_index_t>::m_seg_vector.load() };
+		auto vector_ptr{ m_seg_vector.load() };
 		if (!vector_ptr) return;
-		for (size_t i = vector_ptr->size() - 1; i > (max_size() >> L); --i) {
-			auto seg_ptr = (*vector_ptr)[i].load();
-			if (seg_ptr && seg_ptr.use_count() == 2) {
-				std::shared_ptr<segment_t> new_seg_ptr;
-				(*vector_ptr)[i].compare_exchange_strong(seg_ptr, new_seg_ptr);	///< Try to put it into seg vector, someone might beat us here
+		for (size_t i = vector_ptr->m_segments.size() - 1; i > (max_size() >> L); --i) {
+			auto seg_ptr = vector_ptr->m_segments[i].load();
+			if (seg_ptr) {
+				if (seg_ptr.use_count() == 2) {
+					std::shared_ptr<segment_t> new_seg_ptr;
+					if (!vector_ptr->m_segments[i].compare_exchange_strong(seg_ptr, new_seg_ptr))	///< Try to put it into seg vector, someone might beat us here
+						return;
+				}
+				else return;
 			}
 		}
 	}

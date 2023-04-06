@@ -16,7 +16,11 @@ int main() {
 		stack.push_back(static_cast<size_t>(i.value()), 2.0 * i, 3.0f * i, true, 'A');
 	}
 
+	stack.swap(idx_stack_t{ 0 }, idx_stack_t{ 1 });
 	auto tup = stack.get_tuple(idx_stack_t{0});
+	assert(std::get<0>(tup) == 1);
+	stack.swap(idx_stack_t{ 0 }, idx_stack_t{ 1 });
+	assert(std::get<0>(tup) == 0);
 
 	for (idx_stack_t i = idx_stack_t{ 0 }; i < stack.size(); ++i) {
 		auto v = stack.get<size_t>(i);
@@ -30,17 +34,33 @@ int main() {
 		data = stack.pop_back();
 	}
 
+	stack.compress();
+
+	for (idx_stack_t i = idx_stack_t{ 0 }; i < MAX; ++i) {
+		stack.push_back(static_cast<size_t>(i.value()), 2.0 * i, 3.0f * i, true, 'A');
+	}
+
+	stack.clear();
+	stack.compress();
+
 	//----------------------------------------------------------------------------
 
 
 	vllt::VlltFIFOQueue<types> queue;
+	using idx_queue_t = decltype(queue)::table_index_t;
 
-	queue.push_back(0ull, 0.3, 1.4f, true, 'C');
-	queue.push_back(1ull, 0.4, 2.4f, true, 'D');
+	for (size_t i = 0; i < MAX; ++i) {
+		queue.push_back(i, 2.0 * i, 3.0f * i, true, 'A');
+	}
 
-	auto fdata = queue.pop_front();
-	fdata = queue.pop_front();
-	fdata = queue.pop_front();
-	bool hv1 = fdata.has_value();
+	auto v = queue.pop_front();
+	size_t j = 0;
+	while (v.has_value()) {
+		auto val = std::get<0>(v.value());
+		assert( val == j);
+		j++;
+		v = queue.pop_front();
+	}
+
 	return 0;
 }
