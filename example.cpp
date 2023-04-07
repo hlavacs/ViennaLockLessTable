@@ -105,9 +105,9 @@ int main() {
 		size_t in = 10000, out = 5000;
 		{
 			std::cout << 1 << " ";
-			std::jthread thread1([&]() { push(0, in, 1); });
-			std::jthread thread2([&]() { push(0, in, 2); });
-			std::jthread thread3([&]() { push(0, in, 3); });
+			//std::jthread thread1([&]() { push(0, in, 1); });
+			//std::jthread thread2([&]() { push(0, in, 2); });
+			//std::jthread thread3([&]() { push(0, in, 3); });
 		}
 
 		{
@@ -119,8 +119,7 @@ int main() {
 			std::jthread thread4([&]() { push(0, in, 1); });
 			std::jthread thread5([&]() { push(0, in, 2); });
 			std::jthread thread6([&]() { push(0, in, 3); });
-		}
-		{
+
 			std::jthread t1([&]() { pull2(out); });
 			std::jthread t2([&]() { pull2(out); });
 			std::jthread t3([&]() { pull2(out); });
@@ -131,7 +130,7 @@ int main() {
 			std::jthread t8([&]() { pull2(out); });
 			std::jthread t9([&]() { pull2(out); });
 		}
-		//assert(queue.size() == 9 * in - 9 * out);
+		//assert(queue.size() == 1 * in - 1 * out);
 
 		std::cout << 3 << " ";
 		queue.clear();
