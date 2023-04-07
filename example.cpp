@@ -1,6 +1,7 @@
 
 #include <vector>
 #include <optional>
+#include <thread>
 #include "VLLT.h"
 
 
@@ -46,7 +47,7 @@ int main() {
 	//----------------------------------------------------------------------------
 
 
-	vllt::VlltFIFOQueue<types, 1 << 10,true,16,size_t> queue;
+	vllt::VlltFIFOQueue<types, 1 << 6,true,16,size_t> queue;
 	using idx_queue_t = decltype(queue)::table_index_t;
 
 	auto push = [&](size_t start, size_t max, size_t f = 1 ) {
@@ -86,6 +87,61 @@ int main() {
 	push(MAX/2, MAX, 100);
 	pull(MAX/2, MAX, 100);
 	assert(queue.size() == 0);
+	queue.clear();
+
+	auto pull2 = [&](size_t n) {
+		auto v = queue.pop_front();
+		while (!v.has_value()) {
+			v = queue.pop_front();
+		}
+		for (size_t i = 1; i < n; ++i) {
+			do {
+				v = queue.pop_front();
+			} while (!v.has_value());
+		}
+	};
+
+	auto par = [&]() {
+		size_t in = 10000, out = 5000;
+		{
+			std::cout << 1 << " ";
+			std::jthread thread1([&]() { push(0, in, 1); });
+			std::jthread thread2([&]() { push(0, in, 2); });
+			std::jthread thread3([&]() { push(0, in, 3); });
+		}
+
+		{
+			std::cout << 2 << " ";
+
+			std::jthread thread1([&]() { push(0, in, 1); });
+			std::jthread thread2([&]() { push(0, in, 2); });
+			std::jthread thread3([&]() { push(0, in, 3); });
+			std::jthread thread4([&]() { push(0, in, 1); });
+			std::jthread thread5([&]() { push(0, in, 2); });
+			std::jthread thread6([&]() { push(0, in, 3); });
+		}
+		{
+			std::jthread t1([&]() { pull2(out); });
+			std::jthread t2([&]() { pull2(out); });
+			std::jthread t3([&]() { pull2(out); });
+			std::jthread t4([&]() { pull2(out); });
+			std::jthread t5([&]() { pull2(out); });
+			std::jthread t6([&]() { pull2(out); });
+			std::jthread t7([&]() { pull2(out); });
+			std::jthread t8([&]() { pull2(out); });
+			std::jthread t9([&]() { pull2(out); });
+		}
+		//assert(queue.size() == 9 * in - 9 * out);
+
+		std::cout << 3 << " ";
+		queue.clear();
+		std::cout << 4 << "\n";
+	};
+
+	for (size_t i = 0; i < 500; ++i) {
+		std::cout << "Loop " << i << " ";
+		par();
+	}
 
 	return 0;
 }

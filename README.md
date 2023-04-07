@@ -8,14 +8,14 @@ The Vienna Lock Less Table (VLLT) defines C++20 containers that like std::vector
 * Components can be copyable, movable or be even atomics. In the latter case, only values can be copied, not the atomics themselves.
 * Lockless operations. VLLT does not use mutexes, only compare and swap (CAS).
 * VlltStack: lockless push and pop.
-* VlltFifoQueue: lockless push and pop.
+* VlltFIFOQueue: lockless push and pop.
 
 VLLT uses other projects:
 * Vienna Strong Type (VSTY), see https://github.com/hlavacs/ViennaStrongType.git
 * Vienna Type List Library (VTLL), see https://github.com/hlavacs/ViennaTypeListLibrary.
 The are included as Git submodules! So you must first init and udate them - see below!
 
-VLLT's base class VlltTable is meant as a building block to create more complex containers for multithreaded access. Examples are given by VlltStack and VlltFifoQueue.
+VLLT's base class VlltTable is meant as a building block to create more complex containers for multithreaded access. Examples are given by VlltStack and VlltFIFOQueue.
 
 
 ## Cloning VLLT
@@ -52,7 +52,7 @@ VlltTable offers a slim API only.
 * Get address of the I'th component of row n. This must be synchronized externally, e.g. for writing.
 * Insert a new row to the end of the table. This is synchronized internally, the table can grow as long as there is memory.
 
-VlltTable casn be used as a basis for deriving more complex behavior. The main functionality of VLLT is provided by the classes VlltStack and VlltFifoQueue.
+VlltTable can be used as a basis for deriving more complex behavior. The main functionality of VLLT is provided by the classes VlltStack and VlltFIFOQueue.
 
 VlltStack is a growable stack that offers the following API:
 * push_back: add a new row to the stack. Internally synchronized.
@@ -73,13 +73,43 @@ An example for setting up a stack is
     #include "VLLT.h"
     using types = vtll::tl<size_t, double, float, std::atomic<bool>, char>;
     vllt::VlltStack<types> stack;
-    using idx_stack_t = decltype(stack)::table_index_t;
+    using idx_stack_t = decltype(stack)::table_index_t; //default is size_t
+
+    stack.push_back(static_cast<size_t>(1ull, 2.0, 3.0f, true, 'A');
+    stack.push_back(static_cast<size_t>(2ull, 4.0, 6.0f, true, 'A');
+    stack.push_back(static_cast<size_t>(3ull, 6.0, 9.0f, true, 'A');
+
+    stack.swap(idx_stack_t{ 0 }, idx_stack_t{ 1 }); //swap first two rows
+
+    auto tup = stack.get_tuple(idx_stack_t{0}); //references to the components
+    assert(std::get<0>(tup) == 1);  //first component is size_t
+    stack.swap(idx_stack_t{ 0 }, idx_stack_t{ 1 }); //swap back
+    assert(std::get<0>(tup) == 0);
+
+    auto data = stack.pop_back(); //std::optional tuple holding all the values
+    if(data.has_value()) {
+      assert( std::get<size_t>( data.value() ) == 3); //select by type possible here
+    }
 ```
 
 This way you can always get access to the index type used in the stack, which by default is size_t, but might be any strong type.
 
-VlltFifoQueue is a fifo queue that can grow as demand dictates. It offers the following API:
-* push_back:
-* pop_front:
-* size:
-* clear:
+VlltFIFOQueue is a fifo queue that can grow as demand dictates. It offers the following API:
+* push_back: Put a new row to the end of the queue.
+* pop_front: Get the first element from the queue.
+* size: Get nuber of elements in the queue.
+* clear: Remove all elements from the queue.
+
+```c
+  vllt::VlltFIFOQueue<types, 1 << 10,true,16,size_t> queue;
+  using idx_queue_t = decltype(queue)::table_index_t;
+
+  queue.push_back(1, 2.0, 3.0f, true, 'A'); //first
+  queue.push_back(2, 4.0, 6.0f, true, 'A'); //second
+  queue.push_back(3, 6.0, 9.0f, true, 'A'); //third
+
+  auto v = queue.pop_front(); //get first element
+  if(v.has_value()) {
+    assert(std::get<0>(v.value()) == 1);
+  }
+```

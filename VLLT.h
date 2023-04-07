@@ -57,7 +57,11 @@ namespace vllt {
 		template<size_t I, typename C = vtll::Nth_type<DATA, I>>
 		inline auto component_ptr(table_index_t n) noexcept -> C* {		///< \returns a pointer to a component
 			auto vector_ptr{ m_seg_vector.load() };						///< Access the segment vector
-			auto segment_ptr = (vector_ptr->m_segments[(n >> L) - vector_ptr->m_seg_offset]).load();	///< Access the segment holding the slot
+
+			size_t idx = (n >> L) - vector_ptr->m_seg_offset;
+			assert(vector_ptr->m_segments[idx].load());
+
+			auto segment_ptr = (vector_ptr->m_segments[idx]).load();	///< Access the segment holding the slot
 			if constexpr (ROW) { return &std::get<I>((*segment_ptr)[n & BIT_MASK]); }
 			else { return &std::get<I>(*segment_ptr)[n & BIT_MASK]; }
 		}
@@ -99,6 +103,7 @@ namespace vllt {
 		/// <returns></returns>
 		inline auto resize(table_index_t slot, std::shared_ptr<seg_vector_t>& vector_ptr, segment_idx_t first_seg, segment_idx_t last_seg) {
 			size_t num_seg = vector_ptr ? vector_ptr->m_segments.size() + vector_ptr->m_seg_offset : 0;	///< Current max number of segments
+						
 			while (slot >= N * num_seg) {		///< Do we have enough?					
 				size_t new_size = SLOTS;
 				segment_idx_t offset{ 0 };
@@ -108,9 +113,11 @@ namespace vllt {
 					new_size = first_seg < (num_segments >> 1) ? num_segments * 2 : num_segments;
 				}
 				
+				//HERE IS A BUG TODO
 				auto new_vector_ptr = std::make_shared<seg_vector_t>( //vector has always as many slots as its capacity is -> size==capacity
 					seg_vector_t{ std::pmr::vector<std::atomic<segment_ptr_t>>{new_size, m_mr}, offset } //increase existing one
 				);
+				assert(new_vector_ptr);
 
 				for (size_t i = 0; num_seg > 0 && i < last_seg - first_seg + 1; ++i) {
 					new_vector_ptr->m_segments[i].store(vector_ptr->m_segments[first_seg + i].load()); ///< Copy segment pointers
@@ -515,25 +522,26 @@ namespace vllt {
 		vtll::to_tuple<vtll::remove_atomic<DATA>> ret{};
 
 		auto next_slot = m_next.load();
-		if (next_slot > m_last.load()) return std::nullopt;
-		while (!m_next.compare_exchange_weak(next_slot, table_index_t{ next_slot + 1 }));///< Slot number to put the new data into	
+		do {
+			if (next_slot > m_last.load()) return std::nullopt;
+		} while (!m_next.compare_exchange_weak(next_slot, table_index_t{ next_slot + 1 }));  ///< Slot number to put the new data into	
 
 		vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 			[&](auto i) {
 				using type = vtll::Nth_type<DATA, i>;
 				if		constexpr (std::is_move_assignable_v<type>) { std::get<i>(ret) = std::move(*component_ptr<i>(next_slot)); } //move
 				else if constexpr (std::is_copy_assignable_v<type>) { std::get<i>(ret) = *component_ptr<i>(next_slot); } 			//copy
-				else if constexpr (vtll::is_atomic<type>::value)    { std::get<i>(ret) = component_ptr<i>(next_slot)->load(); } 	//atomic
+				else if constexpr (vtll::is_atomic<type>::value) { std::get<i>(ret) = component_ptr<i>(next_slot)->load(); } 	//atomic
 
 				if constexpr (std::is_destructible_v<type> && !std::is_trivially_destructible_v<type>) { component_ptr<i>(next_slot)->~type(); }	///< Call destructor
 			}
 		);
 
-		auto committed = (next_slot > 0 ? table_index_t{ next_slot - 1 } : table_index_t{ 0 });
-		while (!m_consumed.compare_exchange_weak(committed, next_slot)) { 
-			committed = (next_slot > 0 ? table_index_t{ next_slot - 1ull } : table_index_t{ 0 });
-		}
-		
+		table_index_t consumed;
+		do {
+			consumed = (next_slot > 0 ? table_index_t{ next_slot - 1ull } : table_index_t{ 0 });
+		} while (!m_consumed.compare_exchange_weak(consumed, next_slot));
+
 		return ret;		//RVO?
 	}
 
