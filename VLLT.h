@@ -135,7 +135,12 @@ namespace vllt {
 				assert(new_vector_ptr);
 
 				for (size_t i = 0; num_seg > 0 && i < last_seg - first_seg + 1; ++i) {
-					new_vector_ptr->m_segments[i].store(vector_ptr->m_segments[first_seg + i].load()); ///< Copy segment pointers
+					auto ptr = vector_ptr->m_segments[first_seg + i].load();
+					if (!ptr) {
+						vector_ptr->m_segments[first_seg + i].wait(nullptr);
+						ptr = vector_ptr->m_segments[first_seg + i].load();
+					}
+					new_vector_ptr->m_segments[i].store(ptr); ///< Copy segment pointers
 					assert(new_vector_ptr->m_segments[i].load());
 				};
 				new_vector_ptr->m_seg_offset += first_seg; //shift the used segments, account for spent segments
@@ -160,7 +165,9 @@ namespace vllt {
 			auto seg_ptr = vector_ptr->m_segments[seg_idx].load();			///< Does the segment exist yet? If yes, increases use count.
 			if (!seg_ptr) {													///< If not, create one
 				auto new_seg_ptr = std::make_shared<segment_t>();			///< Create a new segment
-				vector_ptr->m_segments[seg_idx].compare_exchange_strong(seg_ptr, new_seg_ptr);	///< Try to put it into seg vector, someone might beat us here
+				if (vector_ptr->m_segments[seg_idx].compare_exchange_strong(seg_ptr, new_seg_ptr)) {	///< Try to put it into seg vector, someone might beat us here
+					vector_ptr->m_segments[seg_idx].notify_all();
+				}
 			}
 			assert(vector_ptr->m_segments[seg_idx].load());
 		}
