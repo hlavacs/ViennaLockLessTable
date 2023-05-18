@@ -32,7 +32,7 @@ cd ViennaStrongType
 git pull origin main
 cd ..\ViennaLockLessTable
 git pull origin main
-
+ 
 
 ## Using VLLT
 
