@@ -22,17 +22,21 @@ VLLT's base class VlltTable is meant as a building block to create more complex 
 
 For cloning VLLT, do the following:
 
-git clone https://github.com/hlavacs/ViennaLockLessTable.git
-cd ViennaLockLessTable
-git submodule init
-git submodule update
+```
+  git clone https://github.com/hlavacs/ViennaLockLessTable.git
+  cd ViennaLockLessTable
+  git submodule init
+  git submodule update
+```
 
 For making sure that the submodules contain the latest version, cd into them and pull:
-cd ViennaStrongType
-git pull origin main
-cd ..\ViennaLockLessTable
-git pull origin main
- 
+
+```
+  cd ViennaStrongType
+  git pull origin main
+  cd ..\ViennaLockLessTable
+  git pull origin main
+```
 
 ## Using VLLT
 
