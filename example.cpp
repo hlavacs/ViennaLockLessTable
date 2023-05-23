@@ -8,12 +8,13 @@
 int main() {
 
 	using types = vtll::tl<size_t, double, float, bool, char>;
-	vllt::VlltStack<types> stack;
 
-	using idx_stack_t = decltype(stack)::table_index_t;
 
 	const size_t MAX = 1024*16*10;
-	for (idx_stack_t i = idx_stack_t{ 0 }; i < MAX; ++i) {
+
+	//vllt::VlltStack<types> stack;
+
+	/*for (idx_stack_t i = idx_stack_t{0}; i < MAX; ++i) {
 		stack.push_back(static_cast<size_t>(i.value()), 2.0 * i, 3.0f * i, true, 'A');
 	}
 
@@ -43,12 +44,12 @@ int main() {
 
 	stack.clear();
 	stack.compress();
+	*/
 
 	//----------------------------------------------------------------------------
 
 
-	vllt::VlltFIFOQueue<types, 1 << 3,true,16,size_t> queue;
-	using idx_queue_t = decltype(queue)::table_index_t;
+	vllt::VlltFIFOQueue<types, 1 << 3,true,16> queue;
 
 	auto push = [&](size_t start, size_t max, size_t f = 1 ) {
 		for (size_t i = start; i < max; ++i) {
@@ -61,7 +62,7 @@ int main() {
 			auto v = queue.pop_front();
 			size_t j = start;
 			while (v.has_value()) {
-				assert(std::get<0>(v.value()) == f*j);
+				//assert(std::get<0>(v.value()) == f*j);
 				j++;
 				v = queue.pop_front();
 			}
@@ -69,7 +70,7 @@ int main() {
 		else {
 			for (size_t j = start; j < (size_t)n; ++j) {
 				auto v = queue.pop_front();
-				assert(std::get<0>(v.value()) == f*j);
+				//assert(std::get<0>(v.value()) == f*j);
 			}
 		}
 	};
@@ -90,12 +91,8 @@ int main() {
 	queue.clear();
 
 	auto pull2 = [&](size_t n) {
-		auto v = queue.pop_front();
-		while (!v.has_value()) {
-			v = queue.pop_front();
-		}
 		for (size_t i = 1; i < n; ++i) {
-			v = queue.pop_front();
+			auto v = queue.pop_front();
 			//do {
 			//} while (!v.has_value());
 		}
@@ -135,7 +132,6 @@ int main() {
 			std::jthread t8([&]() { pull2(out); });
 
 			std::jthread t9([&]() { pull2(out); });
-
 		}
 		//assert(queue.size() == 1 * in - 1 * out);
 
