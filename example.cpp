@@ -62,7 +62,7 @@ int main() {
 			auto v = queue.pop_front();
 			size_t j = start;
 			while (v.has_value()) {
-				//assert(std::get<0>(v.value()) == f*j);
+				assert(std::get<0>(v.value()) == f*j);
 				j++;
 				v = queue.pop_front();
 			}
@@ -70,7 +70,7 @@ int main() {
 		else {
 			for (size_t j = start; j < (size_t)n; ++j) {
 				auto v = queue.pop_front();
-				//assert(std::get<0>(v.value()) == f*j);
+				assert(std::get<0>(v.value()) == f*j);
 			}
 		}
 	};
@@ -89,7 +89,7 @@ int main() {
 	pull(MAX/2, MAX, 100);
 	assert(queue.size() == 0);
 	queue.clear();
-
+	
 	auto pull2 = [&](size_t n) {
 		for (size_t i = 1; i < n; ++i) {
 			auto v = queue.pop_front();
