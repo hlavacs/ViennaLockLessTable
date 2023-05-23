@@ -58,7 +58,7 @@ namespace vllt {
 		inline auto component_ptr(table_index_t n) noexcept -> C* {		///< \returns a pointer to a component
 			auto vector_ptr{ m_seg_vector.load() };						///< Access the segment vector
 
-			size_t idx = segment(n, vector_ptr); 
+			auto idx = segment(n, vector_ptr); 
 			assert(vector_ptr->m_segments[idx].load());
 
 			auto segment_ptr = (vector_ptr->m_segments[idx]).load();	///< Access the segment holding the slot
@@ -81,9 +81,7 @@ namespace vllt {
 			resize(slot, vector_ptr, first_seg, last_seg); //if need be, grow the vector of segments
 			allocate(slot, vector_ptr); //If need be, allocate a new segment and store it in the vector
 
-			//TODO: validate all segments
-
-			//copy of move the data to the new slot, using a recursive templated lambda
+			//copy or move the data to the new slot, using a recursive templated lambda
 			auto f = [&]<size_t I, typename T, typename... Ts>(auto && fun, T && dat, Ts&&... dats) {
 				if constexpr (vtll::is_atomic<T>::value) component_ptr<I>(slot)->store(dat);	//copy value for atomic
 				else *component_ptr<I>(slot) = std::forward<T>(dat);							//move or copy
@@ -117,18 +115,15 @@ namespace vllt {
 		inline auto resize(table_index_t slot, std::shared_ptr<seg_vector_t>& vector_ptr, segment_idx_t first_seg, segment_idx_t last_seg) {
 			size_t num_seg = vector_ptr ? vector_ptr->m_segments.size() + vector_ptr->m_seg_offset : 0;	///< Current max number of segments
 						
-			//first_seg = segment_idx_t{ 0 };
-
-			while (slot >= N * num_seg) {		///< Do we have enough?					
-				size_t new_size = SLOTS;
-				segment_idx_t offset{ 0 };
-				if (vector_ptr) {
+			while (slot >= N * num_seg) {		// Do we have enough entries in this table?			
+				size_t new_size = SLOTS;		//default number of slots
+				segment_idx_t offset{ 0 };		//start with zero offset
+				if (vector_ptr) {				//we already have a segment vector?
 					offset = vector_ptr->m_seg_offset;
 					size_t num_segments = vector_ptr->m_segments.size();
 					new_size = first_seg < (num_segments >> 1) ? num_segments * 2 : num_segments;
 				}
 				
-				//HERE IS A BUG!!!! TODO
 				auto new_vector_ptr = std::make_shared<seg_vector_t>( //vector has always as many slots as its capacity is -> size==capacity
 					seg_vector_t{ std::pmr::vector<std::atomic<segment_ptr_t>>{new_size, m_mr}, offset } //increase existing one
 				);
@@ -142,7 +137,7 @@ namespace vllt {
 					}
 					new_vector_ptr->m_segments[i].store(ptr); ///< Copy segment pointers
 					assert(new_vector_ptr->m_segments[i].load());
-				};
+				}
 				new_vector_ptr->m_seg_offset += first_seg; //shift the used segments, account for spent segments
 
 				if (m_seg_vector.compare_exchange_strong(vector_ptr, new_vector_ptr)) {	///< Try to exchange old segment vector with new
