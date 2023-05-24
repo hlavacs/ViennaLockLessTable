@@ -49,7 +49,7 @@ int main() {
 	//----------------------------------------------------------------------------
 
 
-	vllt::VlltFIFOQueue<types, 1 << 8,true,16> queue;
+	vllt::VlltFIFOQueue<types, 1 << 5,true,16> queue;
 
 	auto push = [&](size_t start, size_t max, size_t f = 1 ) {
 		for (size_t i = start; i < max; ++i) {
@@ -99,7 +99,7 @@ int main() {
 	};
 
 	auto par = [&]() {
-		size_t in = 5000, out = 4000;
+		size_t in = 5000, out = 5000;
 		{
 			std::cout << 1 << " ";
 			//std::jthread thread1([&]() { push(0, in, 1); });
@@ -141,7 +141,7 @@ int main() {
 		std::cout << 4 << "\n";
 	};
 
-	for (size_t i = 0; i < 1000; ++i) {
+	for (size_t i = 0; i < 10000; ++i) {
 		std::cout << "Loop " << i << " ";
 		par();
 	}

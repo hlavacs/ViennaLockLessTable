@@ -151,11 +151,10 @@ namespace vllt {
 				size_t min_size = segment(slot, new_offset);
 				size_t smaller_size = std::max((num_segments >> 1), SLOTS);
 				size_t new_size = 2 * num_segments;
+				while (min_size > new_size) { new_size *= 2; }
+
 				if (first_seg > num_segments * 0.8 && min_size < smaller_size) new_size = smaller_size;
 				else if (first_seg > (num_segments >> 1) && min_size < num_segments) new_size = num_segments;
-				else {
-					while (min_size > new_size) { new_size *= 2; }
-				}
 
 				auto new_vector_ptr = std::make_shared<seg_vector_t>( //vector has always as many slots as its capacity is -> size==capacity
 					seg_vector_t{ std::pmr::vector<std::atomic<segment_ptr_t>>{new_size, m_mr}, segment_idx_t{new_offset} } //increase existing one
