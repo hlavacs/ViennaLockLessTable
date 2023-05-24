@@ -49,7 +49,7 @@ int main() {
 	//----------------------------------------------------------------------------
 
 
-	vllt::VlltFIFOQueue<types, 1 << 4,true,16> queue;
+	vllt::VlltFIFOQueue<types, 1 << 8,true,16> queue;
 
 	auto push = [&](size_t start, size_t max, size_t f = 1 ) {
 		for (size_t i = start; i < max; ++i) {
