@@ -239,7 +239,7 @@ namespace vllt {
 		while (!m_next_free_slot.compare_exchange_weak(next_free_slot, table_index_t{ next_free_slot + 1 }));///< Slot number to put the new data into	
 
 		auto vector_ptr{ m_seg_vector.load() };		///< Shared pointer to current segment ptr vector, can be nullptr
-		insert(next_free_slot, vector_ptr, m_consumed , std::forward<Cs>(data)...);
+		insert(next_free_slot, vector_ptr, m_consumed, std::forward<Cs>(data)...);
 
 		auto old_last = next_free_slot > 0 ? table_index_t{ next_free_slot - 1 } : table_index_t{};
 		while (!m_last.compare_exchange_weak(old_last, next_free_slot));	///< Increase size to validate the new row
