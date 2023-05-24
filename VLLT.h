@@ -59,9 +59,12 @@ namespace vllt {
 		/// <returns>Pointer to the component.</returns>
 		template<size_t I, typename C = vtll::Nth_type<DATA, I>>
 		inline auto component_ptr(table_index_t n) noexcept -> C* {		///< \returns a pointer to a component
+			assert(n.has_value());
+
 			auto vector_ptr{ m_seg_vector.load() };						///< Access the segment vector
 
 			auto idx = segment(n, vector_ptr);
+			assert( idx < vector_ptr->m_segments.size() );
 			assert(vector_ptr->m_segments[idx].load());
 
 			auto segment_ptr = (vector_ptr->m_segments[idx]).load();	///< Access the segment holding the slot
@@ -101,6 +104,7 @@ namespace vllt {
 		/// <param name="vector_ptr">Pointer to the vector of segments, and offset</param>
 		/// <returns>Index of the segment for the slot.</returns>
 		static auto segment(table_index_t n, std::shared_ptr<seg_vector_t>& vector_ptr) {
+			assert( (n >> L) - vector_ptr->m_seg_offset >= 0);
 			return segment_idx_t{ (n >> L) - vector_ptr->m_seg_offset };
 		}
 
@@ -131,7 +135,7 @@ namespace vllt {
 			while (slot >= N * (vector_ptr->m_segments.size() + vector_ptr->m_seg_offset)) {
 				size_t num_segments = vector_ptr->m_segments.size();
 				size_t new_size = first_seg < (num_segments >> 1) ? num_segments * 2 : num_segments;
-				//if (first_seg > num_segments * 0.8) new_size = std::max( (num_segments >> 1), SLOTS );
+				if (first_seg > num_segments * 0.8) new_size = std::max( (num_segments >> 1), SLOTS );
 
 				auto new_vector_ptr = std::make_shared<seg_vector_t>( //vector has always as many slots as its capacity is -> size==capacity
 					seg_vector_t{ std::pmr::vector<std::atomic<segment_ptr_t>>{new_size, m_mr}, vector_ptr->m_seg_offset } //increase existing one
@@ -139,9 +143,17 @@ namespace vllt {
 				assert(new_vector_ptr);						
 				
 				size_t idx{0};
-				std::ranges::for_each(    vector_ptr->m_segments.begin() + first_seg,                    vector_ptr->m_segments.end(), [&](auto& ptr) { new_vector_ptr->m_segments[idx++].store(ptr.load()); });
-				std::ranges::for_each(new_vector_ptr->m_segments.begin() + num_segments - first_seg, new_vector_ptr->m_segments.end(), [](auto& ptr) { ptr = std::make_shared<segment_t>(); });
-				
+				std::ranges::for_each(    vector_ptr->m_segments.begin() + first_seg,     vector_ptr->m_segments.end(), [&](auto& ptr) { if(idx<new_vector_ptr->m_segments.size()) new_vector_ptr->m_segments[idx++].store(ptr.load()); });
+				std::ranges::for_each(new_vector_ptr->m_segments.begin() + idx,       new_vector_ptr->m_segments.end(), [ ](auto& ptr) { ptr = std::make_shared<segment_t>(); });
+
+				//idx = 0;
+				//std::ranges::for_each(new_vector_ptr->m_segments.begin(), new_vector_ptr->m_segments.end(), [&](auto& ptr) {
+				//	if (idx + first_seg < num_segments) { ptr.store( vector_ptr->m_segments[first_seg + idx].load() ); }
+					//else if (idx < num_segments && idx < first_seg) { ptr.store(vector_ptr->m_segments[idx].load()); }
+				//	else { ptr = std::make_shared<segment_t>(); }
+				//	++idx;
+				//});
+
 				new_vector_ptr->m_seg_offset += first_seg; //shift the used segments, account for spent segments
 
 				if (m_seg_vector.compare_exchange_strong(vector_ptr, new_vector_ptr)) {	///< Try to exchange old segment vector with new

@@ -49,7 +49,7 @@ int main() {
 	//----------------------------------------------------------------------------
 
 
-	vllt::VlltFIFOQueue<types, 1 << 8,true,16> queue;
+	vllt::VlltFIFOQueue<types, 1 << 4,true,16> queue;
 
 	auto push = [&](size_t start, size_t max, size_t f = 1 ) {
 		for (size_t i = start; i < max; ++i) {
@@ -99,7 +99,7 @@ int main() {
 	};
 
 	auto par = [&]() {
-		size_t in = 5000, out = 5000;
+		size_t in = 5000, out = 4000;
 		{
 			std::cout << 1 << " ";
 			//std::jthread thread1([&]() { push(0, in, 1); });
@@ -128,19 +128,20 @@ int main() {
 			std::jthread thread6([&]() { push(0, in, 3); });
 			std::jthread t6([&]() { pull2(out); });
 
+			std::jthread thread7([&]() { push(0, in, 3); });
 			std::jthread t7([&]() { pull2(out); });
 			std::jthread t8([&]() { pull2(out); });
 
 			std::jthread t9([&]() { pull2(out); });
 		}
-		//assert(queue.size() == 1 * in - 1 * out);
+		//assert(queue.size() == 7 * in - 9 * out);
 
 		std::cout << 3 << " ";
 		queue.clear();
 		std::cout << 4 << "\n";
 	};
 
-	for (size_t i = 0; i < 500; ++i) {
+	for (size_t i = 0; i < 1000; ++i) {
 		std::cout << "Loop " << i << " ";
 		par();
 	}
