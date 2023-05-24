@@ -58,10 +58,8 @@ namespace vllt {
 		/// <param name="n">Slot number in the table.</param>
 		/// <returns>Pointer to the component.</returns>
 		template<size_t I, typename C = vtll::Nth_type<DATA, I>>
-		inline auto component_ptr(table_index_t n) noexcept -> C* {		///< \returns a pointer to a component
+		inline auto component_ptr(table_index_t n, std::shared_ptr<seg_vector_t>& vector_ptr) noexcept -> C* {		///< \returns a pointer to a component
 			assert(n.has_value());
-
-			auto vector_ptr{ m_seg_vector.load() };						///< Access the segment vector
 
 			auto idx = segment(n, vector_ptr);
 			assert( idx < vector_ptr->m_segments.size() );
@@ -88,8 +86,8 @@ namespace vllt {
 
 			//copy or move the data to the new slot, using a recursive templated lambda
 			auto f = [&]<size_t I, typename T, typename... Ts>(auto && fun, T && dat, Ts&&... dats) {
-				if constexpr (vtll::is_atomic<T>::value) component_ptr<I>(slot)->store(dat);	//copy value for atomic
-				else *component_ptr<I>(slot) = std::forward<T>(dat);							//move or copy
+				if constexpr (vtll::is_atomic<T>::value) component_ptr<I>(slot, vector_ptr)->store(dat);	//copy value for atomic
+				else *component_ptr<I>(slot, vector_ptr) = std::forward<T>(dat);							//move or copy
 				if constexpr (sizeof...(dats) > 0) { fun.template operator() < I + 1 > (fun, std::forward<Ts>(dats)...); } //recurse
 			};
 			f.template operator() < 0 > (f, std::forward<Cs>(data)...);
@@ -257,6 +255,9 @@ namespace vllt {
 		vtll::to_tuple<vtll::remove_atomic<DATA>> ret{};
 
 		if (!m_last.load().has_value()) return std::nullopt;
+
+		auto vector_ptr{ m_seg_vector.load() };						///< Access the segment vector
+
 		auto next = m_next.load();
 		do {
 			if (next > m_last.load()) return std::nullopt;
@@ -265,11 +266,11 @@ namespace vllt {
 		vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 			[&](auto i) {
 				using type = vtll::Nth_type<DATA, i>;
-				if		constexpr (std::is_move_assignable_v<type>) { std::get<i>(ret) = std::move(*component_ptr<i>(next)); } //move
-				else if constexpr (std::is_copy_assignable_v<type>) { std::get<i>(ret) = *component_ptr<i>(next); } 			//copy
-				else if constexpr (vtll::is_atomic<type>::value) { std::get<i>(ret) = component_ptr<i>(next)->load(); } 	//atomic
+				if		constexpr (std::is_move_assignable_v<type>) { std::get<i>(ret) = std::move(*component_ptr<i>(next, vector_ptr)); } //move
+				else if constexpr (std::is_copy_assignable_v<type>) { std::get<i>(ret) = *component_ptr<i>(next, vector_ptr); } 			//copy
+				else if constexpr (vtll::is_atomic<type>::value) { std::get<i>(ret) = component_ptr<i>(next, vector_ptr)->load(); } 	//atomic
 
-				if constexpr (std::is_destructible_v<type> && !std::is_trivially_destructible_v<type>) { component_ptr<i>(next)->~type(); }	///< Call destructor
+				if constexpr (std::is_destructible_v<type> && !std::is_trivially_destructible_v<type>) { component_ptr<i>(next, vector_ptr)->~type(); }	///< Call destructor
 			}
 		);
 
