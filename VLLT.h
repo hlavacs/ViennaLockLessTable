@@ -71,6 +71,19 @@ namespace vllt {
 			else { return &std::get<I>(*segment_ptr)[n & BIT_MASK]; }
 		}
 
+		template<size_t I, typename C = vtll::Nth_type<DATA, I>>
+		inline auto component_ptr2(table_index_t n, std::shared_ptr<seg_vector_t>& vector_ptr) noexcept -> C* {		///< \returns a pointer to a component
+			assert(n.has_value());
+			auto seg = n >> L;
+			auto idx = segment(n, vector_ptr);
+			assert(idx < vector_ptr->m_segments.size());
+			assert(vector_ptr->m_segments[idx].load());
+
+			auto segment_ptr = (vector_ptr->m_segments[idx]).load();	///< Access the segment holding the slot
+			if constexpr (ROW) { return &std::get<I>((*segment_ptr)[n & BIT_MASK]); }
+			else { return &std::get<I>(*segment_ptr)[n & BIT_MASK]; }
+		}
+
 		/// <summary>
 		/// Insert a new row at the end of the table. Make sure that there are enough segments to store the new data.
 		/// If not allocate a new vector to hold the segements, and allocate new segments.
@@ -84,6 +97,7 @@ namespace vllt {
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
 		void insert(table_index_t slot, std::shared_ptr<seg_vector_t>& vector_ptr, std::atomic<table_index_t>& first_slot, Cs&&... data) {
 			resize(slot, vector_ptr, first_slot); //if need be, grow the vector of segments
+			assert((slot >> L) >= vector_ptr->m_seg_offset);
 
 			//copy or move the data to the new slot, using a recursive templated lambda
 			auto f = [&]<size_t I, typename T, typename... Ts>(auto && fun, T && dat, Ts&&... dats) {
@@ -143,6 +157,7 @@ namespace vllt {
 			while (slot >= N * (vector_ptr->m_segments.size() + vector_ptr->m_seg_offset)) {
 				segment_idx_t first_seg{ 0 };
 				auto fs = first_slot.load();
+				assert( (fs.m_value >> L) >= vector_ptr->m_seg_offset );
 				if (fs.has_value()) first_seg = segment(fs, vector_ptr);
 
 				size_t num_segments = vector_ptr->m_segments.size();
@@ -176,6 +191,7 @@ namespace vllt {
 					vector_ptr = new_vector_ptr;										///< If success, remember for later
 				} //Note: if we were beaten by other thread, then compare_exchange_strong itself puts the new value into vector_ptr
 			}
+			assert((slot >> L) >= vector_ptr->m_seg_offset);
 		}
 
 		std::pmr::memory_resource* m_mr;					///< Memory resource for allocating segments
@@ -210,6 +226,7 @@ namespace vllt {
 		using VlltTable<DATA, N0, ROW, SLOTS>::m_seg_vector;
 		using VlltTable<DATA, N0, ROW, SLOTS>::m_mr;
 		using VlltTable<DATA, N0, ROW, SLOTS>::component_ptr;
+		using VlltTable<DATA, N0, ROW, SLOTS>::component_ptr2;
 		using VlltTable<DATA, N0, ROW, SLOTS>::insert;
 		using VlltTable<DATA, N0, ROW, SLOTS>::segment;
 
@@ -283,11 +300,11 @@ namespace vllt {
 		vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 			[&](auto i) {
 				using type = vtll::Nth_type<DATA, i>;
-				if		constexpr (std::is_move_assignable_v<type>) { std::get<i>(ret) = std::move(*component_ptr<i>(next, vector_ptr)); } //move
-				else if constexpr (std::is_copy_assignable_v<type>) { std::get<i>(ret) = *component_ptr<i>(next, vector_ptr); } 			//copy
-				else if constexpr (vtll::is_atomic<type>::value) { std::get<i>(ret) = component_ptr<i>(next, vector_ptr)->load(); } 	//atomic
+				if		constexpr (std::is_move_assignable_v<type>) { std::get<i>(ret) = std::move(*component_ptr2<i>(next, vector_ptr)); } //move
+				else if constexpr (std::is_copy_assignable_v<type>) { std::get<i>(ret) = *component_ptr2<i>(next, vector_ptr); } 			//copy
+				else if constexpr (vtll::is_atomic<type>::value) { std::get<i>(ret) = component_ptr2<i>(next, vector_ptr)->load(); } 	//atomic
 
-				if constexpr (std::is_destructible_v<type> && !std::is_trivially_destructible_v<type>) { component_ptr<i>(next, vector_ptr)->~type(); }	///< Call destructor
+				if constexpr (std::is_destructible_v<type> && !std::is_trivially_destructible_v<type>) { component_ptr2<i>(next, vector_ptr)->~type(); }	///< Call destructor
 			}
 		);
 
