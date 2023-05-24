@@ -131,6 +131,7 @@ namespace vllt {
 			while (slot >= N * (vector_ptr->m_segments.size() + vector_ptr->m_seg_offset)) {
 				size_t num_segments = vector_ptr->m_segments.size();
 				size_t new_size = first_seg < (num_segments >> 1) ? num_segments * 2 : num_segments;
+				//if (first_seg > num_segments * 0.8) new_size = std::max( (num_segments >> 1), SLOTS );
 
 				auto new_vector_ptr = std::make_shared<seg_vector_t>( //vector has always as many slots as its capacity is -> size==capacity
 					seg_vector_t{ std::pmr::vector<std::atomic<segment_ptr_t>>{new_size, m_mr}, vector_ptr->m_seg_offset } //increase existing one
@@ -229,7 +230,16 @@ namespace vllt {
 		return next_free_slot;	///< Return index of new entry
 	}
 
-	///
+	/// <summary>
+	/// Pop the next item from the queue.
+	/// Move its content into the return value (tuple),
+	/// then remove it from the queue.
+	/// </summary>
+	/// <typeparam name="DATA">Type list of data items.</typeparam>
+	/// <typeparam name="N0">Number of items per segment.</typeparam>
+	/// <typeparam name="ROW">ROW or COLUMN layout.</typeparam>
+	/// <typeparam name="SLOTS">Default number of slots in the first segment vector.</typeparam>
+	/// <returns>Tuple with values from the next item, or nullopt.</returns>
 	template<typename DATA, size_t N0, bool ROW, size_t SLOTS>
 	inline auto VlltFIFOQueue<DATA, N0, ROW, SLOTS>::pop_front() noexcept -> tuple_opt_t {
 		vtll::to_tuple<vtll::remove_atomic<DATA>> ret{};
@@ -259,7 +269,14 @@ namespace vllt {
 		return ret;		//RVO?
 	}
 
-	//
+	/// <summary>
+	/// Get the number of items currently in the queue.
+	/// </summary>
+	/// <typeparam name="DATA">Type list of data items.</typeparam>
+	/// <typeparam name="N0">Number of items per segment.</typeparam>
+	/// <typeparam name="ROW">ROW or COLUMN layout.</typeparam>
+	/// <typeparam name="SLOTS">Default number of slots in the first segment vector.</typeparam>
+	/// <returns>Number of items currently in the queue.</returns>
 	template<typename DATA, size_t N0, bool ROW, size_t SLOTS>
 	inline auto VlltFIFOQueue<DATA, N0, ROW, SLOTS>::size() noexcept -> size_t {
 		auto last = m_last.load();
@@ -274,6 +291,14 @@ namespace vllt {
 		return sz;
 	}
 
+	/// <summary>
+	/// Remove all items from the queue.
+	/// </summary>
+	/// <typeparam name="DATA">Type list of data items.</typeparam>
+	/// <typeparam name="N0">Number of items per segment.</typeparam>
+	/// <typeparam name="ROW">ROW or COLUMN layout.</typeparam>
+	/// <typeparam name="SLOTS">Default number of slots in the first segment vector.</typeparam>
+	/// <returns>Number of items removed from the queue.</returns>
 	template<typename DATA, size_t N0, bool ROW, size_t SLOTS>
 	inline auto VlltFIFOQueue<DATA, N0, ROW, SLOTS>::clear() noexcept -> size_t {
 		size_t num = 0;
