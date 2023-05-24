@@ -284,6 +284,7 @@ namespace vllt {
 		do {
 			consumed = (next > 0 ? table_index_t{ next - 1ull } : table_index_t{});
 		} while (!m_consumed.compare_exchange_weak(consumed, next));
+		if(next>0) assert( consumed == next - 1 );
 
 		return ret;		//RVO?
 	}
