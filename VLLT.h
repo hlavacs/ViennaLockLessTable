@@ -20,8 +20,8 @@ namespace vllt {
 // \brief VlltTable is the base class for some classes, enabling management of tables that can be
 // appended in parallel.
 //
-	using table_index_t = vsty::strong_type_null_t<size_t, vsty::counter<>, std::numeric_limits<size_t>::max()>;
-	using segment_idx_t = vsty::strong_integral_t<size_t, vsty::counter<>>; ///<strong integer type for indexing segments, 0 to size vector-1
+	using table_index_t = size_t; // vsty::strong_type_null_t<size_t, vsty::counter<>, std::numeric_limits<size_t>::max()>;
+	using segment_idx_t = size_t; // vsty::strong_integral_t<size_t, vsty::counter<>>; ///<strong integer type for indexing segments, 0 to size vector-1
 
 	template<typename T>
 	bool has_value(T value) {
@@ -70,7 +70,7 @@ namespace vllt {
 		/// <returns>Pointer to the component.</returns>
 		template<size_t I, typename C = vtll::Nth_type<DATA, I>>
 		inline auto component_ptr(table_index_t n, std::shared_ptr<seg_vector_t>& vector_ptr) noexcept -> C* {		///< \returns a pointer to a component
-			assert(n.has_value());
+			assert(has_value(n));
 			auto seg = n >> L;
 			auto idx = segment(n, vector_ptr);
 			assert( idx < vector_ptr->m_segments.size() );
@@ -83,7 +83,7 @@ namespace vllt {
 
 		template<size_t I, typename C = vtll::Nth_type<DATA, I>>
 		inline auto component_ptr2(table_index_t n, std::shared_ptr<seg_vector_t>& vector_ptr) noexcept -> C* {		///< \returns a pointer to a component
-			assert(n.has_value());
+			assert(has_value(n));
 			auto seg = n >> L;
 			auto idx = segment(n, vector_ptr);
 			assert(idx < vector_ptr->m_segments.size());
@@ -107,7 +107,7 @@ namespace vllt {
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
 		void insert(table_index_t slot, std::shared_ptr<seg_vector_t>& vector_ptr, std::atomic<table_index_t>& first_slot, Cs&&... data) {
 			resize(slot, vector_ptr, first_slot); //if need be, grow the vector of segments
-			assert((slot >> L) >= vector_ptr->m_seg_offset);
+			//assert((slot >> L) >= vector_ptr->m_seg_offset);
 
 			//copy or move the data to the new slot, using a recursive templated lambda
 			auto f = [&]<size_t I, typename T, typename... Ts>(auto && fun, T && dat, Ts&&... dats) {
@@ -167,8 +167,8 @@ namespace vllt {
 			while ( slot >= N * (vector_ptr->m_segments.size() + vector_ptr->m_seg_offset) ) {
 				segment_idx_t first_seg{ 0 };
 				auto fs = first_slot.load();
-				assert( (fs.m_value >> L) >= vector_ptr->m_seg_offset );
-				if (fs.has_value()) {
+				assert( (fs >> L) >= vector_ptr->m_seg_offset );
+				if (has_value(fs)) {
 					first_seg = segment(fs, vector_ptr);
 					//if (first_seg > 0) first_seg = segment_idx_t{ 1ul};
 				}
@@ -204,7 +204,7 @@ namespace vllt {
 					vector_ptr = new_vector_ptr;										///< If success, remember for later
 				} //Note: if we were beaten by other thread, then compare_exchange_strong itself puts the new value into vector_ptr
 			}
-			assert((slot >> L) >= vector_ptr->m_seg_offset);
+			//assert((slot >> L) >= vector_ptr->m_seg_offset);
 		}
 
 		std::pmr::memory_resource* m_mr;					///< Memory resource for allocating segments
@@ -261,9 +261,9 @@ namespace vllt {
 
 	protected:
 		std::atomic<table_index_t>	m_next{ table_index_t{0} };	//next element to be taken out of the queue
-		std::atomic<table_index_t>	m_consumed{};		//last element that was taken out and fully read and destroyed
+		std::atomic<table_index_t>	m_consumed{null_value<table_index_t>()};		//last element that was taken out and fully read and destroyed
 		std::atomic<table_index_t>	m_next_free_slot{ table_index_t{0} };	//next element to write over
-		std::atomic<table_index_t>	m_last{};			//last element that has been produced and fully constructed
+		std::atomic<table_index_t>	m_last{null_value<table_index_t>()};			//last element that has been produced and fully constructed
 	};
 
 
@@ -286,11 +286,11 @@ namespace vllt {
 		while (!m_next_free_slot.compare_exchange_weak(next_free_slot, table_index_t{ next_free_slot + 1 }));///< Slot number to put the new data into	
 
 		auto vector_ptr{ m_seg_vector.load() };		///< Shared pointer to current segment ptr vector, can be nullptr
-		//insert(next_free_slot, vector_ptr, m_consumed, std::forward<Cs>(data)...);
+		insert(next_free_slot, vector_ptr, m_consumed, std::forward<Cs>(data)...);
 
 		table_index_t old_last;		///< Increase size to validate the new row
 		do {			
-			auto old_last = next_free_slot > 0 ? table_index_t{ next_free_slot - 1 } : table_index_t{};		
+			auto old_last = next_free_slot > 0 ? table_index_t{ next_free_slot - 1 } : table_index_t{null_value<table_index_t>()};
 		} while (!m_last.compare_exchange_weak(old_last, next_free_slot));
 		return next_free_slot;	///< Return index of new entry
 	}
@@ -309,31 +309,32 @@ namespace vllt {
 	inline auto VlltFIFOQueue<DATA, N0, ROW, SLOTS>::pop_front() noexcept -> tuple_opt_t {
 		vtll::to_tuple<vtll::remove_atomic<DATA>> ret{};
 
-		if (!m_last.load().has_value()) return std::nullopt;
+		if (!has_value(m_last.load())) return std::nullopt;
 
-		table_index_t next, last;
+		table_index_t next, last, p1;
 		do {
 			next = m_next.load();
 			last = m_last.load();
+			if (!(next <= last)) return std::nullopt;
 			assert(next <= last + 1ul);
-			if (! (next <= last)) return std::nullopt;
-		} while (!m_next.compare_exchange_weak(next, table_index_t{ next + 1 }));  ///< Slot number to put the new data into	
+			p1 = next + 1ul;
+		} while (!m_next.compare_exchange_weak(next, p1));  ///< Slot number to put the new data into	
 
-		assert(!m_consumed.load().has_value() || m_consumed.load() <= m_next.load());
-		assert(!m_last.load().has_value() || m_last.load() <= m_next_free_slot.load());
+		assert(!has_value(m_consumed.load()) || m_consumed.load() <= m_next.load());
+		assert(!has_value(m_last.load()) || m_last.load() <= m_next_free_slot.load());
 		assert(m_next.load() <= m_next_free_slot.load());
 
-		auto nnext = m_next.load();
-		last = m_last.load();
-		assert(!last.has_value() || nnext <= last + 1);
+		//auto nnext = m_next.load();
+		//last = m_last.load();
+		//assert(!has_value(last) || nnext <= last + 1);
 
-		auto cons = m_consumed.load();
-		last = m_last.load();
-		assert(!cons.has_value() || !last.has_value() || cons <= last);
+		//auto cons = m_consumed.load();
+		//last = m_last.load();
+		//assert(!has_value(cons) || !has_value(last) || cons <= last);
 
 		auto vector_ptr{ m_seg_vector.load() };						///< Access the segment vector
 
-		/*vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
+		vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 			[&](auto i) {
 				using type = vtll::Nth_type<DATA, i>;
 				if		constexpr (std::is_move_assignable_v<type>) { std::get<i>(ret) = std::move(*component_ptr2<i>(next, vector_ptr)); } //move
@@ -342,11 +343,11 @@ namespace vllt {
 
 				if constexpr (std::is_destructible_v<type> && !std::is_trivially_destructible_v<type>) { component_ptr2<i>(next, vector_ptr)->~type(); }	///< Call destructor
 			}
-		);*/
+		);
 
 		table_index_t consumed;
 		do {
-			consumed = (next > 0 ? table_index_t{ next - 1ull } : table_index_t{});
+			consumed = (next > 0 ? table_index_t{ next - 1ull } : table_index_t{null_value<table_index_t>()});
 		} while (!m_consumed.compare_exchange_weak(consumed, next));
 		if(next>0) assert( consumed == next - 1 );
 
@@ -366,9 +367,9 @@ namespace vllt {
 		auto last = m_last.load();
 		auto consumed = m_consumed.load();
 		size_t sz{0};
-		if (last.has_value()) {
+		if (has_value(last)) {
 			sz += last;
-			if (consumed.has_value()) sz -= consumed;
+			if (has_value(consumed)) sz -= consumed;
 			else ++sz;
 		}
 
