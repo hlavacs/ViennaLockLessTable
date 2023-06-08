@@ -154,14 +154,17 @@ namespace vllt {
 				assert(vector_ptr);
 			}
 
-			while (slot >= N * (vector_ptr->m_segments.size() + vector_ptr->m_seg_offset)) {
+			while ( slot >= N * (vector_ptr->m_segments.size() + vector_ptr->m_seg_offset) ) {
 				segment_idx_t first_seg{ 0 };
 				auto fs = first_slot.load();
 				assert( (fs.m_value >> L) >= vector_ptr->m_seg_offset );
-				if (fs.has_value()) first_seg = segment(fs, vector_ptr);
-
+				if (fs.has_value()) {
+					first_seg = segment(fs, vector_ptr);
+					//if (first_seg > 0) first_seg = segment_idx_t{ 1ul};
+				}
 				size_t num_segments = vector_ptr->m_segments.size();
 				size_t new_offset = vector_ptr->m_seg_offset + first_seg;
+				//assert(new_offset <= segment(slot, vector_ptr));
 				
 				size_t min_size = segment(slot, new_offset);
 				size_t smaller_size = std::max((num_segments >> 1), SLOTS);
@@ -269,9 +272,10 @@ namespace vllt {
 		auto vector_ptr{ m_seg_vector.load() };		///< Shared pointer to current segment ptr vector, can be nullptr
 		insert(next_free_slot, vector_ptr, m_consumed, std::forward<Cs>(data)...);
 
-		auto old_last = next_free_slot > 0 ? table_index_t{ next_free_slot - 1 } : table_index_t{};
-		while (!m_last.compare_exchange_weak(old_last, next_free_slot));	///< Increase size to validate the new row
-
+		table_index_t old_last;		///< Increase size to validate the new row
+		do {			
+			auto old_last = next_free_slot > 0 ? table_index_t{ next_free_slot - 1 } : table_index_t{};		
+		} while (!m_last.compare_exchange_weak(old_last, next_free_slot));
 		return next_free_slot;	///< Return index of new entry
 	}
 
@@ -292,9 +296,15 @@ namespace vllt {
 		if (!m_last.load().has_value()) return std::nullopt;
 
 		auto next = m_next.load();
+		table_index_t last;
 		do {
-			if (next > m_last.load()) return std::nullopt;
+			last = m_last.load();
+			if (next > last) return std::nullopt;
 		} while (!m_next.compare_exchange_weak(next, table_index_t{ next + 1 }));  ///< Slot number to put the new data into	
+		assert( next <= last);
+		auto cons = m_consumed.load();
+		assert( !cons.has_value() || cons <= next);
+
 		auto vector_ptr{ m_seg_vector.load() };						///< Access the segment vector
 
 		vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
