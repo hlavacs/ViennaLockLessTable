@@ -50,7 +50,7 @@ namespace vllt {
 		using segment_t = std::conditional_t<ROW, array_tuple_t1, array_tuple_t2>;			///< Memory layout of the table
 
 		using segment_ptr_t = std::shared_ptr<segment_t>;						///<Shared pointer to a segment
-		struct seg_vector_t {
+		struct segment_vector_t {
 			std::pmr::vector<std::atomic<segment_ptr_t>> m_segments;	///<Vector of atomic shared pointers to the segments
 			segment_idx_t m_seg_offset = 0;								///<Segment offset for FIFO queue (offsets segments NOT rows)
 		};
@@ -67,18 +67,8 @@ namespace vllt {
 		/// <typeparam name="I">Index in the component list.</typeparam>
 		/// <param name="n">Slot number in the table.</param>
 		/// <returns>Pointer to the component.</returns>
-		/*template<size_t I, typename C = vtll::Nth_type<DATA, I>>
-		inline auto component_ptr(table_index_t n, std::shared_ptr<seg_vector_t>& vector_ptr) noexcept -> C* {		///< \returns a pointer to a component
-			auto seg = n >> L;
-			auto idx = segment(n, vector_ptr);
-			auto segment_ptr = (vector_ptr->m_segments[idx]).load();	///< Access the segment holding the slot
-			if constexpr (ROW) { return &std::get<I>((*segment_ptr)[n & BIT_MASK]); }
-			else { return &std::get<I>(*segment_ptr)[n & BIT_MASK]; }
-		}*/
-
 		template<size_t I, typename C = vtll::Nth_type<DATA, I>>
-		inline auto component_ptr(table_index_t n, std::shared_ptr<seg_vector_t>& vector_ptr) noexcept -> C* {		///< \returns a pointer to a component
-			auto seg = n >> L;
+		inline auto component_ptr(table_index_t n, std::shared_ptr<segment_vector_t>& vector_ptr) noexcept -> C* {		///< \returns a pointer to a component
 			auto idx = segment(n, vector_ptr);
 			auto segment_ptr = (vector_ptr->m_segments[idx]).load();	///< Access the segment holding the slot
 			if constexpr (ROW) { return &std::get<I>((*segment_ptr)[n & BIT_MASK]); }
@@ -96,7 +86,7 @@ namespace vllt {
 		/// <param name="data">The data for the new row.</param>
 		template<typename... Cs>
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
-		void insert(table_index_t slot, std::shared_ptr<seg_vector_t>& vector_ptr, std::atomic<table_index_t>& first_slot, Cs&&... data) {
+		void insert(table_index_t slot, std::shared_ptr<segment_vector_t>& vector_ptr, std::atomic<table_index_t>& first_slot, Cs&&... data) {
 			resize(slot, vector_ptr, first_slot); //if need be, grow the vector of segments
 
 			//copy or move the data to the new slot, using a recursive templated lambda
@@ -126,7 +116,7 @@ namespace vllt {
 		/// <param name="n">Slot.</param>
 		/// <param name="vector_ptr">Pointer to the vector of segments, and offset</param>
 		/// <returns>Index of the segment for the slot.</returns>
-		static auto segment(table_index_t n, std::shared_ptr<seg_vector_t>& vector_ptr) {
+		static auto segment(table_index_t n, std::shared_ptr<segment_vector_t>& vector_ptr) {
 			return segment(n, vector_ptr->m_seg_offset );
 		}
 
@@ -139,10 +129,10 @@ namespace vllt {
 		/// <param name="vector_ptr">Shared pointer to the segment vector.</param>
 		/// <param name="first_seg">Index of first segment that currently holds information.</param>
 		/// <returns></returns>
-		inline auto resize(table_index_t slot, std::shared_ptr<seg_vector_t>& vector_ptr, std::atomic<table_index_t>& first_slot) {
+		inline auto resize(table_index_t slot, std::shared_ptr<segment_vector_t>& vector_ptr, std::atomic<table_index_t>& first_slot) {
 			if (!vector_ptr) {
-				auto new_vector_ptr = std::make_shared<seg_vector_t>( //vector has always as many slots as its capacity is -> size==capacity
-					seg_vector_t{ std::pmr::vector<std::atomic<segment_ptr_t>>{SLOTS, m_mr}, segment_idx_t{0} } //increase existing one
+				auto new_vector_ptr = std::make_shared<segment_vector_t>( //vector has always as many slots as its capacity is -> size==capacity
+					segment_vector_t{ std::pmr::vector<std::atomic<segment_ptr_t>>{SLOTS, m_mr}, segment_idx_t{0} } //increase existing one
 				);
 				for (auto& ptr : new_vector_ptr->m_segments) {
 					ptr = std::make_shared<segment_t>();
@@ -169,8 +159,8 @@ namespace vllt {
 				if (first_seg > num_segments * 0.8 && min_size < smaller_size) new_size = smaller_size;
 				else if (first_seg > (num_segments >> 1) && min_size < num_segments) new_size = num_segments;
 
-				auto new_vector_ptr = std::make_shared<seg_vector_t>( //vector has always as many slots as its capacity is -> size==capacity
-					seg_vector_t{ std::pmr::vector<std::atomic<segment_ptr_t>>{new_size, m_mr}, segment_idx_t{new_offset} } //increase existing one
+				auto new_vector_ptr = std::make_shared<segment_vector_t>( //vector has always as many slots as its capacity is -> size==capacity
+					segment_vector_t{ std::pmr::vector<std::atomic<segment_ptr_t>>{new_size, m_mr}, segment_idx_t{new_offset} } //increase existing one
 				);
 				
 				size_t idx = 0;
@@ -191,8 +181,8 @@ namespace vllt {
 		}
 
 		std::pmr::memory_resource* m_mr;					///< Memory resource for allocating segments
-		std::pmr::polymorphic_allocator<seg_vector_t>	m_allocator;			///< use this allocator
-		std::atomic<std::shared_ptr<seg_vector_t>>		m_seg_vector;			///< Atomic shared ptr to the vector of segments
+		std::pmr::polymorphic_allocator<segment_vector_t>	m_allocator;			///< use this allocator
+		std::atomic<std::shared_ptr<segment_vector_t>>		m_seg_vector;			///< Atomic shared ptr to the vector of segments
 	};
 
 
@@ -232,8 +222,7 @@ namespace vllt {
 		using typename VlltTable<DATA, N0, ROW, SLOTS>::tuple_ref_t;
 		using typename VlltTable<DATA, N0, ROW, SLOTS>::segment_t;
 		using typename VlltTable<DATA, N0, ROW, SLOTS>::segment_ptr_t;
-		using typename VlltTable<DATA, N0, ROW, SLOTS>::seg_vector_t;
-		//using typename VlltTable<DATA, N0, ROW, SLOTS>::segment_idx_t;
+		using typename VlltTable<DATA, N0, ROW, SLOTS>::segment_vector_t;
 
 		VlltStack(size_t r = 1 << 16, std::pmr::memory_resource* mr = std::pmr::new_delete_resource()) noexcept;
 		~VlltStack() noexcept;
@@ -244,12 +233,12 @@ namespace vllt {
 		inline auto size() noexcept -> size_t; ///< \returns the current numbers of rows in the table
 
 		template<size_t I>
-		inline auto get(table_index_t n) noexcept -> typename vtll::Nth_type<DATA, I>&;		///< \returns a ref to a component
+		inline auto get(table_index_t n) noexcept -> std::optional<std::reference_wrapper<vtll::Nth_type<DATA, I>>>;		///< \returns a ref to a component
 
 		template<typename C>									///< \returns a ref to a component
-		inline auto get(table_index_t n) noexcept -> C& requires vtll::unique<DATA>::value;
+		inline auto get(table_index_t n) noexcept -> std::optional<std::reference_wrapper<C>> requires vtll::unique<DATA>::value;
 
-		inline auto get_tuple(table_index_t n) noexcept	-> tuple_ref_t;	///< \returns a tuple with refs to all components
+		inline auto get_tuple(table_index_t n) noexcept	-> std::optional<tuple_ref_t>;	///< \returns a tuple with refs to all components
 
 		//-------------------------------------------------------------------------------------------
 		//add data
@@ -319,10 +308,10 @@ namespace vllt {
 	///
 	template<typename DATA, size_t N0, bool ROW, size_t SLOTS>
 	template<size_t I>
-	inline auto VlltStack<DATA, N0, ROW, SLOTS>::get(table_index_t n) noexcept -> typename vtll::Nth_type<DATA, I>& {
-		assert(n < size());
+	inline auto VlltStack<DATA, N0, ROW, SLOTS>::get(table_index_t n) noexcept -> std::optional<std::reference_wrapper<vtll::Nth_type<DATA, I>>> {
+		if (n >= size()) return std::nullopt;
 		auto vector_ptr = m_seg_vector.load();
-		return *component_ptr<I>(n, vector_ptr);
+		return { *component_ptr<I>(n, vector_ptr) };
 	};
 
 	/////
@@ -332,8 +321,10 @@ namespace vllt {
 	///
 	template<typename DATA, size_t N0, bool ROW, size_t SLOTS>
 	template<typename C>
-	inline auto VlltStack<DATA, N0, ROW, SLOTS>::get(table_index_t n) noexcept -> C& requires vtll::unique<DATA>::value {
-		return get<vtll::index_of<DATA, C>::value>(n);
+	inline auto VlltStack<DATA, N0, ROW, SLOTS>::get(table_index_t n) noexcept -> std::optional<std::reference_wrapper<C>> requires vtll::unique<DATA>::value {
+		if (n >= size()) return std::nullopt;
+		auto vector_ptr = m_seg_vector.load();
+		return { *component_ptr<vtll::index_of<DATA, C>::value>(n, vector_ptr) };
 	};
 
 	/////
@@ -342,8 +333,10 @@ namespace vllt {
 	// \returns a tuple with pointers to all components of entry n.
 	///
 	template<typename DATA, size_t N0, bool ROW, size_t SLOTS>
-	inline auto VlltStack<DATA, N0, ROW, SLOTS>::get_tuple(table_index_t n) noexcept -> tuple_ref_t {
-		return[&]<size_t... Is>(std::index_sequence<Is...>) { return std::tie(get<Is>(n)...); }(std::make_index_sequence<vtll::size<DATA>::value>{});
+	inline auto VlltStack<DATA, N0, ROW, SLOTS>::get_tuple(table_index_t n) noexcept -> std::optional<tuple_ref_t> {
+		if (n >= size()) return std::nullopt;
+		auto vector_ptr = m_seg_vector.load();
+		return { [&] <size_t... Is>(std::index_sequence<Is...>) { return std::tie(*component_ptr<Is>(n, vector_ptr)...); }(std::make_index_sequence<vtll::size<DATA>::value>{})};
 	};
 
 	/////
@@ -435,24 +428,26 @@ namespace vllt {
 	inline auto VlltStack<DATA, N0, ROW, SLOTS>::swap(table_index_t idst, table_index_t isrc) noexcept -> void {
 		assert(idst < size() && isrc < size());
 		auto src = get_tuple(isrc);
+		if (!src.has_value()) return;
 		auto dst = get_tuple(idst);
+		if (!dst.has_value()) return;
 		vtll::static_for<size_t, 0, vtll::size<DATA>::value >([&](auto i) {
 			using type = vtll::Nth_type<DATA, i>;
 			//std::cout << typeid(type).name() << "\n";
 			if constexpr (std::is_move_assignable_v<type> && std::is_move_constructible_v<type>) {
-				std::swap(std::get<i>(dst), std::get<i>(src));
+				std::swap(std::get<i>(dst.value()), std::get<i>(src.value()));
 			}
 			else if constexpr (std::is_copy_assignable_v<type> && std::is_copy_constructible_v<type>) {
-				type tmp{ std::get<i>(src) };
-				std::get<i>(src) = std::get<i>(dst);
-				std::get<i>(dst) = tmp;
+				auto& tmp{ std::get<i>(src.value()) };
+				std::get<i>(src.value()) = std::get<i>(dst.value());
+				std::get<i>(dst.value()) = tmp;
 			}
 			else if constexpr (vtll::is_atomic<type>::value) {
-				type tmp{ std::get<i>(src).load() };
-				std::get<i>(src).store(std::get<i>(dst).load());
-				std::get<i>(dst).store(tmp.load());
+				type tmp{ std::get<i>(src.value()).load() };
+				std::get<i>(src.value()).store(std::get<i>(dst.value()).load());
+				std::get<i>(dst.value()).store(tmp.load());
 			}
-			});
+		});
 		return;
 	}
 
@@ -512,7 +507,7 @@ namespace vllt {
 		using tuple_opt_t = std::optional< vtll::to_tuple< vtll::remove_atomic<DATA> > >;
 		using typename VlltTable<DATA, N0, ROW, SLOTS>::segment_t;
 		using typename VlltTable<DATA, N0, ROW, SLOTS>::segment_ptr_t;
-		using typename VlltTable<DATA, N0, ROW, SLOTS>::seg_vector_t;
+		using typename VlltTable<DATA, N0, ROW, SLOTS>::segment_vector_t;
 
 		VlltFIFOQueue() {};
 
@@ -571,9 +566,9 @@ namespace vllt {
 
 		if (!has_value(m_last.load())) return std::nullopt;
 
-		table_index_t next, last, p1;
+		table_index_t last;
+		auto next = m_next.load();
 		do {
-			next = m_next.load();
 			last = m_last.load();
 			if (!(next <= last)) return std::nullopt;
 		} while (!m_next.compare_exchange_weak(next, table_index_t{next + 1ul}));  ///< Slot number to put the new data into	
@@ -670,7 +665,7 @@ namespace vllt {
 
 		using segment_ptr_t = std::shared_ptr<segment_t>;						///<Shared pointer to a segment
 		using segment_idx_t = vsty::strong_integral_t<size_t, vsty::counter<>>; ///<strong integer type for indexing segments, 0 to size vector-1
-		struct seg_vector_t {
+		struct segment_vector_t {
 			std::pmr::vector<std::atomic<segment_ptr_t>> m_segments;	///<Vector of atomic shared pointers to the segments
 			segment_idx_t m_seg_offset = 0;								///<Segment offset for FIFO queue (offsets segments NOT rows)
 		};
@@ -710,7 +705,7 @@ namespace vllt {
 		/// <param name="data">The data for the new row.</param>
 		template<typename... Cs>
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
-		void insert(table_index_t slot, std::shared_ptr<seg_vector_t>& vector_ptr, segment_idx_t first_seg, segment_idx_t last_seg, Cs&&... data ) {
+		void insert(table_index_t slot, std::shared_ptr<segment_vector_t>& vector_ptr, segment_idx_t first_seg, segment_idx_t last_seg, Cs&&... data ) {
 			resize(slot, vector_ptr, first_seg, last_seg); //if need be, grow the vector of segments
 			allocate(slot, vector_ptr); //If need be, allocate a new segment and store it in the vector
 
@@ -731,7 +726,7 @@ namespace vllt {
 		/// <param name="n">Slot.</param>
 		/// <param name="vector_ptr">Pointer to the vector of segments, and offset</param>
 		/// <returns>Index of the segment for the slot.</returns>
-		static auto segment(table_index_t n, std::shared_ptr<seg_vector_t>& vector_ptr) {
+		static auto segment(table_index_t n, std::shared_ptr<segment_vector_t>& vector_ptr) {
 			return segment_idx_t{ (n >> L) - vector_ptr->m_seg_offset };
 		}
 
@@ -745,7 +740,7 @@ namespace vllt {
 		/// <param name="first_seg">Index of first segment that currently holds information.</param>
 		/// <param name="last_seg">Index of the last segment that currently holds informaton.</param>
 		/// <returns></returns>
-		inline auto resize(table_index_t slot, std::shared_ptr<seg_vector_t>& vector_ptr, segment_idx_t first_seg, segment_idx_t last_seg) {
+		inline auto resize(table_index_t slot, std::shared_ptr<segment_vector_t>& vector_ptr, segment_idx_t first_seg, segment_idx_t last_seg) {
 			size_t num_seg = vector_ptr ? vector_ptr->m_segments.size() + vector_ptr->m_seg_offset : 0;	///< Current max number of segments
 						
 			while (slot >= N * num_seg) {		// Do we have enough entries in this table?			
@@ -757,8 +752,8 @@ namespace vllt {
 					new_size = first_seg < (num_segments >> 1) ? num_segments * 2 : num_segments;
 				}
 				
-				auto new_vector_ptr = std::make_shared<seg_vector_t>( //vector has always as many slots as its capacity is -> size==capacity
-					seg_vector_t{ std::pmr::vector<std::atomic<segment_ptr_t>>{new_size, m_mr}, offset } //increase existing one
+				auto new_vector_ptr = std::make_shared<segment_vector_t>( //vector has always as many slots as its capacity is -> size==capacity
+					segment_vector_t{ std::pmr::vector<std::atomic<segment_ptr_t>>{new_size, m_mr}, offset } //increase existing one
 				);
 				assert(new_vector_ptr);
 
@@ -788,7 +783,7 @@ namespace vllt {
 		/// <param name="slot">Slot number in the table.</param>
 		/// <param name="vector_ptr">Shared pointer to the segment vector.</param>
 		/// <returns></returns>
-		inline auto allocate(table_index_t slot, std::shared_ptr<seg_vector_t>& vector_ptr) {
+		inline auto allocate(table_index_t slot, std::shared_ptr<segment_vector_t>& vector_ptr) {
 			auto seg_idx = segment(slot, vector_ptr);						///< Index of segment we need
 			auto seg_ptr = vector_ptr->m_segments[seg_idx].load();			///< Does the segment exist yet? If yes, increases use count.
 			if (!seg_ptr) {													///< If not, create one
@@ -801,8 +796,8 @@ namespace vllt {
 		}
 
 		std::pmr::memory_resource*						m_mr;					///< Memory resource for allocating segments
-		std::pmr::polymorphic_allocator<seg_vector_t>	m_allocator;			///< use this allocator
-		std::atomic<std::shared_ptr<seg_vector_t>>		m_seg_vector;			///< Atomic shared ptr to the vector of segments
+		std::pmr::polymorphic_allocator<segment_vector_t>	m_allocator;			///< use this allocator
+		std::atomic<std::shared_ptr<segment_vector_t>>		m_seg_vector;			///< Atomic shared ptr to the vector of segments
 	};
 
 
@@ -844,7 +839,7 @@ namespace vllt {
 		using typename VlltTable<DATA, N0, ROW, SLOTS>::tuple_ref_t;
 		using typename VlltTable<DATA, N0, ROW, SLOTS>::segment_t;
 		using typename VlltTable<DATA, N0, ROW, SLOTS>::segment_ptr_t;
-		using typename VlltTable<DATA, N0, ROW, SLOTS>::seg_vector_t;
+		using typename VlltTable<DATA, N0, ROW, SLOTS>::segment_vector_t;
 		using typename VlltTable<DATA, N0, ROW, SLOTS>::segment_idx_t;
 
 		VlltStack(size_t r = 1 << 16, std::pmr::memory_resource* mr = std::pmr::new_delete_resource()) noexcept;
@@ -1118,7 +1113,7 @@ namespace vllt {
 		using tuple_opt_t = std::optional< vtll::to_tuple< vtll::remove_atomic<DATA> > >;
 		using typename VlltTable<DATA, N0, ROW, SLOTS>::segment_t;
 		using typename VlltTable<DATA, N0, ROW, SLOTS>::segment_ptr_t;
-		using typename VlltTable<DATA, N0, ROW, SLOTS>::seg_vector_t;
+		using typename VlltTable<DATA, N0, ROW, SLOTS>::segment_vector_t;
 		using typename VlltTable<DATA, N0, ROW, SLOTS>::segment_idx_t;
 
 		VlltFIFOQueue() {};

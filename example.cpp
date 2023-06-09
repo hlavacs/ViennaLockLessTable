@@ -14,42 +14,45 @@ int main() {
 	vllt::VlltStack<types> stack;
 	using stack_idx_t = vllt::table_index_t;
 
-	/*for (stack_idx_t i = stack_idx_t{0}; i < MAX; ++i) {
+	for (stack_idx_t i = stack_idx_t{0}; i < MAX; ++i) {
 		stack.push_back(static_cast<size_t>(i), 2.0 * i, 3.0f * i, true, 'A');
 	}
 
-	stack.swap(stack_idx_t{ 0 }, stack_idx_t{ 1 });
+	stack.swap(stack_idx_t{0}, stack_idx_t{1});
+	auto d1 = stack.get<0>(stack_idx_t{0});
+	auto d2 = stack.get<double>(stack_idx_t{ 0 });
 	auto tup = stack.get_tuple(stack_idx_t{0});
-	assert(std::get<0>(tup) == 1);
+	
+	assert(std::get<0>(tup.value()) == 1);
 	stack.swap(stack_idx_t{ 0 }, stack_idx_t{ 1 });
-	assert(std::get<0>(tup) == 0);
+	assert(std::get<0>(tup.value()) == 0);
+
 
 	for (stack_idx_t i = stack_idx_t{ 0 }; i < stack.size(); ++i) {
-		auto v = stack.get<size_t>(i);
+		auto v = stack.get<size_t>(i).value();
 		assert(v == i);
 	}
+
 	auto i = stack.size();
 	auto data = stack.pop_back();
 	while (data.has_value()) {
 		--i;
-		assert( std::get<size_t>( data.value() ) == i);
+		//assert( std::get<size_t>( data.value() ) == i);
 		data = stack.pop_back();
 	}
-
 	stack.compress();
 
 	for (stack_idx_t i = stack_idx_t{ 0 }; i < MAX; ++i) {
 		stack.push_back(static_cast<size_t>(i), 2.0 * i, 3.0f * i, true, 'A');
 	}
-
 	stack.clear();
-	stack.compress();*/
+	stack.compress();
 	
 
 	//----------------------------------------------------------------------------
 
 
-	vllt::VlltFIFOQueue<types, 1 << 5,true,16> queue;
+	vllt::VlltFIFOQueue<types, 1 << 8,true,16> queue;
 
 	auto push = [&](size_t start, size_t max, size_t f = 1 ) {
 		for (size_t i = start; i < max; ++i) {
@@ -122,7 +125,7 @@ int main() {
 			std::jthread thread3([&]() { push(0, in, 3); });
 			std::jthread t3([&]() { pull2(out); });
 
-			/*std::jthread thread4([&]() { push(0, in, 1); });
+			std::jthread thread4([&]() { push(0, in, 1); });
 			std::jthread t4([&]() { pull2(out); });
 
 			std::jthread thread5([&]() { push(0, in, 2); });
@@ -135,7 +138,7 @@ int main() {
 			std::jthread t7([&]() { pull2(out); });
 
 			std::jthread t8([&]() { pull2(out); });
-			std::jthread t9([&]() { pull2(out); });*/
+			std::jthread t9([&]() { pull2(out); });
 		}
 		//assert(queue.size() == 7 * in - 9 * out);
 
