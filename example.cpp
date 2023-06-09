@@ -40,13 +40,11 @@ int main() {
 		//assert( std::get<size_t>( data.value() ) == i);
 		data = stack.pop_back();
 	}
-	stack.compress();
 
 	for (stack_idx_t i = stack_idx_t{ 0 }; i < MAX; ++i) {
 		stack.push_back(static_cast<size_t>(i), 2.0 * i, 3.0f * i, true, 'A');
 	}
 	stack.clear();
-	stack.compress();
 	
 
 	//----------------------------------------------------------------------------

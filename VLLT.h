@@ -86,7 +86,7 @@ namespace vllt {
 		/// <param name="data">The data for the new row.</param>
 		template<typename... Cs>
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
-		void insert(table_index_t slot, std::shared_ptr<segment_vector_t>& vector_ptr, std::atomic<table_index_t>& first_slot, Cs&&... data) {
+		void insert(table_index_t slot, std::shared_ptr<segment_vector_t>& vector_ptr, std::atomic<table_index_t>* first_slot, Cs&&... data) {
 			resize(slot, vector_ptr, first_slot); //if need be, grow the vector of segments
 
 			//copy or move the data to the new slot, using a recursive templated lambda
@@ -129,7 +129,7 @@ namespace vllt {
 		/// <param name="vector_ptr">Shared pointer to the segment vector.</param>
 		/// <param name="first_seg">Index of first segment that currently holds information.</param>
 		/// <returns></returns>
-		inline auto resize(table_index_t slot, std::shared_ptr<segment_vector_t>& vector_ptr, std::atomic<table_index_t>& first_slot) {
+		inline auto resize(table_index_t slot, std::shared_ptr<segment_vector_t>& vector_ptr, std::atomic<table_index_t>* first_slot = nullptr) {
 			if (!vector_ptr) {
 				auto new_vector_ptr = std::make_shared<segment_vector_t>( //vector has always as many slots as its capacity is -> size==capacity
 					segment_vector_t{ std::pmr::vector<std::atomic<segment_ptr_t>>{SLOTS, m_mr}, segment_idx_t{0} } //increase existing one
@@ -144,7 +144,7 @@ namespace vllt {
 
 			while ( slot >= N * (vector_ptr->m_segments.size() + vector_ptr->m_seg_offset) ) {
 				segment_idx_t first_seg{ 0 };
-				auto fs = first_slot.load();
+				auto fs = first_slot ? first_slot->load() : table_index_t{0};
 				if (has_value(fs)) {
 					first_seg = segment(fs, vector_ptr);
 				}
@@ -252,7 +252,6 @@ namespace vllt {
 
 		inline auto pop_back() noexcept	-> tuple_opt_t;	///< Remove the last row, call destructor on components
 		inline auto clear() noexcept	-> size_t;	///< Set the number if rows to zero - effectively clear the table, call destructors
-		inline auto compress() noexcept	-> void;	///< Deallocate unused segments
 		inline auto swap(table_index_t n1, table_index_t n2) noexcept -> void;	///< Swap contents of two rows
 
 	protected:
@@ -358,7 +357,7 @@ namespace vllt {
 
 		//make sure there is enough space in the segment VECTOR - if not then change the old vector to a larger vector
 		auto vector_ptr{ m_seg_vector.load() };	///< Shared pointer to current segment ptr vector, can be nullptr
-		//insert(size.m_next_free_slot, vector_ptr, segment_idx_t{ 0 }, std::forward<Cs>(data)...); ///< Make sure there are enough slots for segments
+		insert(size.m_next_free_slot, vector_ptr, nullptr, std::forward<Cs>(data)...); ///< Make sure there are enough slots for segments
 
 		slot_size_t new_size = m_size_cnt.load();	///< Increase size to validate the new row
 		while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ new_size.m_next_free_slot, table_index_t{ new_size.m_size + 1} }));
@@ -451,28 +450,6 @@ namespace vllt {
 		return;
 	}
 
-	/////
-	// \brief Deallocate segments that are currently not used.
-	// Is lockless and threadsafe.
-	///
-	template<typename DATA, size_t N0, bool ROW, size_t SLOTS>
-	inline auto VlltStack<DATA, N0, ROW, SLOTS>::compress() noexcept -> void {
-		auto vector_ptr{ m_seg_vector.load() };
-		if (!vector_ptr) return;
-		for (size_t i = vector_ptr->m_segments.size() - 1; i > (max_size() >> L); --i) {
-			auto seg_ptr = vector_ptr->m_segments[i].load();
-			if (seg_ptr) {
-				if (seg_ptr.use_count() == 2) {
-					std::shared_ptr<segment_t> new_seg_ptr;
-					if (!vector_ptr->m_segments[i].compare_exchange_strong(seg_ptr, new_seg_ptr))	///< Try to put it into seg vector, someone might beat us here
-						return;
-				}
-				else return;
-			}
-		}
-	}
-
-
 
 
 
@@ -540,7 +517,7 @@ namespace vllt {
 		while (!m_next_free_slot.compare_exchange_weak(next_free_slot, table_index_t{ next_free_slot + 1 }));///< Slot number to put the new data into	
 
 		auto vector_ptr{ m_seg_vector.load() };		///< Shared pointer to current segment ptr vector, can be nullptr
-		insert(next_free_slot, vector_ptr, m_consumed, std::forward<Cs>(data)...);
+		insert(next_free_slot, vector_ptr, &m_consumed, std::forward<Cs>(data)...);
 
 		table_index_t old_last;		///< Increase size to validate the new row
 		do {			
