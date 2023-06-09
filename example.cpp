@@ -12,6 +12,8 @@ int main() {
 	const size_t MAX = 1024*16*10;
 
 	{
+		std::cout << "STACK\n";
+
 		vllt::VlltStack<types> stack;
 
 		for (vllt::stack_index_t i = vllt::stack_index_t{ 0 }; i < MAX; ++i) {
@@ -106,17 +108,18 @@ int main() {
 			std::cout << 4 << "\n";
 		};
 
-		for (size_t i = 0; i < 10000; ++i) {
+		for (size_t i = 0; i < 100; ++i) {
 			std::cout << "Loop " << i << " ";
 			par();
 		}
 	}
 
-	return 0;
 
 	//----------------------------------------------------------------------------
 
 	{
+		std::cout << "QUEUE\n";
+
 		vllt::VlltFIFOQueue<types, 1 << 8, true, 16> queue;
 
 		auto push = [&](size_t start, size_t max, size_t f = 1) {
@@ -212,7 +215,7 @@ int main() {
 			std::cout << 4 << "\n";
 		};
 
-		for (size_t i = 0; i < 10000; ++i) {
+		for (size_t i = 0; i < 100; ++i) {
 			std::cout << "Loop " << i << " ";
 			par();
 		}
