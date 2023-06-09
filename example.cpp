@@ -9,22 +9,22 @@ int main() {
 
 	using types = vtll::tl<size_t, double, float, bool, char>;
 
-
 	const size_t MAX = 1024*16*10;
 
-	//vllt::VlltStack<types> stack;
+	vllt::VlltStack<types> stack;
+	using stack_idx_t = vllt::table_index_t;
 
-	/*for (idx_stack_t i = idx_stack_t{0}; i < MAX; ++i) {
-		stack.push_back(static_cast<size_t>(i.value()), 2.0 * i, 3.0f * i, true, 'A');
+	/*for (stack_idx_t i = stack_idx_t{0}; i < MAX; ++i) {
+		stack.push_back(static_cast<size_t>(i), 2.0 * i, 3.0f * i, true, 'A');
 	}
 
-	stack.swap(idx_stack_t{ 0 }, idx_stack_t{ 1 });
-	auto tup = stack.get_tuple(idx_stack_t{0});
+	stack.swap(stack_idx_t{ 0 }, stack_idx_t{ 1 });
+	auto tup = stack.get_tuple(stack_idx_t{0});
 	assert(std::get<0>(tup) == 1);
-	stack.swap(idx_stack_t{ 0 }, idx_stack_t{ 1 });
+	stack.swap(stack_idx_t{ 0 }, stack_idx_t{ 1 });
 	assert(std::get<0>(tup) == 0);
 
-	for (idx_stack_t i = idx_stack_t{ 0 }; i < stack.size(); ++i) {
+	for (stack_idx_t i = stack_idx_t{ 0 }; i < stack.size(); ++i) {
 		auto v = stack.get<size_t>(i);
 		assert(v == i);
 	}
@@ -38,13 +38,13 @@ int main() {
 
 	stack.compress();
 
-	for (idx_stack_t i = idx_stack_t{ 0 }; i < MAX; ++i) {
-		stack.push_back(static_cast<size_t>(i.value()), 2.0 * i, 3.0f * i, true, 'A');
+	for (stack_idx_t i = stack_idx_t{ 0 }; i < MAX; ++i) {
+		stack.push_back(static_cast<size_t>(i), 2.0 * i, 3.0f * i, true, 'A');
 	}
 
 	stack.clear();
-	stack.compress();
-	*/
+	stack.compress();*/
+	
 
 	//----------------------------------------------------------------------------
 
@@ -93,13 +93,16 @@ int main() {
 	auto pull2 = [&](size_t n) {
 		for (size_t i = 1; i < n; ++i) {
 			auto v = queue.pop_front();
-			//do {
-			//} while (!v.has_value());
+			if (v.has_value()) {
+				auto value = v.value();
+				assert(2 * std::get<0>(value) == std::get<1>(value));
+				assert(3 * std::get<0>(value) == std::get<2>(value));
+			}
 		}
 	};
 
 	auto par = [&]() {
-		size_t in = 5000, out = 5000;
+		size_t in = 15000, out = 15000;
 		{
 			std::cout << 1 << " ";
 			//std::jthread thread1([&]() { push(0, in, 1); });
@@ -119,7 +122,7 @@ int main() {
 			std::jthread thread3([&]() { push(0, in, 3); });
 			std::jthread t3([&]() { pull2(out); });
 
-			std::jthread thread4([&]() { push(0, in, 1); });
+			/*std::jthread thread4([&]() { push(0, in, 1); });
 			std::jthread t4([&]() { pull2(out); });
 
 			std::jthread thread5([&]() { push(0, in, 2); });
@@ -130,9 +133,9 @@ int main() {
 
 			std::jthread thread7([&]() { push(0, in, 3); });
 			std::jthread t7([&]() { pull2(out); });
-			std::jthread t8([&]() { pull2(out); });
 
-			std::jthread t9([&]() { pull2(out); });
+			std::jthread t8([&]() { pull2(out); });
+			std::jthread t9([&]() { pull2(out); });*/
 		}
 		//assert(queue.size() == 7 * in - 9 * out);
 
