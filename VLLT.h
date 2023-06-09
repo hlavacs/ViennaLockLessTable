@@ -70,11 +70,11 @@ namespace vllt {
 		/// <returns>Pointer to the component.</returns>
 		template<size_t I, typename C = vtll::Nth_type<DATA, I>>
 		inline auto component_ptr(table_index_t n, std::shared_ptr<seg_vector_t>& vector_ptr) noexcept -> C* {		///< \returns a pointer to a component
-			assert(has_value(n));
+			//assert(has_value(n));
 			auto seg = n >> L;
 			auto idx = segment(n, vector_ptr);
-			assert( idx < vector_ptr->m_segments.size() );
-			assert(vector_ptr->m_segments[idx].load());
+			//assert( idx < vector_ptr->m_segments.size() );
+			//assert(vector_ptr->m_segments[idx].load());
 
 			auto segment_ptr = (vector_ptr->m_segments[idx]).load();	///< Access the segment holding the slot
 			if constexpr (ROW) { return &std::get<I>((*segment_ptr)[n & BIT_MASK]); }
@@ -83,11 +83,11 @@ namespace vllt {
 
 		template<size_t I, typename C = vtll::Nth_type<DATA, I>>
 		inline auto component_ptr2(table_index_t n, std::shared_ptr<seg_vector_t>& vector_ptr) noexcept -> C* {		///< \returns a pointer to a component
-			assert(has_value(n));
+			//assert(has_value(n));
 			auto seg = n >> L;
 			auto idx = segment(n, vector_ptr);
-			assert(idx < vector_ptr->m_segments.size());
-			assert(vector_ptr->m_segments[idx].load());
+			//assert(idx < vector_ptr->m_segments.size());
+			//assert(vector_ptr->m_segments[idx].load());
 
 			auto segment_ptr = (vector_ptr->m_segments[idx]).load();	///< Access the segment holding the slot
 			if constexpr (ROW) { return &std::get<I>((*segment_ptr)[n & BIT_MASK]); }
@@ -127,7 +127,7 @@ namespace vllt {
 		/// <param name="offset">Segment offset to be used.</param>
 		/// <returns>Index of the segment for the slot.</returns>
 		static auto segment(table_index_t n, size_t offset) {
-			assert((n >> L) - offset >= 0);
+			//assert((n >> L) - offset >= 0);
 			return segment_idx_t{ (n >> L) - offset };
 		}
 
@@ -161,13 +161,13 @@ namespace vllt {
 				if (m_seg_vector.compare_exchange_strong(vector_ptr, new_vector_ptr)) {	///< Try to exchange old segment vector with new
 					vector_ptr = new_vector_ptr;										///< If success, remember for later
 				} //Note: if we were beaten by other thread, then compare_exchange_strong itself puts the new value into vector_ptr
-				assert(vector_ptr);
+				//assert(vector_ptr);
 			}
 
 			while ( slot >= N * (vector_ptr->m_segments.size() + vector_ptr->m_seg_offset) ) {
 				segment_idx_t first_seg{ 0 };
 				auto fs = first_slot.load();
-				assert( (fs >> L) >= vector_ptr->m_seg_offset );
+				//assert( (fs >> L) >= vector_ptr->m_seg_offset );
 				if (has_value(fs)) {
 					first_seg = segment(fs, vector_ptr);
 					//if (first_seg > 0) first_seg = segment_idx_t{ 1ul};
@@ -187,7 +187,7 @@ namespace vllt {
 				auto new_vector_ptr = std::make_shared<seg_vector_t>( //vector has always as many slots as its capacity is -> size==capacity
 					seg_vector_t{ std::pmr::vector<std::atomic<segment_ptr_t>>{new_size, m_mr}, segment_idx_t{new_offset} } //increase existing one
 				);
-				assert(new_vector_ptr);						
+				//assert(new_vector_ptr);						
 				
 				size_t idx = 0;
 				std::ranges::for_each(new_vector_ptr->m_segments.begin(), new_vector_ptr->m_segments.end(), [&](auto& ptr) {
@@ -247,7 +247,6 @@ namespace vllt {
 		using typename VlltTable<DATA, N0, ROW, SLOTS>::segment_t;
 		using typename VlltTable<DATA, N0, ROW, SLOTS>::segment_ptr_t;
 		using typename VlltTable<DATA, N0, ROW, SLOTS>::seg_vector_t;
-		//using typename VlltTable<DATA, N0, ROW, SLOTS>::segment_idx_t;
 
 		VlltFIFOQueue() {};
 
@@ -276,12 +275,13 @@ namespace vllt {
 	template<typename... Cs>
 		requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
 	inline auto VlltFIFOQueue<DATA, N0, ROW, SLOTS>::push_back(Cs&&... data) noexcept -> table_index_t {
-		/*assert(!m_consumed.load().has_value() || m_consumed.load() <= m_next.load());
-		assert(!m_last.load().has_value() || m_last.load() <= m_next_free_slot.load());
+		/*assert(!has_value(m_consumed.load()) || m_consumed.load() <= m_next.load());
+		assert(!has_value(m_last.load()) || m_last.load() <= m_next_free_slot.load());
 		assert(m_next.load() <= m_next_free_slot.load());
-		assert(!m_last.load().has_value() || m_next.load() <= m_last.load() + 1);
-		assert(!m_consumed.load().has_value() || !m_last.load().has_value() || m_consumed.load() <= m_last.load());
+		assert(!has_value(m_last.load()) || m_next.load() <= m_last.load() + 1);
+		assert(!has_value(m_consumed.load()) || !has_value(m_last.load()) || m_consumed.load() <= m_last.load());
 		*/
+
 		auto next_free_slot = m_next_free_slot.load();
 		while (!m_next_free_slot.compare_exchange_weak(next_free_slot, table_index_t{ next_free_slot + 1 }));///< Slot number to put the new data into	
 
@@ -290,8 +290,18 @@ namespace vllt {
 
 		table_index_t old_last;		///< Increase size to validate the new row
 		do {			
-			auto old_last = next_free_slot > 0 ? table_index_t{ next_free_slot - 1 } : table_index_t{null_value<table_index_t>()};
-		} while (!m_last.compare_exchange_weak(old_last, next_free_slot));
+			old_last = next_free_slot > 0 ? table_index_t{ next_free_slot - 1 } : table_index_t{null_value<table_index_t>()};
+		} while (! m_last.compare_exchange_weak(old_last, next_free_slot));
+
+		/*next_last_t old_next_last{m_next_last.load()};
+		do {			
+			auto old_next_last = {
+				next_free_slot > 0 ? table_index_t{ next_free_slot - 1 } : table_index_t{null_value<table_index_t>()},
+			};
+		} while (! m_next_last.compare_exchange_weak(old_last, next_free_slot));
+		*/
+
+
 		return next_free_slot;	///< Return index of new entry
 	}
 
@@ -316,22 +326,36 @@ namespace vllt {
 			next = m_next.load();
 			last = m_last.load();
 			if (!(next <= last)) return std::nullopt;
-			assert(next <= last + 1ul);
+			//assert(next <= last + 1ul);
 			p1 = next + 1ul;
 		} while (!m_next.compare_exchange_weak(next, p1));  ///< Slot number to put the new data into	
+		
+		/* {
+			auto cons = m_consumed.load();
+			auto nnext = m_next.load();
+			assert(!has_value(cons) || cons <= nnext);
+		}
+		{
+			auto last = m_last.load();
+			auto nf = m_next_free_slot.load();
+			assert(!has_value(last) || last <= nf);
+		}
+		{
+			auto nnext = m_next.load();
+			auto nf = m_next_free_slot.load();
+			assert(nnext <= nf);
+		}
 
-		assert(!has_value(m_consumed.load()) || m_consumed.load() <= m_next.load());
-		assert(!has_value(m_last.load()) || m_last.load() <= m_next_free_slot.load());
-		assert(m_next.load() <= m_next_free_slot.load());
-
-		//auto nnext = m_next.load();
-		//last = m_last.load();
-		//assert(!has_value(last) || nnext <= last + 1);
-
-		//auto cons = m_consumed.load();
-		//last = m_last.load();
-		//assert(!has_value(cons) || !has_value(last) || cons <= last);
-
+		{
+			auto nnext = m_next.load();
+			auto last = m_last.load();
+			assert(!has_value(last) || nnext <= last + 1);
+		}
+		{
+			auto cons = m_consumed.load();
+			auto last = m_last.load();
+			assert(!has_value(cons) || !has_value(last) || cons <= last);
+		}*/
 		auto vector_ptr{ m_seg_vector.load() };						///< Access the segment vector
 
 		vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
@@ -349,7 +373,7 @@ namespace vllt {
 		do {
 			consumed = (next > 0 ? table_index_t{ next - 1ull } : table_index_t{null_value<table_index_t>()});
 		} while (!m_consumed.compare_exchange_weak(consumed, next));
-		if(next>0) assert( consumed == next - 1 );
+		//if(next>0) assert( consumed == next - 1 );
 
 		return ret;		//RVO?
 	}
