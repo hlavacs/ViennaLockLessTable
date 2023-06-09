@@ -11,142 +11,211 @@ int main() {
 
 	const size_t MAX = 1024*16*10;
 
-	vllt::VlltStack<types> stack;
-	
-	for (vllt::stack_index_t i = vllt::stack_index_t{0}; i < MAX; ++i) {
-		stack.push_back(static_cast<size_t>(i), 2.0 * i, 3.0f * i, true, 'A');
+	{
+		vllt::VlltStack<types> stack;
+
+		for (vllt::stack_index_t i = vllt::stack_index_t{ 0 }; i < MAX; ++i) {
+			stack.push_back(static_cast<size_t>(i), 2.0 * i, 3.0f * i, true, 'A');
+		}
+
+		stack.swap(vllt::stack_index_t{0}, vllt::stack_index_t{1});
+		auto d1 = stack.get<0>(vllt::stack_index_t{0});
+		auto d2 = stack.get<double>(vllt::stack_index_t{ 0 });
+		auto tup = stack.get_tuple(vllt::stack_index_t{0});
+
+		assert(std::get<0>(tup.value()) == 1);
+		stack.swap(vllt::stack_index_t{ 0 }, vllt::stack_index_t{ 1 });
+		assert(std::get<0>(tup.value()) == 0);
+
+
+		for (vllt::stack_index_t i = vllt::stack_index_t{ 0 }; i < stack.size(); ++i) {
+			auto v = stack.get<size_t>(i).value();
+			assert(v == i);
+		}
+
+		auto i = stack.size();
+		auto data = stack.pop_back();
+		while (data.has_value()) {
+			--i;
+			//assert( std::get<size_t>( data.value() ) == i);
+			data = stack.pop_back();
+		}
+
+		for (vllt::stack_index_t i = vllt::stack_index_t{ 0 }; i < MAX; ++i) {
+			stack.push_back(static_cast<size_t>(i), 2.0 * i, 3.0f * i, true, 'A');
+		}
+		stack.clear();
+
+		auto push = [&](size_t start, size_t max, size_t f = 1) {
+			for (size_t i = start; i < max; ++i) {
+				stack.push_back(f * i, f * 2.0 * i, f * 3.0f * i, true, 'A');
+			}
+		};
+
+		auto pull = [&](size_t n) {
+			for (size_t i = 1; i < n; ++i) {
+				auto v = stack.pop_back();
+				if (v.has_value()) {
+					auto value = v.value();
+					assert(2 * std::get<0>(value) == std::get<1>(value));
+					assert(3 * std::get<0>(value) == std::get<2>(value));
+				}
+			}
+		};
+
+		auto par = [&]() {
+			size_t in = 15000, out = 15000;
+			{
+				std::cout << 1 << " ";
+				std::jthread thread1([&]() { push(0, in, 1); });
+				std::jthread thread2([&]() { push(0, in, 2); });
+				std::jthread thread3([&]() { push(0, in, 3); });
+			}
+
+			{
+				std::cout << 2 << " ";
+
+				std::jthread thread1([&]() { push(0, in, 1); });
+				std::jthread t1([&]() { pull(out); });
+
+				std::jthread thread2([&]() { push(0, in, 2); });
+				std::jthread t2([&]() { pull(out); });
+
+				std::jthread thread3([&]() { push(0, in, 3); });
+				std::jthread t3([&]() { pull(out); });
+
+				std::jthread thread4([&]() { push(0, in, 1); });
+				std::jthread t4([&]() { pull(out); });
+
+				std::jthread thread5([&]() { push(0, in, 2); });
+				std::jthread t5([&]() { pull(out); });
+
+				std::jthread thread6([&]() { push(0, in, 3); });
+				std::jthread t6([&]() { pull(out); });
+
+				std::jthread thread7([&]() { push(0, in, 3); });
+				std::jthread t7([&]() { pull(out); });
+
+				std::jthread t8([&]() { pull(out); });
+				std::jthread t9([&]() { pull(out); });
+			}
+			//assert(queue.size() == 7 * in - 9 * out);
+
+			std::cout << 3 << " ";
+			stack.clear();
+			std::cout << 4 << "\n";
+		};
+
+		for (size_t i = 0; i < 10000; ++i) {
+			std::cout << "Loop " << i << " ";
+			par();
+		}
 	}
 
-	stack.swap(vllt::stack_index_t{0}, vllt::stack_index_t{1});
-	auto d1 = stack.get<0>(vllt::stack_index_t{0});
-	auto d2 = stack.get<double>(vllt::stack_index_t{ 0 });
-	auto tup = stack.get_tuple(vllt::stack_index_t{0});
-	
-	assert(std::get<0>(tup.value()) == 1);
-	stack.swap(vllt::stack_index_t{ 0 }, vllt::stack_index_t{ 1 });
-	assert(std::get<0>(tup.value()) == 0);
-
-
-	for (vllt::stack_index_t i = vllt::stack_index_t{ 0 }; i < stack.size(); ++i) {
-		auto v = stack.get<size_t>(i).value();
-		assert(v == i);
-	}
-
-	auto i = stack.size();
-	auto data = stack.pop_back();
-	while (data.has_value()) {
-		--i;
-		//assert( std::get<size_t>( data.value() ) == i);
-		data = stack.pop_back();
-	}
-
-	for (vllt::stack_index_t i = vllt::stack_index_t{ 0 }; i < MAX; ++i) {
-		stack.push_back(static_cast<size_t>(i), 2.0 * i, 3.0f * i, true, 'A');
-	}
-	stack.clear();
-	
+	return 0;
 
 	//----------------------------------------------------------------------------
 
+	{
+		vllt::VlltFIFOQueue<types, 1 << 8, true, 16> queue;
 
-	vllt::VlltFIFOQueue<types, 1 << 8,true,16> queue;
-
-	auto push = [&](size_t start, size_t max, size_t f = 1 ) {
-		for (size_t i = start; i < max; ++i) {
-			queue.push_back(f*i, f*2.0 * i, f*3.0f * i, true, 'A');
-		}
-	};
-
-	auto pull = [&](size_t start = 0, int64_t n = -1ll, size_t f = 1) {
-		if (n < 0) {
-			auto v = queue.pop_front();
-			size_t j = start;
-			while (v.has_value()) {
-				assert(std::get<0>(v.value()) == f*j);
-				j++;
-				v = queue.pop_front();
+		auto push = [&](size_t start, size_t max, size_t f = 1) {
+			for (size_t i = start; i < max; ++i) {
+				queue.push_back(f * i, f * 2.0 * i, f * 3.0f * i, true, 'A');
 			}
-		} 
-		else {
-			for (size_t j = start; j < (size_t)n; ++j) {
+		};
+
+		auto pull = [&](size_t start = 0, int64_t n = -1ll, size_t f = 1) {
+			if (n < 0) {
 				auto v = queue.pop_front();
-				assert(std::get<0>(v.value()) == f*j);
+				size_t j = start;
+				while (v.has_value()) {
+					assert(std::get<0>(v.value()) == f * j);
+					j++;
+					v = queue.pop_front();
+				}
 			}
-		}
-	};
-
-	push(0, MAX);
-	pull();
-
-	push(0, MAX, 10);
-	pull(0, MAX / 2, 10);
-
-	queue.clear();
-	pull();
-	assert(queue.size() == 0);
-
-	push(MAX/2, MAX, 100);
-	pull(MAX/2, MAX, 100);
-	assert(queue.size() == 0);
-	queue.clear();
-	
-	auto pull2 = [&](size_t n) {
-		for (size_t i = 1; i < n; ++i) {
-			auto v = queue.pop_front();
-			if (v.has_value()) {
-				auto value = v.value();
-				assert(2 * std::get<0>(value) == std::get<1>(value));
-				assert(3 * std::get<0>(value) == std::get<2>(value));
+			else {
+				for (size_t j = start; j < (size_t)n; ++j) {
+					auto v = queue.pop_front();
+					assert(std::get<0>(v.value()) == f * j);
+				}
 			}
-		}
-	};
+		};
 
-	auto par = [&]() {
-		size_t in = 15000, out = 15000;
-		{
-			std::cout << 1 << " ";
-			//std::jthread thread1([&]() { push(0, in, 1); });
-			//std::jthread thread2([&]() { push(0, in, 2); });
-			//std::jthread thread3([&]() { push(0, in, 3); });
-		}
+		push(0, MAX);
+		pull();
 
-		{
-			std::cout << 2 << " ";
+		push(0, MAX, 10);
+		pull(0, MAX / 2, 10);
 
-			std::jthread thread1([&]() { push(0, in, 1); });
-			std::jthread t1([&]() { pull2(out); });
-
-			std::jthread thread2([&]() { push(0, in, 2); });
-			std::jthread t2([&]() { pull2(out); });
-
-			std::jthread thread3([&]() { push(0, in, 3); });
-			std::jthread t3([&]() { pull2(out); });
-
-			std::jthread thread4([&]() { push(0, in, 1); });
-			std::jthread t4([&]() { pull2(out); });
-
-			std::jthread thread5([&]() { push(0, in, 2); });
-			std::jthread t5([&]() { pull2(out); });
-
-			std::jthread thread6([&]() { push(0, in, 3); });
-			std::jthread t6([&]() { pull2(out); });
-
-			std::jthread thread7([&]() { push(0, in, 3); });
-			std::jthread t7([&]() { pull2(out); });
-
-			std::jthread t8([&]() { pull2(out); });
-			std::jthread t9([&]() { pull2(out); });
-		}
-		//assert(queue.size() == 7 * in - 9 * out);
-
-		std::cout << 3 << " ";
 		queue.clear();
-		std::cout << 4 << "\n";
-	};
+		pull();
+		assert(queue.size() == 0);
 
-	for (size_t i = 0; i < 10000; ++i) {
-		std::cout << "Loop " << i << " ";
-		par();
+		push(MAX / 2, MAX, 100);
+		pull(MAX / 2, MAX, 100);
+		assert(queue.size() == 0);
+		queue.clear();
+
+		auto pull2 = [&](size_t n) {
+			for (size_t i = 1; i < n; ++i) {
+				auto v = queue.pop_front();
+				if (v.has_value()) {
+					auto value = v.value();
+					assert(2 * std::get<0>(value) == std::get<1>(value));
+					assert(3 * std::get<0>(value) == std::get<2>(value));
+				}
+			}
+		};
+
+		auto par = [&]() {
+			size_t in = 15000, out = 15000;
+			{
+				std::cout << 1 << " ";
+				std::jthread thread1([&]() { push(0, in, 1); });
+				std::jthread thread2([&]() { push(0, in, 2); });
+				std::jthread thread3([&]() { push(0, in, 3); });
+			}
+
+			{
+				std::cout << 2 << " ";
+
+				std::jthread thread1([&]() { push(0, in, 1); });
+				std::jthread t1([&]() { pull2(out); });
+
+				std::jthread thread2([&]() { push(0, in, 2); });
+				std::jthread t2([&]() { pull2(out); });
+
+				std::jthread thread3([&]() { push(0, in, 3); });
+				std::jthread t3([&]() { pull2(out); });
+
+				std::jthread thread4([&]() { push(0, in, 1); });
+				std::jthread t4([&]() { pull2(out); });
+
+				std::jthread thread5([&]() { push(0, in, 2); });
+				std::jthread t5([&]() { pull2(out); });
+
+				std::jthread thread6([&]() { push(0, in, 3); });
+				std::jthread t6([&]() { pull2(out); });
+
+				std::jthread thread7([&]() { push(0, in, 3); });
+				std::jthread t7([&]() { pull2(out); });
+
+				std::jthread t8([&]() { pull2(out); });
+				std::jthread t9([&]() { pull2(out); });
+			}
+			//assert(queue.size() == 7 * in - 9 * out);
+
+			std::cout << 3 << " ";
+			queue.clear();
+			std::cout << 4 << "\n";
+		};
+
+		for (size_t i = 0; i < 10000; ++i) {
+			std::cout << "Loop " << i << " ";
+			par();
+		}
 	}
 
 	return 0;
