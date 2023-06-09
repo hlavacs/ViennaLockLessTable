@@ -12,23 +12,22 @@ int main() {
 	const size_t MAX = 1024*16*10;
 
 	vllt::VlltStack<types> stack;
-	using stack_idx_t = vllt::table_index_t;
-
-	for (stack_idx_t i = stack_idx_t{0}; i < MAX; ++i) {
+	
+	for (vllt::stack_index_t i = vllt::stack_index_t{0}; i < MAX; ++i) {
 		stack.push_back(static_cast<size_t>(i), 2.0 * i, 3.0f * i, true, 'A');
 	}
 
-	stack.swap(stack_idx_t{0}, stack_idx_t{1});
-	auto d1 = stack.get<0>(stack_idx_t{0});
-	auto d2 = stack.get<double>(stack_idx_t{ 0 });
-	auto tup = stack.get_tuple(stack_idx_t{0});
+	stack.swap(vllt::stack_index_t{0}, vllt::stack_index_t{1});
+	auto d1 = stack.get<0>(vllt::stack_index_t{0});
+	auto d2 = stack.get<double>(vllt::stack_index_t{ 0 });
+	auto tup = stack.get_tuple(vllt::stack_index_t{0});
 	
 	assert(std::get<0>(tup.value()) == 1);
-	stack.swap(stack_idx_t{ 0 }, stack_idx_t{ 1 });
+	stack.swap(vllt::stack_index_t{ 0 }, vllt::stack_index_t{ 1 });
 	assert(std::get<0>(tup.value()) == 0);
 
 
-	for (stack_idx_t i = stack_idx_t{ 0 }; i < stack.size(); ++i) {
+	for (vllt::stack_index_t i = vllt::stack_index_t{ 0 }; i < stack.size(); ++i) {
 		auto v = stack.get<size_t>(i).value();
 		assert(v == i);
 	}
@@ -41,7 +40,7 @@ int main() {
 		data = stack.pop_back();
 	}
 
-	for (stack_idx_t i = stack_idx_t{ 0 }; i < MAX; ++i) {
+	for (vllt::stack_index_t i = vllt::stack_index_t{ 0 }; i < MAX; ++i) {
 		stack.push_back(static_cast<size_t>(i), 2.0 * i, 3.0f * i, true, 'A');
 	}
 	stack.clear();
