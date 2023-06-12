@@ -20,13 +20,13 @@ namespace vllt {
 	// \brief VlltTable is the base class for some classes, enabling management of tables that can be
 	// appended in parallel.
 	//
-	using table_index_t = vsty::strong_type_null_t<size_t, vsty::counter<>, std::numeric_limits<size_t>::max()>;
 
 	template<typename DATA, size_t N0 = 1 << 10, bool ROW = true, size_t SLOTS = 16>
 	class VlltTable {
 	protected:
 		static_assert(std::is_default_constructible_v<DATA>, "Your components are not default constructible!");
 
+		using table_index_t = vsty::strong_type_null_t<size_t, vsty::counter<>, std::numeric_limits<size_t>::max()>;
 		using segment_idx_t = vsty::strong_integral_t<size_t, vsty::counter<>>; ///<strong integer type for indexing segments, 0 to size vector-1
 
 		static const size_t N = vtll::smallest_pow2_leq_value< N0 >::value;									///< Force N to be power of 2
@@ -214,6 +214,7 @@ namespace vllt {
 		using VlltTable<DATA, N0, ROW, SLOTS>::insert;
 
 		using tuple_opt_t = std::optional< vtll::to_tuple< vtll::remove_atomic<DATA> > >;
+		using typename VlltTable<DATA, N0, ROW, SLOTS>::table_index_t;
 		using typename VlltTable<DATA, N0, ROW, SLOTS>::tuple_ref_t;
 		using typename VlltTable<DATA, N0, ROW, SLOTS>::segment_t;
 		using typename VlltTable<DATA, N0, ROW, SLOTS>::segment_ptr_t;
@@ -471,6 +472,7 @@ namespace vllt {
 		using VlltTable<DATA, N0, ROW, SLOTS>::segment;
 
 		using tuple_opt_t = std::optional< vtll::to_tuple< vtll::remove_atomic<DATA> > >;
+		using typename VlltTable<DATA, N0, ROW, SLOTS>::table_index_t;
 		using typename VlltTable<DATA, N0, ROW, SLOTS>::segment_t;
 		using typename VlltTable<DATA, N0, ROW, SLOTS>::segment_ptr_t;
 		using typename VlltTable<DATA, N0, ROW, SLOTS>::segment_vector_t;

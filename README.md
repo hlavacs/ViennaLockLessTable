@@ -7,8 +7,8 @@ The Vienna Lock Less Table (VLLT) defines C++20 containers that like std::vector
 * Allows the use of PMR allocators optimized for segment allocation and deallocation.
 * Components can be copyable, movable or be even atomics. In the latter case, only values can be copied, not the atomics themselves.
 * Lockless operations. VLLT does not use mutexes, only compare and swap (CAS).
-* VlltStack: lockless push and pop.
-* VlltFIFOQueue: lockless push and pop.
+* VlltStack (i.e., LIFO queue): lockless push back and pop back.
+* VlltFIFOQueue: lockless push back and pop front.
 
 VLLT uses other projects:
 * Vienna Strong Type (VSTY), see https://github.com/hlavacs/ViennaStrongType.git
@@ -34,7 +34,7 @@ For making sure that the submodules contain the latest version, cd into them and
 ```
   cd ViennaStrongType
   git pull origin main
-  cd ..\ViennaLockLessTable
+  cd ..\ViennaTypeListLibrary
   git pull origin main
 ```
 
@@ -50,24 +50,23 @@ VLLT's main base class is VlltTable. The class depends on the following template
 * N0: the minimal *size* of a segment. VTLL stores its data in segments of size *N*. Here *N* is the smallest power of 2 that is equal or larger than *N0*. So if *N0* is not a power of 2, VTLL will chose the next larger power of 2 as size. The default value is 1024.
 * ROW: a boolean determining the data layout. If true, the layout is row-oriented. If false, it is column-oriented. The default value is false.
 * SLOTS: the initial *number* of segments that can be stored. If more are needed, then this is gradually doubled.
-* table_index_t: a data type that is used for indexing the rows of the table. Its default is *size_t*, but you can use your own strong types if you want.
 
 VlltTable offers a slim API only.
-* Get address of the I'th component of row n. This must be synchronized externally, e.g. for writing.
+* Get address of the i'th component of row n. This must be synchronized externally, e.g., for writing.
 * Insert a new row to the end of the table. This is synchronized internally, the table can grow as long as there is memory.
 
 VlltTable can be used as a basis for deriving more complex behavior. The main functionality of VLLT is provided by the classes VlltStack and VlltFIFOQueue.
 
+## VlltStack
 VlltStack is a growable stack that offers the following API:
 * push_back: add a new row to the stack. Internally synchronized.
 * pop_back: remove the last row from the stack and copy/move values to a tuple. Internally synchronized.
 * clear: remove all rows from the stack. Internally synchronized.
-* compress: deallocate unused segments. Internally synchronized.
 * get: get reference to the I'th component of row n. Externally synchronized.
 * get: get reference to the component of type C of row n. Only available if component types are unique. Externally synchronized.
 * get_tuple: get a tuple with references to all components of row n. Externally synchronized.
 * swap: swap values of two rows. Externally synchronized.
-* size: number of rows in the stack.
+* size: number of elements in the stack.
 
 An example for setting up a stack is
 
@@ -77,17 +76,17 @@ An example for setting up a stack is
     #include "VLLT.h"
     using types = vtll::tl<size_t, double, float, std::atomic<bool>, char>;
     vllt::VlltStack<types> stack;
-    using idx_stack_t = decltype(stack)::table_index_t; //default is size_t
+    using stack_index_t = decltype(stack)::table_index_t; //default is size_t
 
     stack.push_back(static_cast<size_t>(1ull, 2.0, 3.0f, true, 'A');
     stack.push_back(static_cast<size_t>(2ull, 4.0, 6.0f, true, 'A');
     stack.push_back(static_cast<size_t>(3ull, 6.0, 9.0f, true, 'A');
 
-    stack.swap(idx_stack_t{ 0 }, idx_stack_t{ 1 }); //swap first two rows
+    stack.swap(stack_index_t{ 0 }, stack_index_t{ 1 }); //swap first two rows
 
-    auto tup = stack.get_tuple(idx_stack_t{0}); //references to the components
+    auto tup = stack.get_tuple(stack_index_t{0}); //references to the components
     assert(std::get<0>(tup) == 1);  //first component is size_t
-    stack.swap(idx_stack_t{ 0 }, idx_stack_t{ 1 }); //swap back
+    stack.swap(stack_index_t{ 0 }, stack_index_t{ 1 }); //swap back
     assert(std::get<0>(tup) == 0);
 
     auto data = stack.pop_back(); //std::optional tuple holding all the values
@@ -95,9 +94,9 @@ An example for setting up a stack is
       assert( std::get<size_t>( data.value() ) == 3); //select by type possible here
     }
 ```
+The stack uses the strong type stack_index_t as index, which as default uses 32 bits. This means that the stack can hold max. 2^32 elements, but synchronization is lockless. If you need larger sizes then redefine it for 64 bits, which means that synchronization most likely uses locks. This is due to the fact that the stack state uses two such values in a single atomic, and lockless usage is guaranteed only for up to 64 bits inside an atomic.
 
-This way you can always get access to the index type used in the stack, which by default is size_t, but might be any strong type.
-
+## VlltFIFOQueue
 VlltFIFOQueue is a fifo queue that can grow as demand dictates. It offers the following API:
 * push_back: Put a new row to the end of the queue.
 * pop_front: Get the first element from the queue.
@@ -106,7 +105,6 @@ VlltFIFOQueue is a fifo queue that can grow as demand dictates. It offers the fo
 
 ```c
   vllt::VlltFIFOQueue<types, 1 << 10,true,16,size_t> queue;
-  using idx_queue_t = decltype(queue)::table_index_t;
 
   queue.push_back(1, 2.0, 3.0f, true, 'A'); //first
   queue.push_back(2, 4.0, 6.0f, true, 'A'); //second
@@ -117,3 +115,4 @@ VlltFIFOQueue is a fifo queue that can grow as demand dictates. It offers the fo
     assert(std::get<0>(v.value()) == 1);
   }
 ```
+VlltFIFOQueue uses four atomics holding 64 bits as state variables, each of which can only grow monotonically. Operations are always lockless and the queue has no limits on the number of elements it can hold.
