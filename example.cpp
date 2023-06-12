@@ -5,7 +5,7 @@
 #include "VLLT.h"
 
 
-int main() {
+void functional_test() {
 
 	using types = vtll::tl<uint32_t, size_t, double, float, bool, char>;
 
@@ -28,7 +28,6 @@ int main() {
 		assert(std::get<0>(tup.value()) == 1);
 		stack.swap(vllt::stack_index_t{ 0 }, vllt::stack_index_t{ 1 });
 		assert(std::get<0>(tup.value()) == 0);
-
 
 		for (vllt::stack_index_t i = vllt::stack_index_t{ 0 }; i < stack.size(); ++i) {
 			auto v = stack.get<size_t>(i).value();
@@ -243,5 +242,88 @@ int main() {
 		}
 	}
 
-	return 0;
+	return;
 }
+
+
+std::mutex g_mutex;
+
+using namespace std::chrono;
+
+void performance_test() {
+	using types = vtll::tl<uint32_t, size_t, double, float, bool, char>;
+
+	{
+		std::cout << "QUEUE\n";
+
+		vllt::VlltFIFOQueue<types, 1 << 10, true, 16> queue;
+
+		auto par = [&]( bool lck1 ) {
+			auto push = [&](size_t start, size_t max, size_t f, bool lck) {
+				for (size_t i = start; i <= max; ++i) {
+					if (lck) g_mutex.lock();
+					queue.push_back((uint32_t)i, f, (double)f * i, f * 2.0f * i, true, 'A');
+					if (lck) g_mutex.unlock();
+				}
+			};
+
+			auto pull = [&](size_t n, bool lck) {
+				for (size_t i = 1; i <= n; ++i) {
+					if (lck) g_mutex.lock();
+					auto v = queue.pop_front();
+					if (v.has_value()) {
+						auto value = v.value();
+					}
+					if (lck) g_mutex.unlock();
+				}
+			};
+
+			size_t in = 200000, out = 200000;
+
+			std::cout << 1 << " ";
+			auto T1 = std::chrono::high_resolution_clock::now();
+			{
+				std::jthread thread1([&]() { push(1, in, 1, lck1); });
+				std::jthread thread2([&]() { push(1, in, 2, lck1); });
+				std::jthread thread3([&]() { push(1, in, 3, lck1); });
+				std::jthread thread4([&]() { push(1, in, 4, lck1); });
+				std::jthread thread5([&]() { push(1, in, 3, lck1); });
+				std::jthread thread6([&]() { push(1, in, 4, lck1); });
+			}
+			auto T2 = std::chrono::high_resolution_clock::now();
+			{
+				std::jthread t1([&]() { pull(in, lck1); });
+				std::jthread t2([&]() { pull(in, lck1); });
+				std::jthread t3([&]() { pull(in, lck1); });
+				std::jthread t4([&]() { pull(in, lck1); });
+				std::jthread t5([&]() { pull(in, lck1); });
+				std::jthread t6([&]() { pull(in, lck1); });
+			}
+			auto T3 = high_resolution_clock::now();
+			auto dt1 = duration_cast<duration<double>>(T2 - T1).count();
+			auto dt2 = duration_cast<duration<double>>(T3 - T2).count();
+
+			std::cout << dt1 << " " << dt2 << " ";
+
+			return std::make_pair(dt1, dt2);
+		};
+
+		for (size_t i = 0; i < 100; ++i) {
+			std::cout << "Loop " << i << " ";
+			auto TLO = par(true);
+			auto TLL = par(false);
+
+			std::cout << 3 << "\n";
+		}
+
+	}
+
+}
+
+
+int main() {
+	//functional_test();
+	performance_test();
+}
+
+
