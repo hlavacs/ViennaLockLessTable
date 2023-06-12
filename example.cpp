@@ -129,7 +129,7 @@ int main() {
 			std::cout << 4 << "\n";
 		};
 
-		for (size_t i = 0; i < 100; ++i) {
+		for (size_t i = 0; i < 500; ++i) {
 			std::cout << "Loop " << i << " ";
 			par();
 		}
@@ -237,7 +237,7 @@ int main() {
 			std::cout << 4 << "\n";
 		};
 
-		for (size_t i = 0; i < 100; ++i) {
+		for (size_t i = 0; i < 500; ++i) {
 			std::cout << "Loop " << i << " ";
 			par();
 		}

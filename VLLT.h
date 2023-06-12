@@ -42,7 +42,7 @@ namespace vllt {
 
 		using segment_ptr_t = std::shared_ptr<segment_t>;						///<Shared pointer to a segment
 		struct segment_vector_t {
-			std::pmr::vector<std::atomic<segment_ptr_t>> m_segments;	///<Vector of atomic shared pointers to the segments
+			std::pmr::vector<segment_ptr_t> m_segments;	///<Vector of atomic shared pointers to the segments
 			segment_idx_t m_seg_offset = 0;								///<Segment offset for FIFO queue (offsets segments NOT rows)
 		};
 
@@ -61,7 +61,7 @@ namespace vllt {
 		template<size_t I, typename C = vtll::Nth_type<DATA, I>>
 		inline auto component_ptr(table_index_t n, std::shared_ptr<segment_vector_t>& vector_ptr) noexcept -> C* {		///< \returns a pointer to a component
 			auto idx = segment(n, vector_ptr);
-			auto segment_ptr = (vector_ptr->m_segments[idx]).load();	///< Access the segment holding the slot
+			auto segment_ptr = (vector_ptr->m_segments[idx]); // .load();	///< Access the segment holding the slot
 			if constexpr (ROW) { return &std::get<I>((*segment_ptr)[n & BIT_MASK]); }
 			else { return &std::get<I>(*segment_ptr)[n & BIT_MASK]; }
 		}
@@ -123,7 +123,7 @@ namespace vllt {
 		inline auto resize(table_index_t slot, std::shared_ptr<segment_vector_t>& vector_ptr, std::atomic<table_index_t>* first_slot = nullptr) {
 			if (!vector_ptr) {
 				auto new_vector_ptr = std::make_shared<segment_vector_t>( //vector has always as many slots as its capacity is -> size==capacity
-					segment_vector_t{ std::pmr::vector<std::atomic<segment_ptr_t>>{SLOTS, m_mr}, segment_idx_t{0} } //increase existing one
+					segment_vector_t{ std::pmr::vector<segment_ptr_t>{SLOTS, m_mr}, segment_idx_t{ 0 } } //increase existing one
 				);
 				for (auto& ptr : new_vector_ptr->m_segments) {
 					ptr = std::make_shared<segment_t>();
@@ -144,22 +144,24 @@ namespace vllt {
 				size_t new_offset = vector_ptr->m_seg_offset + first_seg;			
 				size_t min_size = segment(slot, new_offset);
 				size_t smaller_size = std::max((num_segments >> 2), SLOTS);
+				size_t medium_size = std::max((num_segments >> 1), SLOTS);
 				size_t new_size = 2 * num_segments;
 				while (min_size > new_size) { new_size *= 2; }
 
-				if (first_seg > num_segments * 0.8 && min_size < smaller_size) { new_size = smaller_size; }
+				if (first_seg > num_segments * 0.85 && min_size < smaller_size) { new_size = smaller_size; }
+				else if (first_seg > num_segments * 0.65 && min_size < smaller_size) { new_size = medium_size; }
 				else if (first_seg > (num_segments >> 1) && min_size < num_segments) new_size = num_segments;
 
 				auto new_vector_ptr = std::make_shared<segment_vector_t>( //vector has always as many slots as its capacity is -> size==capacity
-					segment_vector_t{ std::pmr::vector<std::atomic<segment_ptr_t>>{new_size, m_mr}, segment_idx_t{new_offset} } //increase existing one
+					segment_vector_t{ std::pmr::vector<segment_ptr_t>{new_size, m_mr}, segment_idx_t{ new_offset } } //increase existing one
 				);
 				
 				size_t idx = 0;
 				std::ranges::for_each(new_vector_ptr->m_segments.begin(), new_vector_ptr->m_segments.end(), [&](auto& ptr) {
-					if (first_seg + idx < num_segments) { ptr.store( vector_ptr->m_segments[first_seg + idx].load() ); }
+					if (first_seg + idx < num_segments) { ptr = vector_ptr->m_segments[first_seg + idx]; } 
 					else {
 						size_t i1 = idx - (num_segments - first_seg);
-						if (i1 < first_seg) { ptr.store(vector_ptr->m_segments[i1].load()); }
+						if (i1 < first_seg) { ptr = vector_ptr->m_segments[i1]; }
 						else { ptr = std::make_shared<segment_t>();	}
 					}
 					++idx;
