@@ -505,15 +505,19 @@ namespace vllt {
 		requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
 	inline auto VlltFIFOQueue<DATA, N0, ROW, SLOTS>::push_back(Cs&&... data) noexcept -> table_index_t {
 		auto next_free_slot = m_next_free_slot.load();
-		while (!m_next_free_slot.compare_exchange_weak(next_free_slot, table_index_t{ next_free_slot + 1 }));///< Slot number to put the new data into	
+		while (!m_next_free_slot.compare_exchange_weak(next_free_slot, table_index_t{ next_free_slot + 1 })) {
+			std::this_thread::yield();
+		};///< Slot number to put the new data into	
 
 		auto vector_ptr{ m_seg_vector.load() };		///< Shared pointer to current segment ptr vector, can be nullptr
 		insert(next_free_slot, vector_ptr, &m_consumed, std::forward<Cs>(data)...);
 
-		table_index_t old_last;		///< Increase size to validate the new row
+		table_index_t old_last = next_free_slot > 0 ? table_index_t{ next_free_slot - 1 } : table_index_t{vsty::null_value<table_index_t>()};;
+		bool success;
 		do {			
-			old_last = next_free_slot > 0 ? table_index_t{ next_free_slot - 1 } : table_index_t{vsty::null_value<table_index_t>()};
-		} while (! m_last.compare_exchange_weak(old_last, next_free_slot));
+			success = m_last.compare_exchange_weak(old_last, next_free_slot);
+			if(!success) std::this_thread::yield();
+		} while (!success);
 
 		return next_free_slot;	///< Return index of new entry
 	}
@@ -536,10 +540,13 @@ namespace vllt {
 
 		table_index_t last;
 		auto next = m_next.load();
+		bool success;
 		do {
 			last = m_last.load();
 			if (!(next <= last)) return std::nullopt;
-		} while (!m_next.compare_exchange_weak(next, table_index_t{ next + 1ul }));  ///< Slot number to put the new data into	
+			success = m_next.compare_exchange_weak(next, table_index_t{ next + 1ul });
+			if (!success) std::this_thread::yield();
+		} while (!success);  ///< Slot number to put the new data into	
 		
 		auto vector_ptr{ m_seg_vector.load() };						///< Access the segment vector
 
@@ -555,7 +562,7 @@ namespace vllt {
 		);
 
 		table_index_t consumed = (next > 0 ? table_index_t{ next - 1ull } : table_index_t{vsty::null_value<table_index_t>()});
-		while (!m_consumed.compare_exchange_weak(consumed, next));
+		while (!m_consumed.compare_exchange_weak(consumed, next)) { std::this_thread::yield(); };
 
 		return ret;		//RVO?
 	}
