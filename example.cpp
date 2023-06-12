@@ -256,7 +256,7 @@ void performance_test() {
 	{
 		std::cout << "QUEUE\n";
 
-		vllt::VlltFIFOQueue<types, 1 << 10, true, 16> queue;
+		vllt::VlltFIFOQueue<types, 1 << 8, true, 16> queue;
 
 		auto par = [&]( bool lck1 ) {
 			auto push = [&](size_t start, size_t max, size_t f, bool lck) {
@@ -278,7 +278,7 @@ void performance_test() {
 				}
 			};
 
-			size_t in = 200000, out = 200000;
+			size_t in = 100000, out = 100000;
 
 			std::cout << 1 << " ";
 			auto T1 = std::chrono::high_resolution_clock::now();
@@ -287,8 +287,8 @@ void performance_test() {
 				std::jthread thread2([&]() { push(1, in, 2, lck1); });
 				std::jthread thread3([&]() { push(1, in, 3, lck1); });
 				std::jthread thread4([&]() { push(1, in, 4, lck1); });
-				std::jthread thread5([&]() { push(1, in, 3, lck1); });
-				std::jthread thread6([&]() { push(1, in, 4, lck1); });
+				std::jthread thread5([&]() { push(1, in, 5, lck1); });
+				std::jthread thread6([&]() { push(1, in, 6, lck1); });
 			}
 			auto T2 = std::chrono::high_resolution_clock::now();
 			{
@@ -300,12 +300,29 @@ void performance_test() {
 				std::jthread t6([&]() { pull(in, lck1); });
 			}
 			auto T3 = high_resolution_clock::now();
+			{
+				std::jthread thread1([&]() { push(1, in, 1, lck1); });
+				std::jthread t1([&]() { pull(in, lck1); });
+				std::jthread thread2([&]() { push(1, in, 2, lck1); });
+				std::jthread t2([&]() { pull(in, lck1); });
+				std::jthread thread3([&]() { push(1, in, 3, lck1); });
+				std::jthread t3([&]() { pull(in, lck1); });
+				std::jthread thread4([&]() { push(1, in, 4, lck1); });
+				std::jthread t4([&]() { pull(in, lck1); });
+				std::jthread thread5([&]() { push(1, in, 5, lck1); });
+				std::jthread t5([&]() { pull(in, lck1); });
+				std::jthread thread6([&]() { push(1, in, 6, lck1); });
+				std::jthread t6([&]() { pull(in, lck1); });
+			}
+			auto T4 = std::chrono::high_resolution_clock::now();
+
 			auto dt1 = duration_cast<duration<double>>(T2 - T1).count();
 			auto dt2 = duration_cast<duration<double>>(T3 - T2).count();
+			auto dt3 = duration_cast<duration<double>>(T4 - T3).count();
 
-			std::cout << dt1 << " " << dt2 << " ";
+			std::cout << dt1 << " " << dt2 << " " << dt3 << " ";
 
-			return std::make_pair(dt1, dt2);
+			return std::make_tuple(dt1, dt2, dt3);
 		};
 
 		for (size_t i = 0; i < 100; ++i) {

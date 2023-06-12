@@ -539,7 +539,7 @@ namespace vllt {
 		do {
 			last = m_last.load();
 			if (!(next <= last)) return std::nullopt;
-		} while (!m_next.compare_exchange_weak(next, table_index_t{next + 1ul}));  ///< Slot number to put the new data into	
+		} while (!m_next.compare_exchange_weak(next, table_index_t{ next + 1ul }));  ///< Slot number to put the new data into	
 		
 		auto vector_ptr{ m_seg_vector.load() };						///< Access the segment vector
 
@@ -554,10 +554,8 @@ namespace vllt {
 			}
 		);
 
-		table_index_t consumed;
-		do {
-			consumed = (next > 0 ? table_index_t{ next - 1ull } : table_index_t{vsty::null_value<table_index_t>()});
-		} while (!m_consumed.compare_exchange_weak(consumed, next));
+		table_index_t consumed = (next > 0 ? table_index_t{ next - 1ull } : table_index_t{vsty::null_value<table_index_t>()});
+		while (!m_consumed.compare_exchange_weak(consumed, next));
 
 		return ret;		//RVO?
 	}
