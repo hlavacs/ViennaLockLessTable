@@ -256,7 +256,7 @@ void performance_test() {
 	{
 		std::cout << "QUEUE\n";
 
-		vllt::VlltFIFOQueue<types, 1 << 8, true, 16> queue;
+		vllt::VlltFIFOQueue<types, 1 << 10, true, 16> queue;
 
 		auto par = [&]( bool lck1 ) {
 			auto push = [&](size_t start, size_t max, size_t f, bool lck) {
@@ -278,7 +278,7 @@ void performance_test() {
 				}
 			};
 
-			size_t in = 100000, out = 100000;
+			size_t in = 200000, out = 200000;
 
 			std::cout << 1 << " ";
 			auto T1 = std::chrono::high_resolution_clock::now();
@@ -302,17 +302,17 @@ void performance_test() {
 			auto T3 = high_resolution_clock::now();
 			{
 				std::jthread thread1([&]() { push(1, in, 1, lck1); });
-				std::jthread t1([&]() { pull(in, lck1); });
 				std::jthread thread2([&]() { push(1, in, 2, lck1); });
+				std::jthread t1([&]() { pull(in, lck1); });
 				std::jthread t2([&]() { pull(in, lck1); });
 				std::jthread thread3([&]() { push(1, in, 3, lck1); });
 				std::jthread t3([&]() { pull(in, lck1); });
-				std::jthread thread4([&]() { push(1, in, 4, lck1); });
-				std::jthread t4([&]() { pull(in, lck1); });
-				std::jthread thread5([&]() { push(1, in, 5, lck1); });
-				std::jthread t5([&]() { pull(in, lck1); });
-				std::jthread thread6([&]() { push(1, in, 6, lck1); });
-				std::jthread t6([&]() { pull(in, lck1); });
+				//std::jthread thread4([&]() { push(1, in, 4, lck1); });
+				//std::jthread t4([&]() { pull(in, lck1); });
+				//std::jthread thread5([&]() { push(1, in, 5, lck1); });
+				//std::jthread t5([&]() { pull(in, lck1); });
+				//std::jthread thread6([&]() { push(1, in, 6, lck1); });
+				//std::jthread t6([&]() { pull(in, lck1); });
 			}
 			auto T4 = std::chrono::high_resolution_clock::now();
 
@@ -320,16 +320,29 @@ void performance_test() {
 			auto dt2 = duration_cast<duration<double>>(T3 - T2).count();
 			auto dt3 = duration_cast<duration<double>>(T4 - T3).count();
 
-			std::cout << dt1 << " " << dt2 << " " << dt3 << " ";
+			//std::cout << dt1 << " " << dt2 << " " << dt3 << " ";
 
 			return std::make_tuple(dt1, dt2, dt3);
 		};
 
-		for (size_t i = 0; i < 100; ++i) {
+		double SLO1 = 0.0, SLO2 = 0.0, SLO3 = 0.0;
+		double SLL1 = 0.0, SLL2 = 0.0, SLL3 = 0.0;
+		for (size_t i = 1; i <= 100; ++i) {
 			std::cout << "Loop " << i << " ";
 			auto TLO = par(true);
-			auto TLL = par(false);
+			if (i >= 2) {
+				auto j = i - 1 ;
+				SLO1 += std::get<0>(TLO);
+				SLO2 += std::get<1>(TLO);
+				SLO3 += std::get<2>(TLO);
+				std::cout << SLO1 / j << " " << SLO2 / j << " " << SLO3 / j << " ";
 
+				auto TLL = par(false);
+				SLL1 += std::get<0>(TLL);
+				SLL2 += std::get<1>(TLL);
+				SLL3 += std::get<2>(TLL);
+				std::cout << SLL1 / j << " " << SLL2 / j << " " << SLL3 / j << " ";
+			}
 			std::cout << 3 << "\n";
 		}
 
