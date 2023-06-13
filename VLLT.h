@@ -155,7 +155,7 @@ namespace vllt {
 				else if (first_seg > num_segments * 0.65 && min_size < smaller_size) { new_size = medium_size; }
 				else if (first_seg > (num_segments >> 1) && min_size < num_segments) new_size = num_segments;
 
-				std::this_thread::yield();
+				//std::this_thread::yield();
 				auto vector_ptr2 = m_seg_vector.load();
 				if (vector_ptr != vector_ptr2) {
 					vector_ptr = vector_ptr2;

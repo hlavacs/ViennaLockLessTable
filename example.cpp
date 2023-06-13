@@ -321,13 +321,13 @@ void performance_test() {
 			}
 			{
 				std::vector<std::jthread> threads;
-				size_t num=8;
+				size_t num=12;
 				for (size_t i = 1; i <= num; ++i) {
 					threads.emplace_back(std::move(std::jthread([&]() { push(i, 1, in, i, lck1); })));
-					//threads.emplace_back(std::move(std::jthread([&]() { pull(i, in, lck1); })));
+					threads.emplace_back(std::move(std::jthread([&]() { pull(i, in, lck1); })));
 				}
 				for (size_t i = 1; i <= num; ++i) {
-					threads.emplace_back(std::move(std::jthread([&]() { pull(i, in, lck1); })));
+					//threads.emplace_back(std::move(std::jthread([&]() { pull(i, in, lck1); })));
 				}
 			}
 
