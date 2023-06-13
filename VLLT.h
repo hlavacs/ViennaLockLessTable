@@ -77,8 +77,8 @@ namespace vllt {
 		/// <param name="data">The data for the new row.</param>
 		template<typename... Cs>
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
-		void insert(table_index_t slot, std::shared_ptr<segment_vector_t>& vector_ptr, std::atomic<table_index_t>* first_slot, Cs&&... data) {
-			resize(slot, vector_ptr, first_slot); //if need be, grow the vector of segments
+		void insert(table_index_t slot, std::atomic<table_index_t>* first_slot, Cs&&... data) {
+			auto vector_ptr = resize(slot, first_slot); //if need be, grow the vector of segments
 
 			//copy or move the data to the new slot, using a recursive templated lambda
 			auto f = [&]<size_t I, typename T, typename... Ts>(auto && fun, T && dat, Ts&&... dats) {
@@ -120,7 +120,9 @@ namespace vllt {
 		/// <param name="vector_ptr">Shared pointer to the segment vector.</param>
 		/// <param name="first_seg">Index of first segment that currently holds information.</param>
 		/// <returns></returns>
-		inline auto resize(table_index_t slot, std::shared_ptr<segment_vector_t>& vector_ptr, std::atomic<table_index_t>* first_slot = nullptr) {
+		inline auto resize(table_index_t slot, std::atomic<table_index_t>* first_slot = nullptr) {
+			auto vector_ptr{ m_seg_vector.load() };
+
 			if (!vector_ptr) {
 				auto new_vector_ptr = std::make_shared<segment_vector_t>( //vector has always as many slots as its capacity is -> size==capacity
 					segment_vector_t{ std::pmr::vector<segment_ptr_t>{SLOTS, m_mr}, segment_idx_t{ 0 } } //increase existing one
@@ -131,6 +133,11 @@ namespace vllt {
 				if (m_seg_vector.compare_exchange_strong(vector_ptr, new_vector_ptr)) {	///< Try to exchange old segment vector with new
 					vector_ptr = new_vector_ptr;										///< If success, remember for later
 				} //Note: if we were beaten by other thread, then compare_exchange_strong itself puts the new value into vector_ptr
+			}
+
+			if (slot >= N * (vector_ptr->m_segments.size() + vector_ptr->m_seg_offset)) {
+				std::this_thread::yield();
+				vector_ptr = m_seg_vector.load();
 			}
 
 			while ( slot >= N * (vector_ptr->m_segments.size() + vector_ptr->m_seg_offset) ) {
@@ -170,7 +177,10 @@ namespace vllt {
 				if (m_seg_vector.compare_exchange_strong(vector_ptr, new_vector_ptr)) {	///< Try to exchange old segment vector with new
 					vector_ptr = new_vector_ptr;										///< If success, remember for later
 				} //Note: if we were beaten by other thread, then compare_exchange_strong itself puts the new value into vector_ptr
+				else std::this_thread::yield();
 			}
+
+			return vector_ptr;
 		}
 
 		std::pmr::memory_resource* m_mr;					///< Memory resource for allocating segments
@@ -345,8 +355,7 @@ namespace vllt {
 		};
 
 		//make sure there is enough space in the segment VECTOR - if not then change the old vector to a larger vector
-		auto vector_ptr{ m_seg_vector.load() };	///< Shared pointer to current segment ptr vector, can be nullptr
-		insert(table_index_t{size.m_next_free_slot}, vector_ptr, nullptr, std::forward<Cs>(data)...); ///< Make sure there are enough slots for segments
+		insert(table_index_t{size.m_next_free_slot}, nullptr, std::forward<Cs>(data)...); ///< Make sure there are enough slots for segments
 
 		slot_size_t new_size = m_size_cnt.load();	///< Increase size to validate the new row
 		while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ new_size.m_next_free_slot, stack_index_t{ new_size.m_size + 1} }));
@@ -509,12 +518,13 @@ namespace vllt {
 			std::this_thread::yield();
 		};
 
-		auto vector_ptr{ m_seg_vector.load() };		///< Shared pointer to current segment ptr vector, can be nullptr
-		insert(next_free_slot, vector_ptr, &m_consumed, std::forward<Cs>(data)...);
+		insert(next_free_slot, &m_consumed, std::forward<Cs>(data)...);
 
 		table_index_t expected = next_free_slot > 0 ? table_index_t{ next_free_slot - 1 } : table_index_t{ vsty::null_value<table_index_t>() };
 		auto old_last{ expected };
-		while (!m_last.compare_exchange_weak(old_last, next_free_slot)) { old_last = expected; };
+		while (!m_last.compare_exchange_weak(old_last, next_free_slot)) { 
+			old_last = expected; 
+		};
 
 		return next_free_slot;	///< Return index of new entry
 	}
@@ -560,7 +570,9 @@ namespace vllt {
 
 		table_index_t expected = (next > 0 ? table_index_t{ next - 1ull } : table_index_t{ vsty::null_value<table_index_t>() });
 		auto consumed{ expected };
-		while (!m_consumed.compare_exchange_weak(consumed, next)) { consumed = expected; };
+		while (!m_consumed.compare_exchange_weak(consumed, next)) { 
+			consumed = expected; 
+		};
 
 		return ret;		//RVO?
 	}

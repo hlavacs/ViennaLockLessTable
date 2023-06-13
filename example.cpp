@@ -307,10 +307,10 @@ void performance_test() {
 				std::jthread t2([&]() { pull(in, lck1); });
 				std::jthread thread3([&]() { push(1, in, 3, lck1); });
 				std::jthread t3([&]() { pull(in, lck1); });
-				//std::jthread thread4([&]() { push(1, in, 4, lck1); });
-				//std::jthread t4([&]() { pull(in, lck1); });
-				//std::jthread thread5([&]() { push(1, in, 5, lck1); });
-				//std::jthread t5([&]() { pull(in, lck1); });
+				std::jthread thread4([&]() { push(1, in, 4, lck1); });
+				std::jthread t4([&]() { pull(in, lck1); });
+				std::jthread thread5([&]() { push(1, in, 5, lck1); });
+				std::jthread t5([&]() { pull(in, lck1); });
 				//std::jthread thread6([&]() { push(1, in, 6, lck1); });
 				//std::jthread t6([&]() { pull(in, lck1); });
 			}
@@ -330,8 +330,8 @@ void performance_test() {
 		for (size_t i = 1; i <= 100; ++i) {
 			std::cout << "Loop " << i << " ";
 			auto TLO = par(true);
-			if (i >= 2) {
-				auto j = i - 1 ;
+			if (i >= 4) {
+				auto j = i - 3 ;
 				SLO1 += std::get<0>(TLO);
 				SLO2 += std::get<1>(TLO);
 				SLO3 += std::get<2>(TLO);
@@ -352,6 +352,7 @@ void performance_test() {
 
 
 int main() {
+	std::cout << std::thread::hardware_concurrency() << " Threads\n";
 	//functional_test();
 	performance_test();
 }
