@@ -144,7 +144,7 @@ namespace vllt {
 				}
 
 				size_t num_segments = vector_ptr->m_segments.size();
-				size_t new_offset = vector_ptr->m_seg_offset + first_seg;			
+				size_t new_offset = vector_ptr->m_seg_offset + first_seg;
 				size_t min_size = segment(slot, new_offset);
 				size_t smaller_size = std::max((num_segments >> 2), SLOTS);
 				size_t medium_size = std::max((num_segments >> 1), SLOTS);
@@ -155,11 +155,12 @@ namespace vllt {
 				else if (first_seg > num_segments * 0.65 && min_size < smaller_size) { new_size = medium_size; }
 				else if (first_seg > (num_segments >> 1) && min_size < num_segments) new_size = num_segments;
 
-				//std::this_thread::yield();
+				std::this_thread::yield();
 				auto vector_ptr2 = m_seg_vector.load();
-				if (slot < N * (vector_ptr2->m_segments.size() + vector_ptr2->m_seg_offset)) return vector_ptr2;
-				vector_ptr = vector_ptr2;
-
+				if (vector_ptr != vector_ptr2) {
+					vector_ptr = vector_ptr2;
+					continue;
+				}
 				auto new_vector_ptr = std::make_shared<segment_vector_t>( //vector has always as many slots as its capacity is -> size==capacity
 					segment_vector_t{ std::pmr::vector<segment_ptr_t>{new_size, m_mr}, segment_idx_t{ new_offset } } //increase existing one
 				);
@@ -548,13 +549,13 @@ namespace vllt {
 
 		table_index_t last;
 		auto next = m_next.load();
-		bool success;
+		//bool success;
 		do {
 			last = m_last.load();
 			if (!(next <= last)) return std::nullopt;
-			success = m_next.compare_exchange_weak(next, table_index_t{ next + 1ul });
+			//success = m_next.compare_exchange_weak(next, table_index_t{ next + 1ul });
 			//if (!success) std::this_thread::yield();
-		} while (!success);  ///< Slot number to put the new data into	
+		} while (!m_next.compare_exchange_weak(next, table_index_t{ next + 1ul }));  ///< Slot number to put the new data into	
 		
 		auto vector_ptr{ m_seg_vector.load() };						///< Access the segment vector
 

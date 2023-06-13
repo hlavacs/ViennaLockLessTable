@@ -285,7 +285,7 @@ void performance_test() {
 					if (lck) g_mutex.unlock();
 					push_time[id] += duration_cast<duration<double>>(high_resolution_clock::now() - T1).count();
 					push_num[id]++;
-					wait_for( (rand() % 100) / 100.0);
+					wait_for( (rand() % 100) / 50.0);
 				}
 			};
 
@@ -300,11 +300,11 @@ void performance_test() {
 					if (v.has_value()) {
 						auto value = v.value();
 					}
-					wait_for((rand() % 100) / 100.0);
+					wait_for((rand() % 100) / 50.0);
 				}
 			};
 
-			size_t in = 20000, out = 20000;
+			size_t in = 10000, out = 10000;
 
 			std::cout << 1 << " ";
 			{
@@ -321,11 +321,12 @@ void performance_test() {
 			}
 			{
 				std::vector<std::jthread> threads;
-				for (size_t i = 1; i <= 8; ++i) {
+				size_t num=8;
+				for (size_t i = 1; i <= num; ++i) {
 					threads.emplace_back(std::move(std::jthread([&]() { push(i, 1, in, i, lck1); })));
 					//threads.emplace_back(std::move(std::jthread([&]() { pull(i, in, lck1); })));
 				}
-				for (size_t i = 1; i <= 12; ++i) {
+				for (size_t i = 1; i <= num; ++i) {
 					threads.emplace_back(std::move(std::jthread([&]() { pull(i, in, lck1); })));
 				}
 			}
