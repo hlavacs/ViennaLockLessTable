@@ -135,12 +135,16 @@ namespace vllt {
 				} //Note: if we were beaten by other thread, then compare_exchange_strong itself puts the new value into vector_ptr
 			}
 
-			if (slot >= N * (vector_ptr->m_segments.size() + vector_ptr->m_seg_offset)) {
-				std::this_thread::yield();
-				vector_ptr = m_seg_vector.load();
-			}
-
+			bool yield = ( (std::hash<std::thread::id>()(std::this_thread::get_id()) & 1) == 0);
 			while ( slot >= N * (vector_ptr->m_segments.size() + vector_ptr->m_seg_offset) ) {
+
+				if (yield) {
+					std::this_thread::yield();
+					vector_ptr = m_seg_vector.load();
+				}
+			
+				if (slot < N * (vector_ptr->m_segments.size() + vector_ptr->m_seg_offset)) return vector_ptr;
+
 				segment_idx_t first_seg{ 0 };
 				auto fs = first_slot ? first_slot->load() : table_index_t{0};
 				if (vsty::has_value(fs)) {
@@ -177,7 +181,6 @@ namespace vllt {
 				if (m_seg_vector.compare_exchange_strong(vector_ptr, new_vector_ptr)) {	///< Try to exchange old segment vector with new
 					vector_ptr = new_vector_ptr;										///< If success, remember for later
 				} //Note: if we were beaten by other thread, then compare_exchange_strong itself puts the new value into vector_ptr
-				else std::this_thread::yield();
 			}
 
 			return vector_ptr;
