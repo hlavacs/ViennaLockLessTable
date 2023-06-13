@@ -136,6 +136,7 @@ namespace vllt {
 			}
 
 			while ( slot >= N * (vector_ptr->m_segments.size() + vector_ptr->m_seg_offset) ) {
+
 				segment_idx_t first_seg{ 0 };
 				auto fs = first_slot ? first_slot->load() : table_index_t{0};
 				if (vsty::has_value(fs)) {
@@ -154,10 +155,15 @@ namespace vllt {
 				else if (first_seg > num_segments * 0.65 && min_size < smaller_size) { new_size = medium_size; }
 				else if (first_seg > (num_segments >> 1) && min_size < num_segments) new_size = num_segments;
 
+				//std::this_thread::yield();
+				auto vector_ptr2 = m_seg_vector.load();
+				if (slot < N * (vector_ptr2->m_segments.size() + vector_ptr2->m_seg_offset)) return vector_ptr2;
+				vector_ptr = vector_ptr2;
+
 				auto new_vector_ptr = std::make_shared<segment_vector_t>( //vector has always as many slots as its capacity is -> size==capacity
 					segment_vector_t{ std::pmr::vector<segment_ptr_t>{new_size, m_mr}, segment_idx_t{ new_offset } } //increase existing one
 				);
-				
+
 				size_t idx = 0;
 				std::ranges::for_each(new_vector_ptr->m_segments.begin(), new_vector_ptr->m_segments.end(), [&](auto& ptr) {
 					if (first_seg + idx < num_segments) { ptr = vector_ptr->m_segments[first_seg + idx]; } 
@@ -518,6 +524,7 @@ namespace vllt {
 		auto old_last{ expected };
 		while (!m_last.compare_exchange_weak(old_last, next_free_slot)) { 
 			old_last = expected; 
+			//std::this_thread::yield();
 		};
 
 		return next_free_slot;	///< Return index of new entry
@@ -546,7 +553,7 @@ namespace vllt {
 			last = m_last.load();
 			if (!(next <= last)) return std::nullopt;
 			success = m_next.compare_exchange_weak(next, table_index_t{ next + 1ul });
-			if (!success) std::this_thread::yield();
+			//if (!success) std::this_thread::yield();
 		} while (!success);  ///< Slot number to put the new data into	
 		
 		auto vector_ptr{ m_seg_vector.load() };						///< Access the segment vector
@@ -565,7 +572,8 @@ namespace vllt {
 		table_index_t expected = (next > 0 ? table_index_t{ next - 1ull } : table_index_t{ vsty::null_value<table_index_t>() });
 		auto consumed{ expected };
 		while (!m_consumed.compare_exchange_weak(consumed, next)) { 
-			consumed = expected; 
+			consumed = expected;
+			//std::this_thread::yield();
 		};
 
 		return ret;		//RVO?
