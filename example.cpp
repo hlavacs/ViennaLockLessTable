@@ -272,10 +272,10 @@ void performance_test() {
 		vllt::VlltFIFOQueue<types, 1 << 10, true, 16> queue;
 
 		auto par = [&]( bool lck1 ) {
-			std::array<double, 24> push_time{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-			std::array<double, 24> pull_time{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-			std::array<size_t, 24> push_num{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-			std::array<size_t, 24> pull_num{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+			std::vector<double> push_time(30, 0); 
+			std::vector<double> pull_time(30, 0);
+			std::vector<size_t> push_num(30, 0);
+			std::vector<size_t> pull_num(30, 0);
 
 			auto push = [&](size_t id, size_t start, size_t max, size_t f, bool lck) {
 				for (size_t i = start; i <= max; ++i) {
