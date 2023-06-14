@@ -118,9 +118,8 @@ namespace vllt {
 		/// </summary>
 		void put_cache() {
 			std::scoped_lock lock(m_mutex);
-			size_t i = 0ul;
 			while (segment_cache_cache.size()) {
-				if(i<40) segment_cache.emplace(segment_cache_cache.top());
+				if(segment_cache.size() < 50ul) segment_cache.emplace(segment_cache_cache.top());
 				segment_cache_cache.pop();
 			}
 		}
@@ -187,7 +186,7 @@ namespace vllt {
 				size_t min_size = segment(slot, new_offset);
 				size_t smaller_size = std::max((num_segments >> 2), SLOTS);
 				size_t medium_size = std::max((num_segments >> 1), SLOTS);
-				size_t new_size = 2 * num_segments;
+				size_t new_size = num_segments + (num_segments >> 1);
 				while (min_size > new_size) { new_size *= 2; }
 
 				if (first_seg > num_segments * 0.85 && min_size < smaller_size) { new_size = smaller_size; }
@@ -298,12 +297,12 @@ namespace vllt {
 
 		template<typename... Cs>
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
-		inline auto push_back(Cs&&... data) noexcept -> stack_index_t;	///< Push new component data to the end of the table
+		inline auto push(Cs&&... data) noexcept -> stack_index_t;	///< Push new component data to the end of the table
 
 		//-------------------------------------------------------------------------------------------
 		//remove and swap data
 
-		inline auto pop_back() noexcept	-> tuple_opt_t;	///< Remove the last row, call destructor on components
+		inline auto pop() noexcept		-> tuple_opt_t;	///< Remove the last row, call destructor on components
 		inline auto clear() noexcept	-> size_t;	///< Set the number if rows to zero - effectively clear the table, call destructors
 		inline auto swap(stack_index_t n1, stack_index_t n2) noexcept -> void;	///< Swap contents of two rows
 
@@ -393,7 +392,7 @@ namespace vllt {
 	template<typename DATA, size_t N0, bool ROW, size_t SLOTS>
 	template<typename... Cs>
 		requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
-	inline auto VlltStack<DATA, N0, ROW, SLOTS>::push_back(Cs&&... data) noexcept -> stack_index_t {
+	inline auto VlltStack<DATA, N0, ROW, SLOTS>::push(Cs&&... data) noexcept -> stack_index_t {
 		//increase m_next_free_slot to announce your demand for a new slot -> slot is now reserved for you
 		slot_size_t size = m_size_cnt.load();	///< Make sure that no other thread is popping currently
 		while (size.m_next_free_slot < size.m_size || !m_size_cnt.compare_exchange_weak(size, slot_size_t{ stack_index_t{ size.m_next_free_slot + 1 }, size.m_size })) {
@@ -418,7 +417,7 @@ namespace vllt {
 	// \returns true if a row was popped.
 	///
 	template<typename DATA, size_t N0, bool ROW, size_t SLOTS>
-	inline auto VlltStack<DATA, N0, ROW, SLOTS>::pop_back() noexcept -> tuple_opt_t {
+	inline auto VlltStack<DATA, N0, ROW, SLOTS>::pop() noexcept -> tuple_opt_t {
 		vtll::to_tuple<vtll::remove_atomic<DATA>> ret{};
 
 		slot_size_t size = m_size_cnt.load();
@@ -459,7 +458,7 @@ namespace vllt {
 	template<typename DATA, size_t N0, bool ROW, size_t SLOTS>
 	inline auto VlltStack<DATA, N0, ROW, SLOTS>::clear() noexcept -> size_t {
 		size_t num = 0;
-		while (vsty::has_value(pop_back())) { ++num; }
+		while (vsty::has_value(pop())) { ++num; }
 		return num;
 	}
 
@@ -538,11 +537,11 @@ namespace vllt {
 
 		template<typename... Cs>
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
-		inline auto push_back(Cs&&... data) noexcept -> table_index_t;	///< Push new component data to the end of the table
+		inline auto push(Cs&&... data) noexcept -> table_index_t;	///< Push new component data to the end of the table
 
-		inline auto pop_front() noexcept -> tuple_opt_t;	///< Remove the last row, call destructor on components
-		inline auto size() noexcept		 -> size_t;				///< Number of elements in the queue
-		inline auto clear() noexcept	 -> size_t;			///< Set the number if rows to zero - effectively clear the table, call destructors
+		inline auto pop() noexcept		-> tuple_opt_t;	///< Remove the last row, call destructor on components
+		inline auto size() noexcept		-> size_t;				///< Number of elements in the queue
+		inline auto clear() noexcept	-> size_t;			///< Set the number if rows to zero - effectively clear the table, call destructors
 
 	protected:
 		std::atomic<table_index_t>	m_next{ table_index_t{0} };	//next element to be taken out of the queue
@@ -560,7 +559,7 @@ namespace vllt {
 	template<typename DATA, size_t N0, bool ROW, size_t SLOTS>
 	template<typename... Cs>
 		requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
-	inline auto VlltFIFOQueue<DATA, N0, ROW, SLOTS>::push_back(Cs&&... data) noexcept -> table_index_t {
+	inline auto VlltFIFOQueue<DATA, N0, ROW, SLOTS>::push(Cs&&... data) noexcept -> table_index_t {
 		auto next_free_slot = m_next_free_slot.load();
 		while (!m_next_free_slot.compare_exchange_weak(next_free_slot, table_index_t{ next_free_slot + 1 })); ///< Slot number to put the new data into	
 
@@ -584,7 +583,7 @@ namespace vllt {
 	/// <typeparam name="SLOTS">Default number of slots in the first segment vector.</typeparam>
 	/// <returns>Tuple with values from the next item, or nullopt.</returns>
 	template<typename DATA, size_t N0, bool ROW, size_t SLOTS>
-	inline auto VlltFIFOQueue<DATA, N0, ROW, SLOTS>::pop_front() noexcept -> tuple_opt_t {
+	inline auto VlltFIFOQueue<DATA, N0, ROW, SLOTS>::pop() noexcept -> tuple_opt_t {
 		vtll::to_tuple<vtll::remove_atomic<DATA>> ret{};
 
 		if (!vsty::has_value(m_last.load())) return std::nullopt;
@@ -649,7 +648,7 @@ namespace vllt {
 	template<typename DATA, size_t N0, bool ROW, size_t SLOTS>
 	inline auto VlltFIFOQueue<DATA, N0, ROW, SLOTS>::clear() noexcept -> size_t {
 		size_t num = 0;
-		while (vsty::has_value(pop_front())) { ++num; }
+		while (vsty::has_value(pop())) { ++num; }
 		
 		//auto next_free_slot = m_next_free_slot.load();
 		//auto vector_ptr{ m_seg_vector.load() };		///< Shared pointer to current segment ptr vector, can be nullptr
