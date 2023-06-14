@@ -269,8 +269,8 @@ std::mutex g_mutex;
 void performance_queue() {
 
 	struct comp {
-		double m_div;
-		comp(double div = 10000.0) : m_div{ div } {
+		double m_div{1000.0};
+		comp(){
 			wait_for((rand() % 100) / m_div);
 		};
 		~comp() {
@@ -283,7 +283,7 @@ void performance_queue() {
 	{
 		std::cout << "QUEUE\n";
 
-		vllt::VlltFIFOQueue<types, 1 << 8, true, 16> queue;
+		vllt::VlltFIFOQueue<types, 1 << 8, true, 32> queue;
 		std::queue<vtll::to_tuple<types>> stdqueue;
 
 		auto par = [&]( bool lck1 ) {
@@ -299,7 +299,7 @@ void performance_queue() {
 					auto T1 = std::chrono::high_resolution_clock::now();
 					if (lck) {
 						g_mutex.lock();
-						ref.push(std::make_tuple((uint32_t)i, f, (double)f* i, f * 2.0f * i, true, 'A', comp{}));
+						ref.emplace(std::make_tuple((uint32_t)i, f, (double)f* i, f * 2.0f * i, true, 'A', comp{}));
 						//ref.push((uint32_t)i, f, (double)f * i, f * 2.0f * i, true, 'A');
 						g_mutex.unlock();
 					}
@@ -309,7 +309,7 @@ void performance_queue() {
 
 					push_time[id] += duration_cast<duration<double>>(high_resolution_clock::now() - T1).count();
 					push_num[id]++;
-					wait_for( (rand() % 100) / 100.0);
+					wait_for( (rand() % 100) / 1000.0);
 				}
 			};
 
@@ -329,7 +329,7 @@ void performance_queue() {
 					}
 					pull_time[id] += duration_cast<duration<double>>(high_resolution_clock::now() - T1).count();
 					pull_num[id]++;
-					wait_for((rand() % 100) / 100.0);
+					wait_for((rand() % 100) / 1000.0);
 				}
 			};
 
@@ -409,8 +409,8 @@ void performance_queue() {
 void performance_stack() {
 
 	struct comp {
-		double m_div{};
-		comp(double div = 10000.0) : m_div{div} {
+		double m_div{1000.0};
+		comp() {
 			wait_for((rand() % 100) / m_div);
 		};
 		~comp() {
@@ -439,7 +439,7 @@ void performance_stack() {
 					auto T1 = std::chrono::high_resolution_clock::now();
 					if (lck) {
 						g_mutex.lock();
-						ref.push(std::make_tuple((uint32_t)i, f, (double)f* i, f * 2.0f * i, true, 'A', comp{}));
+						ref.emplace(std::make_tuple((uint32_t)i, f, (double)f* i, f * 2.0f * i, true, 'A', comp{}));
 						//ref.push((uint32_t)i, f, (double)f * i, f * 2.0f * i, true, 'A');
 						g_mutex.unlock();
 					}
@@ -449,7 +449,7 @@ void performance_stack() {
 
 					push_time[id] += duration_cast<duration<double>>(high_resolution_clock::now() - T1).count();
 					push_num[id]++;
-					wait_for((rand() % 100) / 100.0);
+					wait_for((rand() % 100) / 1000.0);
 				}
 			};
 
@@ -469,7 +469,7 @@ void performance_stack() {
 					}
 					pull_time[id] += duration_cast<duration<double>>(high_resolution_clock::now() - T1).count();
 					pull_num[id]++;
-					wait_for((rand() % 100) / 100.0);
+					wait_for((rand() % 100) / 1000.0);
 				}
 			};
 
