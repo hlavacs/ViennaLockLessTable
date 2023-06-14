@@ -1,5 +1,7 @@
 
 #include <vector>
+#include <queue>
+#include <stack>
 #include <optional>
 #include <thread>
 #include <numeric>
@@ -269,10 +271,12 @@ void performance_queue() {
 	{
 		std::cout << "QUEUE\n";
 
-		vllt::VlltFIFOQueue<types, 1 << 10, true, 16> queue;
 
 		auto par = [&]( bool lck1 ) {
-			std::vector<double> push_time(30, 0); 
+			vllt::VlltFIFOQueue<types, 1 << 10, true, 16> queue;
+			std::queue<vtll::to_tuple<types>> stdqueue;
+
+			std::vector<double> push_time(30, 0);
 			std::vector<double> pull_time(30, 0);
 			std::vector<size_t> push_num(30, 0);
 			std::vector<size_t> pull_num(30, 0);
@@ -280,31 +284,40 @@ void performance_queue() {
 			auto push = [&](size_t id, size_t start, size_t max, size_t f, bool lck) {
 				for (size_t i = start; i <= max; ++i) {
 					auto T1 = std::chrono::high_resolution_clock::now();
-					if (lck) g_mutex.lock();
-					queue.push_back((uint32_t)i, f, (double)f * i, f * 2.0f * i, true, 'A');
-					if (lck) g_mutex.unlock();
+					if (lck) {
+						g_mutex.lock();
+						stdqueue.push(std::make_tuple((uint32_t)i, f, (double)f * i, f * 2.0f * i, true, 'A'));
+						g_mutex.unlock();
+					}
+					else {
+						queue.push_back((uint32_t)i, f, (double)f * i, f * 2.0f * i, true, 'A');
+					}
+
 					push_time[id] += duration_cast<duration<double>>(high_resolution_clock::now() - T1).count();
 					push_num[id]++;
-					wait_for( (rand() % 100) / 50.0);
+					wait_for( (rand() % 100) / 100.0);
 				}
 			};
 
 			auto pull = [&](size_t id, size_t n, bool lck) {
 				for (size_t i = 1; i <= n; ++i) {
 					auto T1 = std::chrono::high_resolution_clock::now();
-					if (lck) g_mutex.lock();
-					auto v = queue.pop_front();
-					if (lck) g_mutex.unlock();
+					decltype(queue.pop_front()) v;
+					if (lck) {
+						g_mutex.lock();
+						v = stdqueue.size() ? queue.pop_front() : decltype(v) {};
+						g_mutex.unlock();
+					}
+					else {
+						v = queue.pop_front();
+					}
 					pull_time[id] += duration_cast<duration<double>>(high_resolution_clock::now() - T1).count();
 					pull_num[id]++;
-					if (v.has_value()) {
-						auto value = v.value();
-					}
-					wait_for((rand() % 100) / 50.0);
+					wait_for((rand() % 100) / 100.0);
 				}
 			};
 
-			size_t in = 50000, out = 50000;
+			size_t in = 100000, out = 100000;
 
 			std::cout << 1 << " ";
 			{

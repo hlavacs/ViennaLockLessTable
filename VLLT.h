@@ -118,8 +118,9 @@ namespace vllt {
 		/// </summary>
 		void put_cache() {
 			std::scoped_lock lock(m_mutex);
+			size_t i = 0ul;
 			while (segment_cache_cache.size()) {
-				segment_cache.emplace(segment_cache_cache.top());
+				if(i<40) segment_cache.emplace(segment_cache_cache.top());
 				segment_cache_cache.pop();
 			}
 		}
