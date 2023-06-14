@@ -112,14 +112,13 @@ namespace vllt {
 			return segment(n, vector_ptr->m_seg_offset );
 		}
 
-
 		/// <summary>
 		/// Transfer segments that have been unnessearily allocated to a global cache.
 		/// </summary>
-		void put_cache() {
+		void put_cache( auto& vector_ptr ) {
 			std::scoped_lock lock(m_mutex);
 			while (segment_cache_cache.size()) {
-				if(segment_cache.size() < 50ul) segment_cache.emplace(segment_cache_cache.top());
+				if(segment_cache.size() < vector_ptr->m_segments.size()) segment_cache.emplace(segment_cache_cache.top());
 				segment_cache_cache.pop();
 			}
 		}
@@ -218,7 +217,7 @@ namespace vllt {
 					clear_cache_cache();
 				} //Note: if we were beaten by other thread, then compare_exchange_strong itself puts the new value into vector_ptr
 				else {
-					put_cache(); //we were beaten, so save the new segments in the global cache
+					put_cache(vector_ptr); //we were beaten, so save the new segments in the global cache
 				}
 			}
 

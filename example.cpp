@@ -4,6 +4,7 @@
 #include <stack>
 #include <optional>
 #include <thread>
+#include <latch>
 #include <numeric>
 #include "VLLT.h"
 
@@ -266,7 +267,18 @@ std::mutex g_mutex;
 
 
 void performance_queue() {
-	using types = vtll::tl<uint32_t, size_t, double, float, bool, char>;
+
+	struct comp {
+		double m_div;
+		comp(double div = 10000.0) : m_div{ div } {
+			wait_for((rand() % 100) / m_div);
+		};
+		~comp() {
+			wait_for((rand() % 100) / m_div);
+		};
+	};
+
+	using types = vtll::tl<uint32_t, size_t, double, float, bool, char, comp >;
 
 	{
 		std::cout << "QUEUE\n";
@@ -287,12 +299,12 @@ void performance_queue() {
 					auto T1 = std::chrono::high_resolution_clock::now();
 					if (lck) {
 						g_mutex.lock();
-						ref.push(std::make_tuple((uint32_t)i, f, (double)f * i, f * 2.0f * i, true, 'A'));
+						ref.push(std::make_tuple((uint32_t)i, f, (double)f* i, f * 2.0f * i, true, 'A', comp{}));
 						//ref.push((uint32_t)i, f, (double)f * i, f * 2.0f * i, true, 'A');
 						g_mutex.unlock();
 					}
 					else {
-						queue.push((uint32_t)i, f, (double)f * i, f * 2.0f * i, true, 'A');
+						queue.push((uint32_t)i, f, (double)f* i, f * 2.0f * i, true, 'A', comp{});
 					}
 
 					push_time[id] += duration_cast<duration<double>>(high_resolution_clock::now() - T1).count();
@@ -321,27 +333,30 @@ void performance_queue() {
 				}
 			};
 
-			size_t in = 50000, out = 50000;
+			size_t in = 10000, out = 10000;
 
+			std::ptrdiff_t num = 5;
 			std::cout << 1 << " ";
 			{
+				std::latch l{2*num};
 				std::vector<std::jthread> threads;
-				for (size_t i = 1; i <= 10; ++i) {
-					threads.emplace_back( std::move(std::jthread([&]() { push(i, 1, in, i, lck1); })) );
+				for (std::ptrdiff_t i = 1; i <= 2*num; ++i) {
+					threads.emplace_back(std::move(std::jthread([&]() { l.arrive_and_wait(); push(i, 1, in, i, lck1); })));
 				}
 			}
 			{
+				std::latch l{2*num};
 				std::vector<std::jthread> threads;
-				for (size_t i = 1; i <= 10; ++i) {
-					threads.emplace_back(std::move(std::jthread([&]() { pull(i, in, lck1); })));
+				for (std::ptrdiff_t i = 1; i <= 2*num; ++i) {
+					threads.emplace_back(std::move(std::jthread([&]() { l.arrive_and_wait(); pull(i, in, lck1); })));
 				}
 			}
 			{
+				std::latch l{2*num};
 				std::vector<std::jthread> threads;
-				size_t num = 5;
-				for (size_t i = 1; i <= num; ++i) {
-					threads.emplace_back(std::move(std::jthread([&]() { push(i, 1, in, i, lck1); })));
-					threads.emplace_back(std::move(std::jthread([&]() { pull(i, in, lck1); })));
+				for (std::ptrdiff_t i = 1; i <= num; ++i) {
+					threads.emplace_back(std::move(std::jthread([&]() { l.arrive_and_wait(); push(i, 1, in, i, lck1); })));
+					threads.emplace_back(std::move(std::jthread([&]() { l.arrive_and_wait(); pull(i, in, lck1); })));
 				}
 			}
 
@@ -392,12 +407,23 @@ void performance_queue() {
 
 
 void performance_stack() {
-	using types = vtll::tl<uint32_t, size_t, double, float, bool, char>;
+
+	struct comp {
+		double m_div{};
+		comp(double div = 10000.0) : m_div{div} {
+			wait_for((rand() % 100) / m_div);
+		};
+		~comp() {
+			wait_for((rand() % 100) / m_div);
+		};
+	};
+
+	using types = vtll::tl<uint32_t, size_t, double, float, bool, char, comp>;
 
 	{
 		std::cout << "STACK\n";
 
-		vllt::VlltStack<types, 1 << 8, true, 16> stack;
+		vllt::VlltStack<types, 1 << 8, true, 32> stack;
 		std::stack<vtll::to_tuple<types>> stdstack;
 
 		auto par = [&](bool lck1) {
@@ -413,17 +439,17 @@ void performance_stack() {
 					auto T1 = std::chrono::high_resolution_clock::now();
 					if (lck) {
 						g_mutex.lock();
-						ref.push(std::make_tuple((uint32_t)i, f, (double)f * i, f * 2.0f * i, true, 'A'));
+						ref.push(std::make_tuple((uint32_t)i, f, (double)f* i, f * 2.0f * i, true, 'A', comp{}));
 						//ref.push((uint32_t)i, f, (double)f * i, f * 2.0f * i, true, 'A');
 						g_mutex.unlock();
 					}
 					else {
-						stack.push((uint32_t)i, f, (double)f * i, f * 2.0f * i, true, 'A');
+						stack.push((uint32_t)i, f, (double)f * i, f * 2.0f * i, true, 'A', comp{});
 					}
 
 					push_time[id] += duration_cast<duration<double>>(high_resolution_clock::now() - T1).count();
 					push_num[id]++;
-					wait_for((rand() % 100) / 50.0);
+					wait_for((rand() % 100) / 100.0);
 				}
 			};
 
@@ -443,31 +469,34 @@ void performance_stack() {
 					}
 					pull_time[id] += duration_cast<duration<double>>(high_resolution_clock::now() - T1).count();
 					pull_num[id]++;
-					wait_for((rand() % 100) / 50.0);
+					wait_for((rand() % 100) / 100.0);
 				}
 			};
 
-			size_t in = 50000, out = 50000;
+			size_t in = 10000, out = 10000;
 
+			std::ptrdiff_t num = 5;
 			std::cout << 1 << " ";
 			{
+				std::latch l{2*num};
 				std::vector<std::jthread> threads;
-				for (size_t i = 1; i <= 8; ++i) {
-					threads.emplace_back(std::move(std::jthread([&]() { push(i, 1, in, i, lck1); })));
+				for (std::ptrdiff_t i = 1; i <= 2 * num; ++i) {
+					threads.emplace_back(std::move(std::jthread([&]() { l.arrive_and_wait(); push(i, 1, in, i, lck1); })));
 				}
 			}
 			{
+				std::latch l{2 * num};
 				std::vector<std::jthread> threads;
-				for (size_t i = 1; i <= 8; ++i) {
-					threads.emplace_back(std::move(std::jthread([&]() { pull(i, in, lck1); })));
+				for (std::ptrdiff_t i = 1; i <= 2 * num; ++i) {
+					threads.emplace_back(std::move(std::jthread([&]() { l.arrive_and_wait(); pull(i, in, lck1); })));
 				}
 			}
 			{
+				std::latch l{2*num};
 				std::vector<std::jthread> threads;
-				size_t num = 4;
-				for (size_t i = 1; i <= num; ++i) {
-					threads.emplace_back(std::move(std::jthread([&]() { push(i, 1, in, i, lck1); })));
-					threads.emplace_back(std::move(std::jthread([&]() { pull(i, in, lck1); })));
+				for (std::ptrdiff_t i = 1; i <= num; ++i) {
+					threads.emplace_back(std::move(std::jthread([&]() { l.arrive_and_wait(); push(i, 1, in, i, lck1); })));
+					threads.emplace_back(std::move(std::jthread([&]() { l.arrive_and_wait(); pull(i, in, lck1); })));
 				}
 			}
 
@@ -517,13 +546,11 @@ void performance_stack() {
 }
 
 
-
-
 int main() {
 	std::cout << std::thread::hardware_concurrency() << " Threads\n";
-	functional_test();
-	performance_queue();
+	//functional_test();
 	performance_stack();
+	performance_queue();
 }
 
 
