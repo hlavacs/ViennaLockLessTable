@@ -409,7 +409,7 @@ void performance_queue() {
 void performance_stack() {
 
 	struct comp {
-		double m_div{1000.0};
+		double m_div{10000.0};
 		comp() {
 			wait_for((rand() % 100) / m_div);
 		};
