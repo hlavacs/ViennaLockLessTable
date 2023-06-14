@@ -263,7 +263,7 @@ std::mutex g_mutex;
 
 
 
-void performance_test() {
+void performance_queue() {
 	using types = vtll::tl<uint32_t, size_t, double, float, bool, char>;
 
 	{
@@ -304,30 +304,27 @@ void performance_test() {
 				}
 			};
 
-			size_t in = 10000, out = 10000;
+			size_t in = 50000, out = 50000;
 
 			std::cout << 1 << " ";
 			{
 				std::vector<std::jthread> threads;
-				for (size_t i = 1; i <= 12; ++i) {
+				for (size_t i = 1; i <= 6; ++i) {
 					threads.emplace_back( std::move(std::jthread([&]() { push(i, 1, in, i, lck1); })) );
 				}
 			}
 			{
 				std::vector<std::jthread> threads;
-				for (size_t i = 1; i <= 12; ++i) {
+				for (size_t i = 1; i <= 6; ++i) {
 					threads.emplace_back(std::move(std::jthread([&]() { pull(i, in, lck1); })));
 				}
 			}
 			{
 				std::vector<std::jthread> threads;
-				size_t num=12;
+				size_t num = 6;
 				for (size_t i = 1; i <= num; ++i) {
 					threads.emplace_back(std::move(std::jthread([&]() { push(i, 1, in, i, lck1); })));
 					threads.emplace_back(std::move(std::jthread([&]() { pull(i, in, lck1); })));
-				}
-				for (size_t i = 1; i <= num; ++i) {
-					//threads.emplace_back(std::move(std::jthread([&]() { pull(i, in, lck1); })));
 				}
 			}
 
@@ -374,10 +371,17 @@ void performance_test() {
 }
 
 
+void performance_stack() {
+
+}
+
+
+
+
 int main() {
 	std::cout << std::thread::hardware_concurrency() << " Threads\n";
 	//functional_test();
-	performance_test();
+	performance_queue();
 }
 
 

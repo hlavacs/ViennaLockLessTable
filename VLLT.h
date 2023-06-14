@@ -5,6 +5,7 @@
 #include <shared_mutex>
 #include <optional>
 #include <array>
+#include <stack>
 #include <concepts>
 #include <algorithm>
 #include <type_traits>
@@ -111,6 +112,43 @@ namespace vllt {
 			return segment(n, vector_ptr->m_seg_offset );
 		}
 
+
+		/// <summary>
+		/// Transfer segments that have been unnessearily allocated to a global cache.
+		/// </summary>
+		void put_cache() {
+			std::scoped_lock lock(m_mutex);
+			while (segment_cache_cache.size()) {
+				segment_cache.emplace(segment_cache_cache.top());
+				segment_cache_cache.pop();
+			}
+		}
+
+		/// <summary>
+		/// Get a new segment - either from the global cache or allocate a new one.
+		/// 
+		/// This might be an unnessesary allocation, so also put it into a temp cache cache.
+		/// </summary>
+		/// <returns></returns>
+		auto get_cache() {
+			std::scoped_lock lock(m_mutex);
+			if (!segment_cache.size()) {
+				auto ptr = std::make_shared<segment_t>();
+				segment_cache_cache.emplace(ptr);
+				return ptr;
+			}
+			auto ptr = segment_cache.top();
+			segment_cache.pop();
+			return ptr;
+		}
+
+		/// <summary>
+		/// Allocations were useful, so clear the temp cache cache.
+		/// </summary>
+		void clear_cache_cache() {
+			while (segment_cache_cache.size()) segment_cache_cache.pop();
+		}
+
 		/// <summary>
 		/// If the vector of segments is too small, allocate a larger one and copy the previous segment pointers into it.
 		/// Then make one CAS attempt. If the attempt succeeds, then remember the new segment vector.
@@ -155,7 +193,6 @@ namespace vllt {
 				else if (first_seg > num_segments * 0.65 && min_size < smaller_size) { new_size = medium_size; }
 				else if (first_seg > (num_segments >> 1) && min_size < num_segments) new_size = num_segments;
 
-				//std::this_thread::yield();
 				auto vector_ptr2 = m_seg_vector.load();
 				if (vector_ptr != vector_ptr2) {
 					vector_ptr = vector_ptr2;
@@ -171,14 +208,18 @@ namespace vllt {
 					else {
 						size_t i1 = idx - (num_segments - first_seg);
 						if (i1 < first_seg) { ptr = vector_ptr->m_segments[i1]; }
-						else { ptr = std::make_shared<segment_t>();	}
+						else { ptr = get_cache(); }
 					}
 					++idx;
 				});
 
 				if (m_seg_vector.compare_exchange_strong(vector_ptr, new_vector_ptr)) {	///< Try to exchange old segment vector with new
 					vector_ptr = new_vector_ptr;										///< If success, remember for later
+					clear_cache_cache();
 				} //Note: if we were beaten by other thread, then compare_exchange_strong itself puts the new value into vector_ptr
+				else {
+					put_cache(); //we were beaten, so save the new segments in the global cache
+				}
 			}
 
 			return vector_ptr;
@@ -187,6 +228,11 @@ namespace vllt {
 		std::pmr::memory_resource* m_mr;					///< Memory resource for allocating segments
 		std::pmr::polymorphic_allocator<segment_vector_t>	m_allocator;			///< use this allocator
 		std::atomic<std::shared_ptr<segment_vector_t>>		m_seg_vector;			///< Atomic shared ptr to the vector of segments
+
+		std::mutex m_mutex;
+		std::stack<segment_ptr_t> segment_cache;
+		static inline thread_local std::stack<segment_ptr_t> segment_cache_cache;
+
 	};
 
 
@@ -515,18 +561,13 @@ namespace vllt {
 		requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
 	inline auto VlltFIFOQueue<DATA, N0, ROW, SLOTS>::push_back(Cs&&... data) noexcept -> table_index_t {
 		auto next_free_slot = m_next_free_slot.load();
-		while (!m_next_free_slot.compare_exchange_weak(next_free_slot, table_index_t{ next_free_slot + 1 })) { ///< Slot number to put the new data into	
-			std::this_thread::yield();
-		};
+		while (!m_next_free_slot.compare_exchange_weak(next_free_slot, table_index_t{ next_free_slot + 1 })); ///< Slot number to put the new data into	
 
 		insert(next_free_slot, &m_consumed, std::forward<Cs>(data)...);
 
 		table_index_t expected = next_free_slot > 0 ? table_index_t{ next_free_slot - 1 } : table_index_t{ vsty::null_value<table_index_t>() };
 		auto old_last{ expected };
-		while (!m_last.compare_exchange_weak(old_last, next_free_slot)) { 
-			old_last = expected; 
-			//std::this_thread::yield();
-		};
+		while (!m_last.compare_exchange_weak(old_last, next_free_slot)) { old_last = expected; };
 
 		return next_free_slot;	///< Return index of new entry
 	}
@@ -549,12 +590,9 @@ namespace vllt {
 
 		table_index_t last;
 		auto next = m_next.load();
-		//bool success;
 		do {
 			last = m_last.load();
 			if (!(next <= last)) return std::nullopt;
-			//success = m_next.compare_exchange_weak(next, table_index_t{ next + 1ul });
-			//if (!success) std::this_thread::yield();
 		} while (!m_next.compare_exchange_weak(next, table_index_t{ next + 1ul }));  ///< Slot number to put the new data into	
 		
 		auto vector_ptr{ m_seg_vector.load() };						///< Access the segment vector
@@ -572,10 +610,7 @@ namespace vllt {
 
 		table_index_t expected = (next > 0 ? table_index_t{ next - 1ull } : table_index_t{ vsty::null_value<table_index_t>() });
 		auto consumed{ expected };
-		while (!m_consumed.compare_exchange_weak(consumed, next)) { 
-			consumed = expected;
-			//std::this_thread::yield();
-		};
+		while (!m_consumed.compare_exchange_weak(consumed, next)) { consumed = expected; };
 
 		return ret;		//RVO?
 	}
