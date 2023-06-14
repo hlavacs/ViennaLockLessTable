@@ -424,7 +424,7 @@ void performance_stack() {
 		std::cout << "STACK\n";
 
 		vllt::VlltStack<types, 1 << 8, true, 32> stack;
-		std::stack<vtll::to_tuple<types>> stdstack;
+		std::stack<vtll::to_tuple<types>, std::vector<vtll::to_tuple<types>>> stdstack;
 
 		auto par = [&](bool lck1) {
 			auto& ref = stdstack;
