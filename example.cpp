@@ -271,10 +271,10 @@ void performance_queue() {
 	struct comp {
 		double m_div{1000.0};
 		comp(){
-			wait_for((rand() % 100) / m_div);
+			wait_for(0); // (rand() % 100) / m_div);
 		};
 		~comp() {
-			wait_for((rand() % 100) / m_div);
+			wait_for(0); // (rand() % 100) / m_div);
 		};
 	};
 
@@ -309,7 +309,7 @@ void performance_queue() {
 
 					push_time[id] += duration_cast<duration<double>>(high_resolution_clock::now() - T1).count();
 					push_num[id]++;
-					wait_for( (rand() % 100) / 1000.0);
+					wait_for( (rand() % 100) / 100.0);
 				}
 			};
 
@@ -329,13 +329,13 @@ void performance_queue() {
 					}
 					pull_time[id] += duration_cast<duration<double>>(high_resolution_clock::now() - T1).count();
 					pull_num[id]++;
-					wait_for((rand() % 100) / 1000.0);
+					wait_for((rand() % 100) / 100.0);
 				}
 			};
 
 			size_t in = 10000, out = 10000;
 
-			std::ptrdiff_t num = 5;
+			std::ptrdiff_t num = std::thread::hardware_concurrency() / 2 - 1;
 			std::cout << 1 << " ";
 			{
 				std::latch l{2*num};
@@ -411,10 +411,10 @@ void performance_stack() {
 	struct comp {
 		double m_div{10000.0};
 		comp() {
-			wait_for((rand() % 100) / m_div);
+			wait_for(0); // (rand() % 100) / m_div);
 		};
 		~comp() {
-			wait_for((rand() % 100) / m_div);
+			wait_for(0); // (rand() % 100) / m_div);
 		};
 	};
 
@@ -475,7 +475,7 @@ void performance_stack() {
 
 			size_t in = 10000, out = 10000;
 
-			std::ptrdiff_t num = 5;
+			std::ptrdiff_t num = std::thread::hardware_concurrency() / 2 - 1;
 			std::cout << 1 << " ";
 			{
 				std::latch l{2*num};

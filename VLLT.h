@@ -172,7 +172,9 @@ namespace vllt {
 				} //Note: if we were beaten by other thread, then compare_exchange_strong itself puts the new value into vector_ptr
 			}
 
-			while ( slot >= N * (vector_ptr->m_segments.size() + vector_ptr->m_seg_offset) ) {
+			auto f = (rand() % 100) / 100.0;
+			while ( slot >= N * (vector_ptr->m_segments.size() + vector_ptr->m_seg_offset - 1.0 + f)) {
+				f = 1.0;
 
 				segment_idx_t first_seg{ 0 };
 				auto fs = first_slot ? first_slot->load() : table_index_t{0};
