@@ -549,7 +549,7 @@ void performance_stack() {
 int main() {
 	std::cout << std::thread::hardware_concurrency() << " Threads\n";
 	//functional_test();
-	performance_stack();
+	//performance_stack();
 	performance_queue();
 }
 
