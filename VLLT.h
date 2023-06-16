@@ -1,6 +1,7 @@
 #pragma once
 
 #include <assert.h>
+#include <algorithm>
 #include <memory_resource>
 #include <shared_mutex>
 #include <optional>
@@ -208,15 +209,22 @@ namespace vllt {
 				);
 
 				size_t idx = 0;
+				size_t remain = num_segments - first_seg;
 				std::ranges::for_each(new_vector_ptr->m_segments.begin(), new_vector_ptr->m_segments.end(), [&](auto& ptr) {
 					if (first_seg + idx < num_segments) { ptr = vector_ptr->m_segments[first_seg + idx]; } 
 					else {
-						size_t i1 = idx - (num_segments - first_seg);
+						size_t i1 = idx - remain;
 						if (i1 < first_seg) { ptr = vector_ptr->m_segments[i1]; }
-						else { ptr = std::make_shared<segment_t>(); }
+						else { ptr = get_cache(); }
 					}
 					++idx;
 				});
+
+				auto reused = (int64_t)new_vector_ptr->m_segments.size() - (int64_t)remain;
+				auto unused = (int64_t)vector_ptr->m_segments.size() - (int64_t)new_vector_ptr->m_segments.size();
+				for (int64_t i = 0; i < unused; ++i) {
+					segment_cache.emplace(vector_ptr->m_segments[i + reused]);
+				}
 
 				m_seg_vector.store( new_vector_ptr );
 				//clear_cache_cache();
