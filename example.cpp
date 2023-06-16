@@ -298,10 +298,9 @@ void performance_queue() {
 				for (size_t i = start; i <= max; ++i) {
 					auto T1 = std::chrono::high_resolution_clock::now();
 					if (lck) {
-						g_mutex.lock();
+						std::scoped_lock lock(g_mutex);
 						ref.emplace(std::make_tuple((uint32_t)i, f, (double)f* i, f * 2.0f * i, true, 'A', comp{}));
 						//ref.push((uint32_t)i, f, (double)f * i, f * 2.0f * i, true, 'A');
-						g_mutex.unlock();
 					}
 					else {
 						queue.push((uint32_t)i, f, (double)f* i, f * 2.0f * i, true, 'A', comp{});
@@ -317,12 +316,11 @@ void performance_queue() {
 				for (size_t i = 1; i <= n; ++i) {
 					auto T1 = std::chrono::high_resolution_clock::now();
 					if (lck) {
-						g_mutex.lock();
+						std::scoped_lock lock(g_mutex);
 						if (ref.size()) {
 							vtll::to_tuple<types> v = ref.front();
 							ref.pop();
 						}
-						g_mutex.unlock();
 					}
 					else {
 						auto v = queue.pop();
@@ -438,10 +436,9 @@ void performance_stack() {
 				for (size_t i = start; i <= max; ++i) {
 					auto T1 = std::chrono::high_resolution_clock::now();
 					if (lck) {
-						g_mutex.lock();
+						std::scoped_lock lock(g_mutex);
 						ref.emplace(std::make_tuple((uint32_t)i, f, (double)f* i, f * 2.0f * i, true, 'A', comp{}));
 						//ref.push((uint32_t)i, f, (double)f * i, f * 2.0f * i, true, 'A');
-						g_mutex.unlock();
 					}
 					else {
 						stack.push((uint32_t)i, f, (double)f * i, f * 2.0f * i, true, 'A', comp{});
@@ -449,7 +446,7 @@ void performance_stack() {
 
 					push_time[id] += duration_cast<duration<double>>(high_resolution_clock::now() - T1).count();
 					push_num[id]++;
-					wait_for(5.0 * (rand() % 100) / 100.0);
+					wait_for(50.0 * (rand() % 100) / 100.0);
 				}
 			};
 
@@ -457,19 +454,18 @@ void performance_stack() {
 				for (size_t i = 1; i <= n; ++i) {
 					auto T1 = std::chrono::high_resolution_clock::now();
 					if (lck) {
-						g_mutex.lock();
+						std::scoped_lock lock(g_mutex);
 						if (ref.size()) {
 							vtll::to_tuple<types> v = ref.top();
 							ref.pop();
 						}
-						g_mutex.unlock();
 					}
 					else {
 						auto v = stack.pop();
 					}
 					pull_time[id] += duration_cast<duration<double>>(high_resolution_clock::now() - T1).count();
 					pull_num[id]++;
-					wait_for(5.0 * (rand() % 100) / 100.0);
+					wait_for(50.0 * (rand() % 100) / 100.0);
 				}
 			};
 
@@ -550,7 +546,7 @@ int main() {
 	std::cout << std::thread::hardware_concurrency() << " Threads\n";
 	//functional_test();
 	performance_stack();
-	//performance_queue();
+	performance_queue();
 }
 
 

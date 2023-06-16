@@ -145,7 +145,7 @@ namespace vllt {
 				ptr = segment_cache.top();
 				segment_cache.pop();
 			}
-			segment_cache_cache.emplace(ptr);
+			//segment_cache_cache.emplace(ptr);
 			return ptr;
 		}
 
@@ -241,7 +241,7 @@ namespace vllt {
 
 				if (m_seg_vector.compare_exchange_strong(vector_ptr, new_vector_ptr)) {	///< Try to exchange old segment vector with new
 					vector_ptr = new_vector_ptr;										///< If success, remember for later
-					clear_cache_cache();
+					//clear_cache_cache();
 				} //Note: if we were beaten by other thread, then compare_exchange_strong itself puts the new value into vector_ptr
 				else {
 					put_cache_cache(vector_ptr); //we were beaten, so save the new segments in the global cache
