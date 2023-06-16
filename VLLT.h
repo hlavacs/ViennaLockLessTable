@@ -145,7 +145,7 @@ namespace vllt {
 				ptr = segment_cache.top();
 				segment_cache.pop();
 			}
-			//segment_cache_cache.emplace(ptr);
+			segment_cache_cache.emplace(ptr);
 			return ptr;
 		}
 
@@ -232,7 +232,7 @@ namespace vllt {
 				auto reused = (int64_t)new_vector_ptr->m_segments.size() - (int64_t)remain;
 				auto unused = (int64_t)vector_ptr->m_segments.size() - (int64_t)new_vector_ptr->m_segments.size();
 				for (int64_t i = 0; i < unused; ++i) {
-					put_cache(vector_ptr->m_segments[i + reused], vector_ptr); //we were beaten, so save the new segments in the global cache
+					put_cache(vector_ptr->m_segments[i + reused], vector_ptr); //these segments are left since we are shrinking
 				}
 
 				//m_seg_vector.store( new_vector_ptr );
@@ -241,7 +241,7 @@ namespace vllt {
 
 				if (m_seg_vector.compare_exchange_strong(vector_ptr, new_vector_ptr)) {	///< Try to exchange old segment vector with new
 					vector_ptr = new_vector_ptr;										///< If success, remember for later
-					//clear_cache_cache();
+					clear_cache_cache();  //we used those for the new segment
 				} //Note: if we were beaten by other thread, then compare_exchange_strong itself puts the new value into vector_ptr
 				else {
 					put_cache_cache(vector_ptr); //we were beaten, so save the new segments in the global cache
