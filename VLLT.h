@@ -116,12 +116,17 @@ namespace vllt {
 		/// <summary>
 		/// Transfer segments that have been unnessearily allocated to a global cache.
 		/// </summary>
-		void put_cache( auto& vector_ptr ) {
-			//std::scoped_lock lock(m_mutex);
+		void put_cache_cache( auto& vector_ptr ) {
+			std::scoped_lock lock(m_mutex);
 			while (segment_cache_cache.size()) {
 				if(2*segment_cache.size() < vector_ptr->m_segments.size()) segment_cache.emplace(segment_cache_cache.top());
 				segment_cache_cache.pop();
 			}
+		}
+
+		void put_cache(auto& ptr, auto& vector_ptr) {
+			std::scoped_lock lock(m_mutex);
+			if (2 * segment_cache.size() < vector_ptr->m_segments.size()) segment_cache.emplace(ptr);
 		}
 
 		/// <summary>
@@ -131,7 +136,7 @@ namespace vllt {
 		/// </summary>
 		/// <returns></returns>
 		auto get_cache() {
-			//std::scoped_lock lock(m_mutex);
+			std::scoped_lock lock(m_mutex);
 			if (!segment_cache.size()) {
 				auto ptr = std::make_shared<segment_t>();
 				//segment_cache_cache.emplace(ptr);
@@ -196,7 +201,7 @@ namespace vllt {
 				else if (first_seg > num_segments * 0.65 && min_size < medium_size) { new_size = medium_size; }
 				else if (first_seg > (num_segments >> 1) && min_size < num_segments) new_size = num_segments;
 
-				std::scoped_lock lock(m_mutex);
+				//std::scoped_lock lock(m_mutex);
 
 				auto vector_ptr2 = m_seg_vector.load();
 				if (vector_ptr != vector_ptr2) {
