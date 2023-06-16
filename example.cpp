@@ -309,7 +309,7 @@ void performance_queue() {
 
 					push_time[id] += duration_cast<duration<double>>(high_resolution_clock::now() - T1).count();
 					push_num[id]++;
-					wait_for( (rand() % 100) / 100.0);
+					wait_for( 20.0 * (rand() % 100) / 100.0);
 				}
 			};
 
@@ -329,13 +329,13 @@ void performance_queue() {
 					}
 					pull_time[id] += duration_cast<duration<double>>(high_resolution_clock::now() - T1).count();
 					pull_num[id]++;
-					wait_for((rand() % 100) / 100.0);
+					wait_for( 20.0 * (rand() % 100) / 100.0);
 				}
 			};
 
-			size_t in = 10000, out = 10000;
+			size_t in = 20000, out = 20000;
 
-			std::ptrdiff_t num = std::thread::hardware_concurrency() / 2 - 1;
+			std::ptrdiff_t num = std::thread::hardware_concurrency() / 2;
 			std::cout << 1 << " ";
 			{
 				std::latch l{2*num};
@@ -449,7 +449,7 @@ void performance_stack() {
 
 					push_time[id] += duration_cast<duration<double>>(high_resolution_clock::now() - T1).count();
 					push_num[id]++;
-					wait_for((rand() % 100) / 1000.0);
+					wait_for(5.0 * (rand() % 100) / 100.0);
 				}
 			};
 
@@ -469,11 +469,11 @@ void performance_stack() {
 					}
 					pull_time[id] += duration_cast<duration<double>>(high_resolution_clock::now() - T1).count();
 					pull_num[id]++;
-					wait_for((rand() % 100) / 1000.0);
+					wait_for(5.0 * (rand() % 100) / 100.0);
 				}
 			};
 
-			size_t in = 10000, out = 10000;
+			size_t in = 20000, out = 20000;
 
 			std::ptrdiff_t num = std::thread::hardware_concurrency() / 2 - 1;
 			std::cout << 1 << " ";
@@ -516,7 +516,7 @@ void performance_stack() {
 			std::cout << "Loop " << i << " ";
 			auto TLO = par(true);
 			auto TLL = par(false);
-			if (i >= 4) {
+			if (i >= 2) {
 				double alpha = 0.0;
 				SLO1 = alpha * SLO1 + (1.0 - alpha) * std::get<0>(TLO);
 				SLO2 = alpha * SLO2 + (1.0 - alpha) * std::get<1>(TLO);
@@ -529,7 +529,7 @@ void performance_stack() {
 				std::cout << SLL1 << " " << SLL2 << " " << SLL3 << " ";
 			}
 			else {
-				double j = 3.;
+				double j = 1.;
 				SLO1 += std::get<0>(TLO) / j;
 				SLO2 += std::get<1>(TLO) / j;
 				SLO3 += std::get<2>(TLO) / j;
@@ -549,8 +549,8 @@ void performance_stack() {
 int main() {
 	std::cout << std::thread::hardware_concurrency() << " Threads\n";
 	//functional_test();
-	//performance_stack();
-	performance_queue();
+	performance_stack();
+	//performance_queue();
 }
 
 

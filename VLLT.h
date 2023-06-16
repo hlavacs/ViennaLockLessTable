@@ -119,14 +119,14 @@ namespace vllt {
 		void put_cache_cache( auto& vector_ptr ) {
 			std::scoped_lock lock(m_mutex);
 			while (segment_cache_cache.size()) {
-				if(segment_cache.size() < 2*vector_ptr->m_segments.size()) segment_cache.emplace(segment_cache_cache.top());
+				if(segment_cache.size() < vector_ptr->m_segments.size()) segment_cache.emplace(segment_cache_cache.top());
 				segment_cache_cache.pop();
 			}
 		}
 
-		void put_cache(auto& ptr, auto& vector_ptr) {
+		void put_cache(auto&& ptr, auto& vector_ptr) {
 			std::scoped_lock lock(m_mutex);
-			if (segment_cache.size() < 2*vector_ptr->m_segments.size()) segment_cache.emplace(ptr);
+			if (segment_cache.size() < vector_ptr->m_segments.size()) segment_cache.emplace(ptr);
 		}
 
 		/// <summary>
@@ -180,8 +180,10 @@ namespace vllt {
 				} //Note: if we were beaten by other thread, then compare_exchange_strong itself puts the new value into vector_ptr
 			}
 
-			auto sz = vector_ptr->m_segments.size() / 8;
-			auto f = sz * (std::hash<std::thread::id>()(std::this_thread::get_id()) & 0xFF ) / 255.0 - sz;
+			auto sz = vector_ptr->m_segments.size() / 16;
+			double rnd = (rand() % 1000) / 1000.0;
+			//if (rnd > 0.2 && segment_cache.size() < vector_ptr->m_segments.size()) { put_cache(std::make_shared<segment_t>(), vector_ptr); }
+			auto f = sz* rnd - sz;
 			while ( slot >= N * (vector_ptr->m_segments.size() + vector_ptr->m_seg_offset + f)) {
 				f = 0.0;
 
@@ -231,10 +233,10 @@ namespace vllt {
 				auto unused = (int64_t)vector_ptr->m_segments.size() - (int64_t)new_vector_ptr->m_segments.size();
 				for (int64_t i = 0; i < unused; ++i) {
 					put_cache(vector_ptr->m_segments[i + reused], vector_ptr); //we were beaten, so save the new segments in the global cache
-
 				}
 
 				//m_seg_vector.store( new_vector_ptr );
+				//put_cache_cache(vector_ptr);
 				//clear_cache_cache();
 
 				if (m_seg_vector.compare_exchange_strong(vector_ptr, new_vector_ptr)) {	///< Try to exchange old segment vector with new
