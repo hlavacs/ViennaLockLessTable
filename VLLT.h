@@ -136,16 +136,16 @@ namespace vllt {
 		/// </summary>
 		/// <returns></returns>
 		auto get_cache() {
-			m_mutex.lock();
+			std::scoped_lock lock(m_mutex);
+			segment_ptr_t ptr;
 			if (!segment_cache.size()) {
-				m_mutex.unlock();
-				auto ptr = std::make_shared<segment_t>();
-				segment_cache_cache.emplace(ptr);
-				return ptr;
+				ptr = std::make_shared<segment_t>();
 			}
-			auto ptr = segment_cache.top();
-			segment_cache.pop();
-			m_mutex.unlock();
+			else {
+				ptr = segment_cache.top();
+				segment_cache.pop();
+			}
+			segment_cache_cache.emplace(ptr);
 			return ptr;
 		}
 
@@ -203,7 +203,7 @@ namespace vllt {
 				else if (first_seg > num_segments * 0.65 && min_size < medium_size) { new_size = medium_size; }
 				else if (first_seg > (num_segments >> 1) && min_size < num_segments) new_size = num_segments;
 
-				std::scoped_lock lock(m_allocate);
+				//std::scoped_lock lock(m_allocate);
 
 				auto vector_ptr2 = m_seg_vector.load();
 				if (vector_ptr != vector_ptr2) {
