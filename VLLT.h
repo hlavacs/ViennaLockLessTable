@@ -220,11 +220,6 @@ namespace vllt {
 				size_t idx = 0;
 				size_t remain = num_segments - first_seg;
 
-				auto reused = (int64_t)new_vector_ptr->m_segments.size() - (int64_t)remain;
-				auto unused = (int64_t)vector_ptr->m_segments.size() - (int64_t)new_vector_ptr->m_segments.size();
-				for (int64_t i = 0; i < unused; ++i) {
-					put_cache(vector_ptr->m_segments[i + reused], vector_ptr); //these segments are left since we are shrinking
-				}
 
 				std::ranges::for_each(new_vector_ptr->m_segments.begin(), new_vector_ptr->m_segments.end(), [&](auto& ptr) {
 					if (first_seg + idx < num_segments) { ptr = vector_ptr->m_segments[first_seg + idx]; } 
@@ -241,7 +236,16 @@ namespace vllt {
 				//clear_cache_cache();
 
 				if (m_seg_vector.compare_exchange_strong(vector_ptr, new_vector_ptr)) {	///< Try to exchange old segment vector with new
+
+					//also reuse segments that we did not reuse because vector was shrunk
+					auto reused = (int64_t)new_vector_ptr->m_segments.size() - (int64_t)remain;
+					auto unused = (int64_t)vector_ptr->m_segments.size() - (int64_t)new_vector_ptr->m_segments.size();
+					for (int64_t i = 0; i < unused; ++i) {
+						put_cache(vector_ptr->m_segments[i + reused], vector_ptr); //these segments are left since we are shrinking
+					}
+
 					vector_ptr = new_vector_ptr;										///< If success, remember for later
+
 					clear_cache_cache();  //we used those for the new segment
 				} //Note: if we were beaten by other thread, then compare_exchange_strong itself puts the new value into vector_ptr
 				else {
