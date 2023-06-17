@@ -219,6 +219,13 @@ namespace vllt {
 
 				size_t idx = 0;
 				size_t remain = num_segments - first_seg;
+
+				auto reused = (int64_t)new_vector_ptr->m_segments.size() - (int64_t)remain;
+				auto unused = (int64_t)vector_ptr->m_segments.size() - (int64_t)new_vector_ptr->m_segments.size();
+				for (int64_t i = 0; i < unused; ++i) {
+					put_cache(vector_ptr->m_segments[i + reused], vector_ptr); //these segments are left since we are shrinking
+				}
+
 				std::ranges::for_each(new_vector_ptr->m_segments.begin(), new_vector_ptr->m_segments.end(), [&](auto& ptr) {
 					if (first_seg + idx < num_segments) { ptr = vector_ptr->m_segments[first_seg + idx]; } 
 					else {
@@ -228,12 +235,6 @@ namespace vllt {
 					}
 					++idx;
 				});
-
-				auto reused = (int64_t)new_vector_ptr->m_segments.size() - (int64_t)remain;
-				auto unused = (int64_t)vector_ptr->m_segments.size() - (int64_t)new_vector_ptr->m_segments.size();
-				for (int64_t i = 0; i < unused; ++i) {
-					put_cache(vector_ptr->m_segments[i + reused], vector_ptr); //these segments are left since we are shrinking
-				}
 
 				//m_seg_vector.store( new_vector_ptr );
 				//put_cache_cache(vector_ptr);

@@ -308,7 +308,7 @@ void performance_queue() {
 
 					push_time[id] += duration_cast<duration<double>>(high_resolution_clock::now() - T1).count();
 					push_num[id]++;
-					wait_for( 20.0 * (rand() % 100) / 100.0);
+					wait_for( 10.0 * (rand() % 100) / 100.0);
 				}
 			};
 
@@ -327,13 +327,13 @@ void performance_queue() {
 					}
 					pull_time[id] += duration_cast<duration<double>>(high_resolution_clock::now() - T1).count();
 					pull_num[id]++;
-					wait_for( 20.0 * (rand() % 100) / 100.0);
+					wait_for( 10.0 * (rand() % 100) / 100.0);
 				}
 			};
 
 			size_t in = 20000, out = 20000;
 
-			std::ptrdiff_t num = std::thread::hardware_concurrency() / 2;
+			std::ptrdiff_t num = std::thread::hardware_concurrency() / 2 - 1;
 			std::cout << 1 << " ";
 			{
 				std::latch l{2*num};
@@ -446,7 +446,7 @@ void performance_stack() {
 
 					push_time[id] += duration_cast<duration<double>>(high_resolution_clock::now() - T1).count();
 					push_num[id]++;
-					wait_for(50.0 * (rand() % 100) / 100.0);
+					wait_for(10.0 * (rand() % 100) / 100.0);
 				}
 			};
 
@@ -465,7 +465,7 @@ void performance_stack() {
 					}
 					pull_time[id] += duration_cast<duration<double>>(high_resolution_clock::now() - T1).count();
 					pull_num[id]++;
-					wait_for(50.0 * (rand() % 100) / 100.0);
+					wait_for(10.0 * (rand() % 100) / 100.0);
 				}
 			};
 
