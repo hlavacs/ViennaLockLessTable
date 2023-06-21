@@ -14,6 +14,7 @@
 #include "VTLL.h"
 #include "VSTY.h"
 
+//todo: partition table indices, segment allocation on demand, also pay constr/destr costs, lockless segment cache
 
 namespace vllt {
 
