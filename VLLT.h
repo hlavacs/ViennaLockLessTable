@@ -44,7 +44,7 @@ namespace vllt {
 
 		using segment_ptr_t = std::shared_ptr<segment_t>;						///<Shared pointer to a segment
 		struct segment_vector_t {
-			std::pmr::vector<segment_ptr_t> m_segments;	///<Vector of atomic shared pointers to the segments
+			std::pmr::vector<segment_ptr_t> m_segments;	///<Vector of shared pointers to the segments
 			segment_idx_t m_seg_offset = 0;								///<Segment offset for FIFO queue (offsets segments NOT rows)
 		};
 
