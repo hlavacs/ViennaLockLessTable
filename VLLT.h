@@ -15,6 +15,7 @@
 #include "VSTY.h"
 
 //todo: partition table indices into state/counter, turn spinlock into lockless with state/counter, align atomics, segment allocation on demand not all alloc when constructing, also pay constr/destr costs, lockless segment cache
+//read-write locking segments: push - dont have to do anything (even if other are read/writing last segment), pop - write lock the last segment
 
 namespace vllt {
 
