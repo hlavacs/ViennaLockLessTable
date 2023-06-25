@@ -14,7 +14,7 @@
 #include "VTLL.h"
 #include "VSTY.h"
 
-//todo: align atomics, partition table indices, segment allocation on demand, also pay constr/destr costs, lockless segment cache
+//todo: partition table indices into state/counter, turn spinlock into lockless with state/counter, align atomics, segment allocation on demand not all alloc when constructing, also pay constr/destr costs, lockless segment cache
 
 namespace vllt {
 
