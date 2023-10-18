@@ -13,7 +13,7 @@ The Vienna Lock Less Table (VLLT) defines C++20 containers that like std::vector
 VLLT uses other projects:
 * Vienna Strong Type (VSTY), see https://github.com/hlavacs/ViennaStrongType.git
 * Vienna Type List Library (VTLL), see https://github.com/hlavacs/ViennaTypeListLibrary.
-The are included as Git submodules! So you must first init and udate them - see below!
+You have to clone them next to the ViennaLockLessTable directory, see below.
 
 VLLT's base class VlltTable is meant as a building block to create more complex containers for multithreaded access. Examples are given by VlltStack and VlltFIFOQueue.
 
@@ -23,10 +23,12 @@ VLLT's base class VlltTable is meant as a building block to create more complex 
 For cloning VLLT, do the following:
 
 ```
+  git clone https://github.com/hlavacs/ViennaTypeListLibrary.git
+  git clone https://github.com/hlavacs/ViennaStrongType.git
   git clone https://github.com/hlavacs/ViennaLockLessTable.git
   cd ViennaLockLessTable
-  git submodule init
-  git submodule update
+  msvc.bat   //or run cmake
+  cmake --build .
 ```
 
 For making sure that the submodules contain the latest version, cd into them and pull:

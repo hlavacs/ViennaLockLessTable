@@ -21,13 +21,13 @@ set(TARGET example)
 
 set(SOURCE example.cpp)
 
-include_directories(ViennaStrongType)
-include_directories(ViennaTypeListLibrary)
+include_directories(../ViennaStrongType)
+include_directories(../ViennaTypeListLibrary)
 
 set(HEADERS
 	VLLT.h
 	../ViennaStrongType/VSTY.h
-    ../ViennaTypeListLibrary/VTLL.h
+  ../ViennaTypeListLibrary/VTLL.h
 )
 
 add_executable(${TARGET} ${SOURCE} ${HEADERS})
