@@ -26,8 +26,8 @@ include_directories(ViennaTypeListLibrary)
 
 set(HEADERS
 	VLLT.h
-	ViennaStrongType/VSTY.h
-  ViennaTypeListLibrary/VTLL.h
+	../ViennaStrongType/VSTY.h
+    ../ViennaTypeListLibrary/VTLL.h
 )
 
 add_executable(${TARGET} ${SOURCE} ${HEADERS})
