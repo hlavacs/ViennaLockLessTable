@@ -57,7 +57,7 @@ namespace vllt {
 
 	public:
 		VlltTable(size_t r = 1 << 16, std::pmr::memory_resource* mr = std::pmr::new_delete_resource()) noexcept
-			: m_mr{ mr }, m_allocator{ mr }, m_seg_vector{ nullptr } {};
+			: m_mr{ mr }, m_allocator{ mr }, m_segment_vector{ nullptr } {};
 		~VlltTable() noexcept {};
 
 		/// <summary>
@@ -178,7 +178,7 @@ namespace vllt {
 		/// <param name="first_seg">Index of first segment that currently holds information.</param>
 		/// <returns></returns>
 		inline auto resize(table_index_t slot, std::atomic<table_index_t>* first_slot = nullptr) {
-			auto vector_ptr{ m_seg_vector.load() };
+			auto vector_ptr{ m_segment_vector.load() };
 
 			if (!vector_ptr) {
 				auto new_vector_ptr = std::make_shared<segment_vector_t>( //vector has always as many MINSLOTS as its capacity is -> size==capacity
@@ -187,8 +187,8 @@ namespace vllt {
 				for (auto& ptr : new_vector_ptr->m_segments) {
 					ptr = std::make_shared<segment_t>();
 				}
-				if (m_seg_vector.compare_exchange_strong(vector_ptr, new_vector_ptr)) {	///< Try to exchange old segment vector with new
-					vector_ptr = new_vector_ptr;										///< If success, remember for later
+				if (m_segment_vector.compare_exchange_strong(vector_ptr, new_vector_ptr)) {	///< Try to exchange old segment vector with new
+					vector_ptr = new_vector_ptr; ///< If success, remember for later
 				} //Note: if we were beaten by other thread, then compare_exchange_strong itself puts the new value into vector_ptr
 			}
 
@@ -219,7 +219,7 @@ namespace vllt {
 
 				//std::scoped_lock lock(m_allocate);
 
-				auto vector_ptr2 = m_seg_vector.load();
+				auto vector_ptr2 = m_segment_vector.load();
 				if (vector_ptr != vector_ptr2) {
 					vector_ptr = vector_ptr2;
 					continue;
@@ -243,11 +243,11 @@ namespace vllt {
 					++idx;
 				});
 
-				//m_seg_vector.store( new_vector_ptr );
+				//m_segment_vector.store( new_vector_ptr );
 				//put_cache_cache(vector_ptr);
 				//clear_cache_cache();
 
-				if (m_seg_vector.compare_exchange_strong(vector_ptr, new_vector_ptr)) {	///< Try to exchange old segment vector with new
+				if (m_segment_vector.compare_exchange_strong(vector_ptr, new_vector_ptr)) {	///< Try to exchange old segment vector with new
 
 					//also reuse segments that we did not reuse because vector was shrunk
 					auto reused = (int64_t)new_vector_ptr->m_segments.size() - (int64_t)remain;
@@ -256,7 +256,7 @@ namespace vllt {
 						put_global_cache(vector_ptr->m_segments[i + reused], vector_ptr); //these segments are left since we are shrinking
 					}
 
-					vector_ptr = new_vector_ptr;										///< If success, remember for later
+					vector_ptr = new_vector_ptr; ///< If success, remember for later
 
 					clear_local_cache();  //we used those for the new segment
 				} //Note: if we were beaten by other thread, then compare_exchange_strong itself puts the new value into vector_ptr
@@ -270,13 +270,13 @@ namespace vllt {
 
 		std::pmr::memory_resource* m_mr; ///< Memory resource for allocating segments
 		std::pmr::polymorphic_allocator<segment_vector_t>	m_allocator;  ///< use this allocator
-		std::atomic<std::shared_ptr<segment_vector_t>>		m_seg_vector;///< Atomic shared ptr to the vector of segments
+		std::atomic<std::shared_ptr<segment_vector_t>>		m_segment_vector;///< Atomic shared ptr to the vector of segments
 
 		std::mutex m_mutex;
 		std::stack<segment_ptr_t> segment_global_cache;
 		static inline thread_local std::stack<segment_ptr_t> segment_local_cache;
 
-		std::mutex m_allocate;
+		//std::mutex m_allocate;
 	};
 
 
@@ -310,7 +310,7 @@ namespace vllt {
 		using VlltTable<DATA, N0, ROW, MINSLOTS>::N;
 		using VlltTable<DATA, N0, ROW, MINSLOTS>::L;
 		using VlltTable<DATA, N0, ROW, MINSLOTS>::m_mr;
-		using VlltTable<DATA, N0, ROW, MINSLOTS>::m_seg_vector;
+		using VlltTable<DATA, N0, ROW, MINSLOTS>::m_segment_vector;
 		using VlltTable<DATA, N0, ROW, MINSLOTS>::get_component_ptr;
 		using VlltTable<DATA, N0, ROW, MINSLOTS>::insert;
 
@@ -399,7 +399,7 @@ namespace vllt {
 	template<size_t I>
 	inline auto VlltStack<DATA, N0, ROW, MINSLOTS>::get(stack_index_t n) noexcept -> std::optional<std::reference_wrapper<vtll::Nth_type<DATA, I>>> {
 		if (n >= size()) return std::nullopt;
-		auto vector_ptr = m_seg_vector.load();
+		auto vector_ptr = m_segment_vector.load();
 		return { *(this->template get_component_ptr<I>(table_index_t{n}, vector_ptr)) };
 	};
 
@@ -412,7 +412,7 @@ namespace vllt {
 	template<typename C>
 	inline auto VlltStack<DATA, N0, ROW, MINSLOTS>::get(stack_index_t n) noexcept -> std::optional<std::reference_wrapper<C>> requires vtll::unique<DATA>::value {
 		if (n >= size()) return std::nullopt;
-		auto vector_ptr = m_seg_vector.load();
+		auto vector_ptr = m_segment_vector.load();
 		return { *(this->template get_component_ptr<vtll::index_of<DATA, C>::value>(table_index_t{n}, vector_ptr)) };
 	};
 
@@ -424,7 +424,7 @@ namespace vllt {
 	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
 	inline auto VlltStack<DATA, N0, ROW, MINSLOTS>::get_tuple(stack_index_t n) noexcept -> std::optional<tuple_ref_t> {
 		if (n >= size()) return std::nullopt;
-		auto vector_ptr = m_seg_vector.load();
+		auto vector_ptr = m_segment_vector.load();
 		return { [&] <size_t... Is>(std::index_sequence<Is...>) { return std::tie(* (this->template get_component_ptr<Is>(table_index_t{n}, vector_ptr))...); }(std::make_index_sequence<vtll::size<DATA>::value>{}) };
 	};
 
@@ -475,7 +475,7 @@ namespace vllt {
 			if (size.m_next_free_slot == 0) return std::nullopt;	///< Is there a row to pop off?
 		};
 
-		auto vector_ptr{ m_seg_vector.load() };						///< Access the segment vector
+		auto vector_ptr{ m_segment_vector.load() };						///< Access the segment vector
 
 		auto idx = size.m_next_free_slot - 1;
 		vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
@@ -564,7 +564,7 @@ namespace vllt {
 	public:
 		using VlltTable<DATA, N0, ROW, MINSLOTS>::N;
 		using VlltTable<DATA, N0, ROW, MINSLOTS>::L;
-		using VlltTable<DATA, N0, ROW, MINSLOTS>::m_seg_vector;
+		using VlltTable<DATA, N0, ROW, MINSLOTS>::m_segment_vector;
 		using VlltTable<DATA, N0, ROW, MINSLOTS>::m_mr;
 		using VlltTable<DATA, N0, ROW, MINSLOTS>::get_component_ptr;
 		using VlltTable<DATA, N0, ROW, MINSLOTS>::insert;
@@ -639,7 +639,7 @@ namespace vllt {
 			if (!(next <= last)) return std::nullopt;
 		} while (!m_next.compare_exchange_weak(next, table_index_t{ next + 1ul }));  ///< Slot number to put the new data into	
 		
-		auto vector_ptr{ m_seg_vector.load() };						///< Access the segment vector
+		auto vector_ptr{ m_segment_vector.load() };						///< Access the segment vector
 
 		vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 			[&](auto i) {
@@ -695,7 +695,7 @@ namespace vllt {
 		while (pop().has_value()) { ++num; }
 		
 		//auto next_free_slot = m_next_free_slot.load();
-		//auto vector_ptr{ m_seg_vector.load() };		///< Shared pointer to current segment ptr vector, can be nullptr
+		//auto vector_ptr{ m_segment_vector.load() };		///< Shared pointer to current segment ptr vector, can be nullptr
 		//resize(next_free_slot, vector_ptr, &m_consumed);
 
 		return num;
