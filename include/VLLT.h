@@ -71,7 +71,7 @@ namespace vllt {
 		template<size_t I, typename C = vtll::Nth_type<DATA, I>>
 		inline auto get_component_ptr(table_index_t n, std::shared_ptr<segment_vector_t>& vector_ptr) noexcept -> C* { ///< \returns a pointer to a component
 			auto idx = segment(n, vector_ptr);
-			auto segment_ptr = (vector_ptr->m_segments[idx]); // .load();	///< Access the segment holding the slot
+			auto segment_ptr = (vector_ptr->m_segments[idx]); ///< Access the segment holding the slot
 			if constexpr (ROW) { return &std::get<I>((*segment_ptr)[n & BIT_MASK]); }
 			else { return &std::get<I>(*segment_ptr)[n & BIT_MASK]; }
 		}
@@ -80,20 +80,20 @@ namespace vllt {
 		/// Insert a new row at the end of the table. Make sure that there are enough segments to store the new data.
 		/// If not allocate a new vector to hold the segements, and allocate new segments.
 		/// </summary>
-		/// <param name="slot">Slot number in the table.</param>
+		/// <param name="n">Row number in the table.</param>
 		/// <param name="vector_ptr">Shared pointer to the segment vector.</param>
 		/// <param name="first_seg">Index of first segment that currently holds information.</param>
 		/// <param name="last_seg">Index of the last segment that currently holds informaton.</param>
 		/// <param name="data">The data for the new row.</param>
 		template<typename... Cs>
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
-		void insert(table_index_t slot, std::atomic<table_index_t>* first_slot, Cs&&... data) {
-			auto vector_ptr = resize(slot, first_slot); //if need be, grow the vector of segments
+		void insert(table_index_t n, std::atomic<table_index_t>* first_slot, Cs&&... data) {
+			auto vector_ptr = resize(n, first_slot); //if need be, grow the vector of segments
 
 			//copy or move the data to the new slot, using a recursive templated lambda
 			auto f = [&]<size_t I, typename T, typename... Ts>(auto && fun, T && dat, Ts&&... dats) {
-				if constexpr (vtll::is_atomic<T>::value) get_component_ptr<I>(slot, vector_ptr)->store(dat); //copy value for atomic
-				else *get_component_ptr<I>(slot, vector_ptr) = std::forward<T>(dat); //move or copy
+				if constexpr (vtll::is_atomic<T>::value) get_component_ptr<I>(n, vector_ptr)->store(dat); //copy value for atomic
+				else *get_component_ptr<I>(n, vector_ptr) = std::forward<T>(dat); //move or copy
 				if constexpr (sizeof...(dats) > 0) { fun.template operator() < I + 1 > (fun, std::forward<Ts>(dats)...); } //recurse
 			};
 			f.template operator() < 0 > (f, std::forward<Cs>(data)...);
@@ -104,7 +104,7 @@ namespace vllt {
 		/// <summary>
 		/// Return the segment index for a given slot.
 		/// </summary>
-		/// <param name="n">Slot.</param>
+		/// <param name="n">Row number.</param>
 		/// <param name="offset">Segment offset to be used.</param>
 		/// <returns>Index of the segment for the slot.</returns>
 		static auto segment(table_index_t n, size_t offset) {
@@ -114,8 +114,8 @@ namespace vllt {
 		/// <summary>
 		/// Return the segment index for a given slot.
 		/// </summary>
-		/// <param name="n">Slot.</param>
-		/// <param name="vector_ptr">Pointer to the vector of segments, and offset</param>
+		/// <param name="n">Row number.</param>
+		/// <param name="vector_ptr">Pointer to the vector of segments, and offset.</param>
 		/// <returns>Index of the segment for the slot.</returns>
 		static auto segment(table_index_t n, std::shared_ptr<segment_vector_t>& vector_ptr) {
 			return segment(n, vector_ptr->m_segment_offset );
@@ -123,45 +123,49 @@ namespace vllt {
 
 		/// <summary>
 		/// Transfer segments that have been unnessearily allocated to a global cache.
+		/// <param name="vector_ptr">Slot.</param>
 		/// </summary>
-		void put_cache_cache( auto& vector_ptr ) {
+		void transfer_local_cache( auto& vector_ptr ) {
 			std::scoped_lock lock(m_mutex);
-			while (segment_cache_cache.size()) {
-				if(segment_cache.size() < vector_ptr->m_segments.size()) segment_cache.emplace(segment_cache_cache.top());
-				segment_cache_cache.pop();
+			while (segment_local_cache.size()) {
+				if(segment_global_cache.size() < vector_ptr->m_segments.size()) segment_global_cache.emplace(segment_local_cache.top());
+				segment_local_cache.pop();
 			}
 		}
 
-		void put_cache(auto&& ptr, auto& vector_ptr) {
+		/// <summary>
+		/// Transfer segments that have been unnessearily allocated to a global cache.
+		/// <param name="vector_ptr">Slot.</param>
+		/// </summary>		
+		void put_global_cache(auto&& ptr, auto& vector_ptr) {
 			std::scoped_lock lock(m_mutex);
-			if (segment_cache.size() < vector_ptr->m_segments.size()) segment_cache.emplace(ptr);
+			if (segment_global_cache.size() < vector_ptr->m_segments.size()) segment_global_cache.emplace(ptr);
 		}
 
 		/// <summary>
 		/// Get a new segment - either from the global cache or allocate a new one.
-		/// 
-		/// This might be an unnessesary allocation, so also put it into a temp cache cache.
+		/// This might be an unnessesary allocation, so also put it into a temp local cache.
 		/// </summary>
 		/// <returns></returns>
-		auto get_cache() {
+		auto get_global_cache() {
 			std::scoped_lock lock(m_mutex);
 			segment_ptr_t ptr;
-			if (!segment_cache.size()) {
+			if (!segment_global_cache.size()) {
 				ptr = std::make_shared<segment_t>();
 			}
 			else {
-				ptr = segment_cache.top();
-				segment_cache.pop();
+				ptr = segment_global_cache.top();
+				segment_global_cache.pop();
 			}
-			segment_cache_cache.emplace(ptr);
+			segment_local_cache.emplace(ptr);
 			return ptr;
 		}
 
 		/// <summary>
 		/// Allocations were useful, so clear the temp cache cache.
 		/// </summary>
-		void clear_cache_cache() {
-			while (segment_cache_cache.size()) segment_cache_cache.pop();
+		void clear_local_cache() {
+			while (segment_local_cache.size()) segment_local_cache.pop();
 		}
 
 		/// <summary>
@@ -234,7 +238,7 @@ namespace vllt {
 					else {
 						size_t i1 = idx - remain;
 						if (i1 < first_seg) { ptr = vector_ptr->m_segments[i1]; }
-						else { ptr = get_cache(); }
+						else { ptr = get_global_cache(); }
 					}
 					++idx;
 				});
@@ -249,28 +253,28 @@ namespace vllt {
 					auto reused = (int64_t)new_vector_ptr->m_segments.size() - (int64_t)remain;
 					auto unused = (int64_t)vector_ptr->m_segments.size() - (int64_t)new_vector_ptr->m_segments.size();
 					for (int64_t i = 0; i < unused; ++i) {
-						put_cache(vector_ptr->m_segments[i + reused], vector_ptr); //these segments are left since we are shrinking
+						put_global_cache(vector_ptr->m_segments[i + reused], vector_ptr); //these segments are left since we are shrinking
 					}
 
 					vector_ptr = new_vector_ptr;										///< If success, remember for later
 
-					clear_cache_cache();  //we used those for the new segment
+					clear_local_cache();  //we used those for the new segment
 				} //Note: if we were beaten by other thread, then compare_exchange_strong itself puts the new value into vector_ptr
 				else {
-					put_cache_cache(vector_ptr); //we were beaten, so save the new segments in the global cache
+					transfer_local_cache(vector_ptr); //we were beaten, so save the new segments in the global cache
 				}
 			}
 
 			return vector_ptr;
 		}
 
-		std::pmr::memory_resource* m_mr;					///< Memory resource for allocating segments
-		std::pmr::polymorphic_allocator<segment_vector_t>	m_allocator;			///< use this allocator
-		std::atomic<std::shared_ptr<segment_vector_t>>		m_seg_vector;			///< Atomic shared ptr to the vector of segments
+		std::pmr::memory_resource* m_mr; ///< Memory resource for allocating segments
+		std::pmr::polymorphic_allocator<segment_vector_t>	m_allocator;  ///< use this allocator
+		std::atomic<std::shared_ptr<segment_vector_t>>		m_seg_vector;///< Atomic shared ptr to the vector of segments
 
 		std::mutex m_mutex;
-		std::stack<segment_ptr_t> segment_cache;
-		static inline thread_local std::stack<segment_ptr_t> segment_cache_cache;
+		std::stack<segment_ptr_t> segment_global_cache;
+		static inline thread_local std::stack<segment_ptr_t> segment_local_cache;
 
 		std::mutex m_allocate;
 	};
