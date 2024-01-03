@@ -19,6 +19,68 @@
 
 namespace vllt {
 
+	template<typename T, size_t N = 256>
+		requires std::is_default_constructible_v<T>
+	class VLLtCache {
+	public:
+		VLLtCache() noexcept {
+			int32_t i = 1;
+			for( auto& c : m_cache ) { c.m_next = i++; }
+			m_cache[N - 1].m_next = -1;
+		};
+
+		~VLLtCache() noexcept {};
+		inline auto get() noexcept -> std::optional<T> { return get(m_head); };
+		inline auto put(T&& v) noexcept -> bool { return put(std::forward<T>(v), m_head); };
+
+	private:
+		struct cache_t {
+			T m_value;
+			int32_t m_next;
+		};
+
+		struct key_t {
+			int32_t m_first; //index of first item in the single list, -1 if no item
+			uint32_t m_generation; //prevent ABA problem
+		};
+
+		inline auto get(std::atomic<key_t>& head) noexcept -> std::optional<T>;
+		inline auto put(T&&, std::atomic<key_t>& head) noexcept -> bool;
+
+		std::array<cache_t, N> m_cache;
+		std::atomic<key_t> m_head{-1,0}; //index of first item in the cache, -1 if no item
+		std::atomic<key_t> m_free{0,0}; //index of first free slot in the cache, -1 if no free slot
+	};
+	
+
+	template<typename T, size_t N>
+		requires std::is_default_constructible_v<T>
+	inline auto VLLtCache<T, N>::get(std::atomic<key_t>& head) noexcept -> std::optional<T> {	//get an item from the cache
+		key_t old_key = head.load();
+		while (old_key.m_first != -1) {
+			key_t new_key{ m_cache[old_key.m_first].m_next, old_key.m_generation + 1 };
+			if (head.compare_exchange_weak(old_key, new_key)) {
+				put(m_cache[old_key.m_first].m_value, m_free);
+				return std::optional<T>{ std::move(m_cache[old_key.m_first].m_value) };
+			}
+		}
+		return std::nullopt;
+	}
+
+	template<typename T, size_t N>
+		requires std::is_default_constructible_v<T>
+	inline auto VLLtCache<T, N>::put(T&& v, std::atomic<key_t>& head) noexcept -> bool {	//put an item into the cache
+		key_t old_key = head.load();
+		while (old_key.m_first != -1) {
+			key_t new_key{ m_cache[old_key.m_first].m_next, old_key.m_generation + 1 };
+			if (head.compare_exchange_weak(old_key, new_key)) {
+				m_cache[old_key.m_first].m_value = std::move(v);
+				return true;
+			}
+		}
+		return false;
+	}
+
 
 	/// <summary>
 	/// VlltTable is the base class for some classes, enabling management of tables that can be
@@ -165,13 +227,22 @@ namespace vllt {
 		}
 	}
 	/// <summary>
-	/// Transfer segments that have been unnessearily allocated to a global cache.
-	/// <param name="vector_ptr">Slot.</param>
+	/// Put a segment into the global cache.
+	/// <param name="ptr">Pointer to the segment.</param>
+	/// <param name="vector_ptr">Segment vector.</param>
 	/// </summary>		
 	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
 	inline auto VlltTable<DATA,N0,ROW,MINSLOTS>::put_global_cache(auto&& ptr, auto& vector_ptr) -> void {
 		std::scoped_lock lock(m_mutex);
 		if (segment_global_cache.size() < vector_ptr->m_segments.size()) segment_global_cache.emplace(ptr);
+
+		//segment_cache_t* sc = new segment_cache_t{ ptr, nullptr };
+		//auto first = m_segment_global_cache.load();
+		//if( first ) sc->m_next = first;
+		//while( !m_segment_global_cache.compare_exchange_weak(first, sc) ) {
+		//	sc->m_next = first;
+		//}
+
 	}
 
 	/// <summary>
