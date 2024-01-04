@@ -19,6 +19,10 @@
 
 namespace vllt {
 
+	/// <summary>
+	/// VlltCache is a simple cache for objects of type T. It is a single linked list of objects.
+	/// When an object is requested, then the first object in the list is returned. 
+	/// </summary>
 	template<typename T, size_t N = 256>
 		requires std::is_default_constructible_v<T> && std::is_move_assignable_v<T>
 	class VlltCache {
@@ -56,6 +60,8 @@ namespace vllt {
 	};
 	
 
+	/// @brief Get an object from the cache.
+	/// @return Returns an object from the cache, or std::nullopt if the cache is empty.
 	template<typename T, size_t N>
 		requires std::is_default_constructible_v<T> && std::is_move_assignable_v<T>
 	inline auto VlltCache<T, N>::get() noexcept -> std::optional<T> {
@@ -67,6 +73,8 @@ namespace vllt {
 	}
 
 
+	/// @brief Put an object into the cache.
+	/// @return Returs true if there was space left, else false.
 	template<typename T, size_t N>
 		requires std::is_default_constructible_v<T> && std::is_move_assignable_v<T>
 	template<typename A>
@@ -105,6 +113,9 @@ namespace vllt {
 		}
 	}
 
+
+
+	//---------------------------------------------------------------------------------------------------
 
 
 
