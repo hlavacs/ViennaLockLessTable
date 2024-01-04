@@ -20,18 +20,21 @@
 namespace vllt {
 
 	template<typename T, size_t N = 256>
-		requires std::is_default_constructible_v<T>
-	class VLLtCache {
+		requires std::is_default_constructible_v<T> && std::is_move_assignable_v<T>
+	class VlltCache {
 	public:
-		VLLtCache() noexcept {
+		VlltCache() noexcept {
 			int32_t i = 1;
 			for( auto& c : m_cache ) { c.m_next = i++; }
 			m_cache[N - 1].m_next = -1;
 		};
 
-		~VLLtCache() noexcept {};
-		inline auto get() noexcept -> std::optional<T> { return get(m_head); };
-		inline auto put(T&& v) noexcept -> bool { return put(std::forward<T>(v), m_head); };
+		~VlltCache() noexcept {};
+		inline auto get() noexcept -> std::optional<T>;
+
+		template<typename A>
+			requires std::is_same_v<std::decay_t<A>, T>
+		inline auto put(A&& v) noexcept -> bool;
 
 	private:
 		struct cache_t {
@@ -44,42 +47,65 @@ namespace vllt {
 			uint32_t m_generation; //prevent ABA problem
 		};
 
-		inline auto get(std::atomic<key_t>& head) noexcept -> std::optional<T>;
-		inline auto put(T&&, std::atomic<key_t>& head) noexcept -> bool;
+		inline auto get(std::atomic<key_t>& stack) noexcept -> int32_t; //-1 means empty
+		inline auto put(int32_t index, std::atomic<key_t>& stack) noexcept -> void;
 
 		std::array<cache_t, N> m_cache;
-		std::atomic<key_t> m_head{-1,0}; //index of first item in the cache, -1 if no item
-		std::atomic<key_t> m_free{0,0}; //index of first free slot in the cache, -1 if no free slot
+		std::atomic<key_t> m_head{ {-1,0} }; //index of first item in the cache, -1 if no item
+		std::atomic<key_t> m_free{ {0,0} }; //index of first free slot in the cache, -1 if no free slot
 	};
 	
 
 	template<typename T, size_t N>
-		requires std::is_default_constructible_v<T>
-	inline auto VLLtCache<T, N>::get(std::atomic<key_t>& head) noexcept -> std::optional<T> {	//get an item from the cache
-		key_t old_key = head.load();
-		while (old_key.m_first != -1) {
-			key_t new_key{ m_cache[old_key.m_first].m_next, old_key.m_generation + 1 };
-			if (head.compare_exchange_weak(old_key, new_key)) {
-				put(m_cache[old_key.m_first].m_value, m_free);
-				return std::optional<T>{ std::move(m_cache[old_key.m_first].m_value) };
-			}
-		}
-		return std::nullopt;
+		requires std::is_default_constructible_v<T> && std::is_move_assignable_v<T>
+	inline auto VlltCache<T, N>::get() noexcept -> std::optional<T> {
+		auto idx = get(m_head);
+		if( idx == -1 ) return std::nullopt;
+		T value = std::move(m_cache[idx].m_value);
+		put(idx, m_free);
+		return value; //implicit move through RVO
 	}
 
+
 	template<typename T, size_t N>
-		requires std::is_default_constructible_v<T>
-	inline auto VLLtCache<T, N>::put(T&& v, std::atomic<key_t>& head) noexcept -> bool {	//put an item into the cache
-		key_t old_key = head.load();
-		while (old_key.m_first != -1) {
-			key_t new_key{ m_cache[old_key.m_first].m_next, old_key.m_generation + 1 };
-			if (head.compare_exchange_weak(old_key, new_key)) {
-				m_cache[old_key.m_first].m_value = std::move(v);
-				return true;
+		requires std::is_default_constructible_v<T> && std::is_move_assignable_v<T>
+	template<typename A>
+			requires std::is_same_v<std::decay_t<A>, T>
+	inline auto VlltCache<T, N>::put(A&& v) noexcept -> bool {
+		auto idx = get(m_free);
+		if( idx == -1 ) return false;
+		m_cache[idx].m_value = v;
+		put(idx, m_head);
+		return true;
+	}
+
+
+	template<typename T, size_t N>
+		requires std::is_default_constructible_v<T> && std::is_move_assignable_v<T>
+	inline auto VlltCache<T, N>::get(std::atomic<key_t>& stack) noexcept -> int32_t {
+		key_t key = stack.load();
+		while( key.m_first != -1 ) {
+			if( stack.compare_exchange_weak(key, key_t{m_cache[key.m_first].m_next, key.m_generation + 1}) ) {
+				return key.m_first;
 			}
 		}
-		return false;
+		return -1;
 	}
+
+
+	template<typename T, size_t N>
+		requires std::is_default_constructible_v<T> && std::is_move_assignable_v<T>
+	inline auto VlltCache<T, N>::put(int32_t index, std::atomic<key_t>& stack) noexcept -> void {
+		key_t key = stack.load();
+		while( true ) {
+			m_cache[index].m_next = key.m_first;
+			if( stack.compare_exchange_weak(key, key_t{index, key.m_generation + 1}) ) {
+				return;
+			}
+		}
+	}
+
+
 
 
 	/// <summary>

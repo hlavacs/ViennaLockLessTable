@@ -27,6 +27,30 @@ void functional_test() {
 
 	const size_t MAX = 1024*16*10;
 
+	{	
+		std::cout << "CACHE\n";
+
+		vllt::VlltCache<std::string, 256> cache;
+
+		for (size_t i = 0ul; i < 256 + 10; ++i) {
+			auto str = std::to_string(i);
+			std::cout << "Put " << str << " SUCCESS: " << cache.put(str) << "\n";
+		}
+
+		for (size_t i = 0ul; i < 256 + 10; ++i) {
+			std::string str = "NONE";
+			auto ret = cache.get();
+			if( ret.has_value() )
+				str = ret.value();
+			std::cout << "Get " << str << "\n";
+		}
+
+	}
+
+
+		//----------------------------------------------------------------------------
+
+
 	{
 		std::cout << "STACK\n";
 
