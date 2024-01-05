@@ -70,5 +70,6 @@
         "thread": "cpp",
         "variant": "cpp",
         "functional": "cpp"
-    }
+    },
+    "cmake.configureOnOpen": false
 }
