@@ -34,7 +34,7 @@ void functional_test() {
 
 		for (size_t i = 0ul; i < 256 + 10; ++i) {
 			auto str = std::to_string(i);
-			std::cout << "Put " << str << " SUCCESS: " << cache.put(str) << "\n";
+			std::cout << "Put " << str << " SUCCESS: " << cache.push(str) << "\n";
 		}
 
 		for (size_t i = 0ul; i < 256 + 10; ++i) {
