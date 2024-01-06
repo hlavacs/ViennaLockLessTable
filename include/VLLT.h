@@ -154,7 +154,7 @@ namespace vllt {
 		using block_t = std::conditional_t<ROW, array_tuple_t1, array_tuple_t2>; ///< Memory layout of the table
 
 		using block_ptr_t = std::shared_ptr<block_t>; ///< Shared pointer to a block
-		struct block_vector_t {
+		struct block_map_t {
 			std::pmr::vector<block_ptr_t> m_blocks;	///< Vector of shared pointers to the blocks
 			block_idx_t m_block_offset = block_idx_t{0}; ///< Segment offset for FIFO queue (offsets blocks NOT rows)
 		};
@@ -165,7 +165,7 @@ namespace vllt {
 		~VlltTable() noexcept {};
 
 		template<size_t I, typename C = vtll::Nth_type<DATA, I>>
-		inline auto get_component_ptr(table_index_t n, std::shared_ptr<block_vector_t>& vector_ptr) noexcept -> C*;
+		inline auto get_component_ptr(table_index_t n, std::shared_ptr<block_map_t>& vector_ptr) noexcept -> C*;
 
 		template<typename... Cs>
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
@@ -177,11 +177,11 @@ namespace vllt {
 		inline auto transfer_local_cache( auto& vector_ptr ) -> void;	
 		inline auto get_global_cache() -> block_ptr_t;
 
-		inline auto resize(table_index_t slot, std::atomic<table_index_t>* first_slot = nullptr) -> std::shared_ptr<block_vector_t>;
+		inline auto resize(table_index_t slot, std::atomic<table_index_t>* first_slot = nullptr) -> std::shared_ptr<block_map_t>;
 
 		std::pmr::memory_resource* m_mr; ///< Memory resource for allocating blocks
-		std::pmr::polymorphic_allocator<block_vector_t>	m_allocator;  ///< use this allocator
-		std::atomic<std::shared_ptr<block_vector_t>>		m_block_vector;///< Atomic shared ptr to the vector of blocks
+		std::pmr::polymorphic_allocator<block_map_t>	m_allocator;  ///< use this allocator
+		std::atomic<std::shared_ptr<block_map_t>>		m_block_vector;///< Atomic shared ptr to the vector of blocks
 
 		VlltCache<block_ptr_t, 64> m_block_global_cache;
 		static inline thread_local std::stack<block_ptr_t> m_block_local_cache;
@@ -199,7 +199,7 @@ namespace vllt {
 	/// <returns>Pointer to the component.</returns>
 	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
 	template<size_t I, typename C>
-	inline auto VlltTable<DATA,N0,ROW,MINSLOTS>::get_component_ptr(table_index_t n, std::shared_ptr<block_vector_t>& vector_ptr) noexcept -> C* { ///< \returns a pointer to a component
+	inline auto VlltTable<DATA,N0,ROW,MINSLOTS>::get_component_ptr(table_index_t n, std::shared_ptr<block_map_t>& vector_ptr) noexcept -> C* { ///< \returns a pointer to a component
 		auto idx = block(n, vector_ptr->m_block_offset);
 		auto block_ptr = (vector_ptr->m_blocks[idx]); ///< Access the block holding the slot
 		if constexpr (ROW) { return &std::get<I>((*block_ptr)[n & BIT_MASK]); }
@@ -264,13 +264,13 @@ namespace vllt {
 	/// <param name="first_seg">Index of first block that currently holds information.</param>
 	/// <returns>Pointer to the block vector.</returns>
 	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
-	inline auto VlltTable<DATA,N0,ROW,MINSLOTS>::resize(table_index_t slot, std::atomic<table_index_t>* first_slot) -> std::shared_ptr<block_vector_t> {
+	inline auto VlltTable<DATA,N0,ROW,MINSLOTS>::resize(table_index_t slot, std::atomic<table_index_t>* first_slot) -> std::shared_ptr<block_map_t> {
 
 		//Get a pointer to the block vector. If there is none, then allocate a new one.
 		auto vector_ptr{ m_block_vector.load() };
 		if (!vector_ptr) {
-			auto new_vector_ptr = std::make_shared<block_vector_t>( //vector has always as many MINSLOTS as its capacity is -> size==capacity
-				block_vector_t{ std::pmr::vector<block_ptr_t>{MINSLOTS, m_mr}, block_idx_t{ 0 } } //increase existing one
+			auto new_vector_ptr = std::make_shared<block_map_t>( //vector has always as many MINSLOTS as its capacity is -> size==capacity
+				block_map_t{ std::pmr::vector<block_ptr_t>{MINSLOTS, m_mr}, block_idx_t{ 0 } } //increase existing one
 			);
 			for (auto& ptr : new_vector_ptr->m_blocks) {
 				ptr = std::make_shared<block_t>();
@@ -319,8 +319,8 @@ namespace vllt {
 			}
 
 			//Allocate a new block vector and populate it with empty semgement pointers.
-			auto new_vector_ptr = std::make_shared<block_vector_t>( //vector has always as many slots as its capacity is -> size==capacity
-				block_vector_t{ std::pmr::vector<block_ptr_t>{new_size, m_mr}, block_idx_t{ new_offset } } //increase existing one
+			auto new_vector_ptr = std::make_shared<block_map_t>( //vector has always as many slots as its capacity is -> size==capacity
+				block_map_t{ std::pmr::vector<block_ptr_t>{new_size, m_mr}, block_idx_t{ new_offset } } //increase existing one
 			);
 
 			//Copy the old block pointers into the new vector. Create also empty blocks for the new slots (or get the from the cache).
@@ -399,7 +399,7 @@ namespace vllt {
 		using typename VlltTable<DATA, N0, ROW, MINSLOTS>::tuple_ref_t;
 		using typename VlltTable<DATA, N0, ROW, MINSLOTS>::block_t;
 		using typename VlltTable<DATA, N0, ROW, MINSLOTS>::block_ptr_t;
-		using typename VlltTable<DATA, N0, ROW, MINSLOTS>::block_vector_t;
+		using typename VlltTable<DATA, N0, ROW, MINSLOTS>::block_map_t;
 
 		VlltStack(size_t r = 1 << 16, std::pmr::memory_resource* mr = std::pmr::new_delete_resource()) noexcept;
 
@@ -655,7 +655,7 @@ namespace vllt {
 		using typename VlltTable<DATA, N0, ROW, MINSLOTS>::table_index_t;
 		using typename VlltTable<DATA, N0, ROW, MINSLOTS>::block_t;
 		using typename VlltTable<DATA, N0, ROW, MINSLOTS>::block_ptr_t;
-		using typename VlltTable<DATA, N0, ROW, MINSLOTS>::block_vector_t;
+		using typename VlltTable<DATA, N0, ROW, MINSLOTS>::block_map_t;
 
 		VlltFIFOQueue() {};
 

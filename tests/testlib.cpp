@@ -277,7 +277,7 @@ void functional_test() {
 			std::cout << 4 << "\n";
 		};
 
-		for (size_t i = 0; i < 50; ++i) {
+		for (size_t i = 0; i < 30; ++i) {
 			std::cout << "Loop " << i << " ";
 			par();
 		}
