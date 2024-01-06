@@ -4,14 +4,14 @@
 
 
 # Configuration directories and files
-SourceDirectory: D:/data/GitHub/ViennaLockLessTable
-BuildDirectory: D:/data/GitHub/ViennaLockLessTable/build
+SourceDirectory: C:/data/GitHub/ViennaLockLessTable
+BuildDirectory: C:/data/GitHub/ViennaLockLessTable/build
 
 # Where to place the cost data store
 CostDataFile: 
 
 # Site is something like machine.domain, i.e. pragmatic.crd
-Site: DESKTOP-QCHMISS
+Site: LAPTOP-GMOS5MGU
 
 # Build name is osname-revision-compiler, i.e. Linux-2.4.2-2smp-c++
 BuildName: Win32-MSBuild
@@ -27,7 +27,7 @@ SubmitInactivityTimeout:
 NightlyStartTime: 00:00:00 EDT
 
 # Commands for the build/test/submit cycle
-ConfigureCommand: "C:/Program Files/CMake/bin/cmake.exe" "D:/data/GitHub/ViennaLockLessTable"
+ConfigureCommand: "C:/Program Files/CMake/bin/cmake.exe" "C:/data/GitHub/ViennaLockLessTable"
 MakeCommand: "C:\Program Files\CMake\bin\cmake.exe" --build . --config "${CTEST_CONFIGURATION_TYPE}"
 DefaultCTestConfigurationType: Release
 
