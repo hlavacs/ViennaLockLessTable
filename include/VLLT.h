@@ -388,7 +388,7 @@ namespace vllt {
 	// the block.
 	//
 	///
-	template<typename DATA, size_t N0 = 1 << 10, bool ROW = true, size_t MINSLOTS = 16, size_t NUMBITS1 = 24>
+	template<typename DATA, size_t N0 = 1 << 10, bool ROW = true, size_t MINSLOTS = 16, size_t NUMBITS1 = 40>
 	class VlltStack : public VlltTable<DATA, N0, ROW, MINSLOTS> {
 
 	public:
@@ -438,10 +438,10 @@ namespace vllt {
 	protected:
 
 		using slot_size_t = vsty::strong_type_t<uint64_t, vsty::counter<>>;
-		stack_diff_t  stack_diff(slot_size_t size) { return stack_diff_t{ size.get_bits_signed(0,NUMBITS1) }; }
-		stack_index_t stack_size(slot_size_t size) { return stack_index_t{ size.get_bits(NUMBITS1) }; }	
+		stack_index_t stack_size(slot_size_t size) { return stack_index_t{ size.get_bits(0, NUMBITS1) }; }	
+		stack_diff_t  stack_diff(slot_size_t size) { return stack_diff_t{ size.get_bits_signed(NUMBITS1) }; }
 
-		alignas(64) std::atomic<slot_size_t> m_size_cnt{ slot_size_t{ stack_diff_t{0}, stack_index_t{ 0 }, NUMBITS1 } };	///< Next slot and size as atomic
+		alignas(64) std::atomic<slot_size_t> m_size_cnt{ slot_size_t{ stack_index_t{ 0 }, stack_diff_t{0}, NUMBITS1 } };	///< Next slot and size as atomic
 
 		inline auto max_size() noexcept -> size_t;
 	};
@@ -523,7 +523,7 @@ namespace vllt {
 	inline auto VlltStack<DATA, N0, ROW, MINSLOTS, NUMBITS1>::push(Cs&&... data) noexcept -> stack_index_t {
 		//increase size.m_diff to announce your demand for a new slot -> slot is now reserved for you
 		slot_size_t size = m_size_cnt.load();	///< Make sure that no other thread is popping currently
-		while (stack_diff(size) < 0 || !m_size_cnt.compare_exchange_weak(size, slot_size_t{ stack_diff(size) + 1, stack_size(size), NUMBITS1 } )) {
+		while (stack_diff(size) < 0 || !m_size_cnt.compare_exchange_weak(size, slot_size_t{ stack_size(size), stack_diff(size) + 1, NUMBITS1 } )) {
 			if ( stack_diff(size)  < 0 ) { //here compare_exchange_weak was NOT called to copy manually
 				size = m_size_cnt.load();
 			}
@@ -533,8 +533,8 @@ namespace vllt {
 		//make sure there is enough space in the block VECTOR - if not then change the old map to a larger map
 		insert(table_index_t{stack_size(size) + stack_diff(size)}, nullptr, std::forward<Cs>(data)...); ///< Make sure there are enough MINSLOTS for blocks
 
-		slot_size_t new_size = slot_size_t{ stack_diff(size) + 1, stack_size(size), NUMBITS1 };	///< Increase size to validate the new row
-		while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ stack_diff(new_size) - 1, stack_size(new_size) + 1, NUMBITS1 } ));
+		slot_size_t new_size = slot_size_t{ stack_size(size), stack_diff(size) + 1, NUMBITS1 };	///< Increase size to validate the new row
+		while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ stack_size(new_size) + 1, stack_diff(new_size) - 1, NUMBITS1 } ));
 
 		return stack_index_t{ stack_size(size) + stack_diff(size) };	///< Return index of new entry
 	}
@@ -553,7 +553,7 @@ namespace vllt {
 		if (stack_size(size) + stack_diff(size) == 0) return std::nullopt;	///< Is there a row to pop off?
 
 		/// Make sure that no other thread is currently pushing a new row
-		while (stack_diff(size) > 0 || !m_size_cnt.compare_exchange_weak(size, slot_size_t{ stack_diff(size) - 1, stack_size(size), NUMBITS1 })) {
+		while (stack_diff(size) > 0 || !m_size_cnt.compare_exchange_weak(size, slot_size_t{ stack_size(size), stack_diff(size) - 1, NUMBITS1 })) {
 			if (stack_diff(size) > 0) { size = m_size_cnt.load(); }
 			if (stack_size(size) + stack_diff(size) == 0) return std::nullopt;	///< Is there a row to pop off?
 		};
@@ -572,8 +572,8 @@ namespace vllt {
 			}
 		);
 
-		slot_size_t new_size = slot_size_t{ stack_diff(size) - 1, stack_size(size), NUMBITS1 };	///< Commit the popping of the row
-		while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ stack_diff(new_size) + 1, stack_size(new_size) - 1, NUMBITS1 }));
+		slot_size_t new_size = slot_size_t{ stack_size(size), stack_diff(size) - 1, NUMBITS1 };	///< Commit the popping of the row
+		while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ stack_size(new_size) - 1, stack_diff(new_size) + 1, NUMBITS1 }));
 
 		return ret; //RVO?
 	}
