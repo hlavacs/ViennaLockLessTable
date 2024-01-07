@@ -27,6 +27,10 @@ _deps
 **/*.depend
 **/*.tcl
 
+*.ninja_deps
+*.ninja_log
+*.exe
+
 # MSVC cmake project files
 ALL_BUILD.vcxproj
 ZERO_CHECK.vcxproj
