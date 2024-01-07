@@ -368,6 +368,7 @@ namespace vllt {
 
 
 	using stack_index_t = vsty::strong_type_t<uint32_t, vsty::counter<>, std::integral_constant<uint32_t, std::numeric_limits<uint32_t>::max()>>;
+	using stack_diff_t = vsty::strong_type_t<int32_t, vsty::counter<>, std::integral_constant<int32_t, std::numeric_limits<int32_t>::max()>>;
 
 
 	/////
@@ -437,11 +438,11 @@ namespace vllt {
 	protected:
 
 		struct slot_size_t {
-			stack_index_t m_next_free_slot{ 0 };	//index of next free slot
+			stack_diff_t m_diff{ 0 };				//difference between next free slot and size
 			stack_index_t m_size{ 0 };				//number of valid entries
 		};
 
-		alignas(64) std::atomic<slot_size_t> m_size_cnt{ {stack_index_t{0}, stack_index_t{ 0 }} };	///< Next slot and size as atomic
+		alignas(64) std::atomic<slot_size_t> m_size_cnt{ {stack_diff_t{0}, stack_index_t{ 0 }} };	///< Next slot and size as atomic
 
 		inline auto max_size() noexcept -> size_t;
 	};
@@ -461,7 +462,7 @@ namespace vllt {
 	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
 	inline auto VlltStack<DATA, N0, ROW, MINSLOTS>::max_size() noexcept -> size_t {
 		auto size = m_size_cnt.load();
-		return std::max(size.m_next_free_slot, size.m_size);
+		return std::max(static_cast<decltype(size.m_size)>(size.m_size + size.m_diff), size.m_size);
 	};
 
 	/////
@@ -471,7 +472,7 @@ namespace vllt {
 	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
 	inline auto VlltStack<DATA, N0, ROW, MINSLOTS>::size() noexcept -> size_t {
 		auto size = m_size_cnt.load();
-		return std::min(size.m_next_free_slot, size.m_size);
+		return std::min(static_cast<decltype(size.m_size)>(size.m_size + size.m_diff), size.m_size);
 	};
 
 	/////
@@ -521,21 +522,22 @@ namespace vllt {
 	template<typename... Cs>
 		requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
 	inline auto VlltStack<DATA, N0, ROW, MINSLOTS>::push(Cs&&... data) noexcept -> stack_index_t {
-		//increase m_next_free_slot to announce your demand for a new slot -> slot is now reserved for you
+		//increase size.m_diff to announce your demand for a new slot -> slot is now reserved for you
 		slot_size_t size = m_size_cnt.load();	///< Make sure that no other thread is popping currently
-		while (size.m_next_free_slot < size.m_size || !m_size_cnt.compare_exchange_weak(size, slot_size_t{ stack_index_t{ size.m_next_free_slot + 1 }, size.m_size })) {
-			if (size.m_next_free_slot < size.m_size) { //here compare_exchange_weak was NOT called to copy manually
+		while (size.m_diff < 0 || !m_size_cnt.compare_exchange_weak(size, slot_size_t{ stack_diff_t{ size.m_diff + 1 }, size.m_size } )) {
+			if ( size.m_diff  < 0 ) { //here compare_exchange_weak was NOT called to copy manually
 				size = m_size_cnt.load();
 			}
+			//call wait function here
 		};
 
 		//make sure there is enough space in the block VECTOR - if not then change the old map to a larger map
-		insert(table_index_t{size.m_next_free_slot}, nullptr, std::forward<Cs>(data)...); ///< Make sure there are enough MINSLOTS for blocks
+		insert(table_index_t{size.m_size + size.m_diff}, nullptr, std::forward<Cs>(data)...); ///< Make sure there are enough MINSLOTS for blocks
 
-		slot_size_t new_size = m_size_cnt.load();	///< Increase size to validate the new row
-		while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ new_size.m_next_free_slot, stack_index_t{ new_size.m_size + 1} }));
+		slot_size_t new_size = slot_size_t{ stack_diff_t{ size.m_diff + 1 }, size.m_size };	///< Increase size to validate the new row
+		while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ stack_diff_t{ new_size.m_diff - 1 } , stack_index_t{ new_size.m_size + 1} } ));
 
-		return stack_index_t{ size.m_next_free_slot };	///< Return index of new entry
+		return stack_index_t{ size.m_size + size.m_diff };	///< Return index of new entry
 	}
 
 	/////
@@ -549,19 +551,17 @@ namespace vllt {
 		vtll::to_tuple<vtll::remove_atomic<DATA>> ret{};
 
 		slot_size_t size = m_size_cnt.load();
-		if (size.m_next_free_slot == 0) return std::nullopt;	///< Is there a row to pop off?
+		if (size.m_size + size.m_diff == 0) return std::nullopt;	///< Is there a row to pop off?
 
 		/// Make sure that no other thread is currently pushing a new row
-		while (size.m_next_free_slot > size.m_size ||
-			!m_size_cnt.compare_exchange_weak(size, slot_size_t{ stack_index_t{size.m_next_free_slot - 1}, size.m_size })) {
-
-			if (size.m_next_free_slot > size.m_size) { size = m_size_cnt.load(); }
-			if (size.m_next_free_slot == 0) return std::nullopt;	///< Is there a row to pop off?
+		while (size.m_diff > 0 || !m_size_cnt.compare_exchange_weak(size, slot_size_t{ stack_diff_t{size.m_diff - 1}, size.m_size })) {
+			if (size.m_diff > 0) { size = m_size_cnt.load(); }
+			if (size.m_size + size.m_diff == 0) return std::nullopt;	///< Is there a row to pop off?
 		};
 
 		auto map_ptr{ m_block_map.load() };						///< Access the block map
 
-		auto idx = size.m_next_free_slot - 1;
+		auto idx = size.m_size + size.m_diff - 1;
 		vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 			[&](auto i) {
 				using type = vtll::Nth_type<DATA, i>;
@@ -573,8 +573,8 @@ namespace vllt {
 			}
 		);
 
-		slot_size_t new_size = m_size_cnt.load();	///< Commit the popping of the row
-		while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ new_size.m_next_free_slot, stack_index_t{ new_size.m_size - 1} }));
+		slot_size_t new_size = slot_size_t{ stack_diff_t{size.m_diff - 1}, size.m_size };	///< Commit the popping of the row
+		while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ stack_diff_t{ new_size.m_diff + 1 }, stack_index_t{ new_size.m_size - 1} }));
 
 		return ret; //RVO?
 	}
