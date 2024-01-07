@@ -7,8 +7,10 @@
 #include <latch>
 #include <numeric>
 #include <string>
-#include "VLLT.h"
+#include <cstdlib>
+#include <random>
 
+#include "VLLT.h"
 
 using namespace std::chrono;
 
@@ -49,18 +51,25 @@ void functional_test() {
 
 		for (size_t n = 0ul; n < 10; ++n) {
 
-			for (size_t i = 0ul; i < 100*rand() + 10; ++i) {
-				auto str = std::to_string(i);
-				//std::cout << "Put " << str << " SUCCESS: " << cache.push(str) << "\n";
+			std::random_device rd;  // a seed source for the random number engine
+   			std::mt19937 gen(rd()); // mersenne_twister_engine seeded with rd()
+    		std::uniform_int_distribution<> distrib(1, 100);
+			auto num = distrib(gen);
+			for (size_t i = 0ul; i < num; ++i) {
+				cache.push(std::to_string(i));
 			}
 
 			for (size_t i = 0ul; i < 100; ++i) {
 				std::string str = "NONE";
 				auto ret = cache.get();
-				if( ret.has_value() )
+				if( ret.has_value() ) {
 					str = ret.value();
+					--num;
+				}
 				//std::cout << "Get " << str << "\n";
 			}
+			std::cout << "Num " << num << "\n";
+			assert(num == 0);
 		}
 
 	}
