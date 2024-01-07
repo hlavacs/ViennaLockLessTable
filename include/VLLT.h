@@ -388,7 +388,7 @@ namespace vllt {
 	// the block.
 	//
 	///
-	template<typename DATA, size_t N0 = 1 << 10, bool ROW = true, size_t MINSLOTS = 16>
+	template<typename DATA, size_t N0 = 1 << 10, bool ROW = true, size_t MINSLOTS = 16, size_t NUMBITS1 = 24>
 	class VlltStack : public VlltTable<DATA, N0, ROW, MINSLOTS> {
 
 	public:
@@ -437,12 +437,11 @@ namespace vllt {
 
 	protected:
 
-		struct slot_size_t {
-			stack_diff_t m_diff{ 0 };				//difference between next free slot and size
-			stack_index_t m_size{ 0 };				//number of valid entries
-		};
+		using slot_size_t = vsty::strong_type_t<uint64_t, vsty::counter<>>;
+		stack_diff_t  stack_diff(slot_size_t size) { return stack_diff_t{ size.get_bits_signed(0,NUMBITS1) }; }
+		stack_index_t stack_size(slot_size_t size) { return stack_index_t{ size.get_bits(NUMBITS1) }; }	
 
-		alignas(64) std::atomic<slot_size_t> m_size_cnt{ {stack_diff_t{0}, stack_index_t{ 0 }} };	///< Next slot and size as atomic
+		alignas(64) std::atomic<slot_size_t> m_size_cnt{ slot_size_t{ stack_diff_t{0}, stack_index_t{ 0 }, NUMBITS1 } };	///< Next slot and size as atomic
 
 		inline auto max_size() noexcept -> size_t;
 	};
@@ -452,27 +451,27 @@ namespace vllt {
 	// \param[in] r Max number of rows that can be stored in the table.
 	// \param[in] mr Memory allocator.
 	///
-	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
-	inline VlltStack<DATA, N0, ROW, MINSLOTS>::VlltStack(size_t r, std::pmr::memory_resource* mr) noexcept : VlltTable<DATA, N0, ROW, MINSLOTS>(r, mr) {};
+	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, size_t NUMBITS1>
+	inline VlltStack<DATA, N0, ROW, MINSLOTS, NUMBITS1>::VlltStack(size_t r, std::pmr::memory_resource* mr) noexcept : VlltTable<DATA, N0, ROW, MINSLOTS>(r, mr) {};
 
 	/////
 	// \brief Return number of rows when growing including new rows not yet established.
 	// \returns number of rows when growing including new rows not yet established.
 	///
-	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
-	inline auto VlltStack<DATA, N0, ROW, MINSLOTS>::max_size() noexcept -> size_t {
+	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, size_t NUMBITS1>
+	inline auto VlltStack<DATA, N0, ROW, MINSLOTS, NUMBITS1>::max_size() noexcept -> size_t {
 		auto size = m_size_cnt.load();
-		return std::max(static_cast<decltype(size.m_size)>(size.m_size + size.m_diff), size.m_size);
+		return std::max(static_cast<decltype(stack_size(size))>(stack_size(size) + stack_diff(size)), stack_size(size));
 	};
 
 	/////
 	// \brief Return number of valid rows.
 	// \returns number of valid rows.
 	///
-	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
-	inline auto VlltStack<DATA, N0, ROW, MINSLOTS>::size() noexcept -> size_t {
+	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, size_t NUMBITS1>
+	inline auto VlltStack<DATA, N0, ROW, MINSLOTS, NUMBITS1>::size() noexcept -> size_t {
 		auto size = m_size_cnt.load();
-		return std::min(static_cast<decltype(size.m_size)>(size.m_size + size.m_diff), size.m_size);
+		return std::min(static_cast<decltype(stack_size(size))>(stack_size(size) + stack_diff(size)), stack_size(size));
 	};
 
 	/////
@@ -480,9 +479,9 @@ namespace vllt {
 	// \param[in] n Index to the entry.
 	// \returns a pointer to the Ith component of entry n.
 	///
-	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
+	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, size_t NUMBITS1>
 	template<size_t I>
-	inline auto VlltStack<DATA, N0, ROW, MINSLOTS>::get(stack_index_t n) noexcept -> std::optional<std::reference_wrapper<vtll::Nth_type<DATA, I>>> {
+	inline auto VlltStack<DATA, N0, ROW, MINSLOTS, NUMBITS1>::get(stack_index_t n) noexcept -> std::optional<std::reference_wrapper<vtll::Nth_type<DATA, I>>> {
 		if (n >= size()) return std::nullopt;
 		auto map_ptr = m_block_map.load();
 		return { *(this->template get_component_ptr<I>(table_index_t{n}, map_ptr)) };
@@ -493,9 +492,9 @@ namespace vllt {
 	// \param[in] n Index to the entry.
 	// \returns a pointer to the Ith component of entry n.
 	///
-	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
+	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, size_t NUMBITS1>
 	template<typename C>
-	inline auto VlltStack<DATA, N0, ROW, MINSLOTS>::get(stack_index_t n) noexcept -> std::optional<std::reference_wrapper<C>> requires vtll::unique<DATA>::value {
+	inline auto VlltStack<DATA, N0, ROW, MINSLOTS, NUMBITS1>::get(stack_index_t n) noexcept -> std::optional<std::reference_wrapper<C>> requires vtll::unique<DATA>::value {
 		if (n >= size()) return std::nullopt;
 		auto map_ptr = m_block_map.load();
 		return { *(this->template get_component_ptr<vtll::index_of<DATA, C>::value>(table_index_t{n}, map_ptr)) };
@@ -506,8 +505,8 @@ namespace vllt {
 	// \param[in] n Index to the entry.
 	// \returns a tuple with pointers to all components of entry n.
 	///
-	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
-	inline auto VlltStack<DATA, N0, ROW, MINSLOTS>::get_tuple(stack_index_t n) noexcept -> std::optional<tuple_ref_t> {
+	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, size_t NUMBITS1>
+	inline auto VlltStack<DATA, N0, ROW, MINSLOTS, NUMBITS1>::get_tuple(stack_index_t n) noexcept -> std::optional<tuple_ref_t> {
 		if (n >= size()) return std::nullopt;
 		auto map_ptr = m_block_map.load();
 		return { [&] <size_t... Is>(std::index_sequence<Is...>) { return std::tie(* (this->template get_component_ptr<Is>(table_index_t{n}, map_ptr))...); }(std::make_index_sequence<vtll::size<DATA>::value>{}) };
@@ -518,26 +517,26 @@ namespace vllt {
 	// \param[in] data References to the components to be added.
 	// \returns the index of the new entry.
 	///
-	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
+	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, size_t NUMBITS1>
 	template<typename... Cs>
 		requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
-	inline auto VlltStack<DATA, N0, ROW, MINSLOTS>::push(Cs&&... data) noexcept -> stack_index_t {
+	inline auto VlltStack<DATA, N0, ROW, MINSLOTS, NUMBITS1>::push(Cs&&... data) noexcept -> stack_index_t {
 		//increase size.m_diff to announce your demand for a new slot -> slot is now reserved for you
 		slot_size_t size = m_size_cnt.load();	///< Make sure that no other thread is popping currently
-		while (size.m_diff < 0 || !m_size_cnt.compare_exchange_weak(size, slot_size_t{ stack_diff_t{ size.m_diff + 1 }, size.m_size } )) {
-			if ( size.m_diff  < 0 ) { //here compare_exchange_weak was NOT called to copy manually
+		while (stack_diff(size) < 0 || !m_size_cnt.compare_exchange_weak(size, slot_size_t{ stack_diff(size) + 1, stack_size(size), NUMBITS1 } )) {
+			if ( stack_diff(size)  < 0 ) { //here compare_exchange_weak was NOT called to copy manually
 				size = m_size_cnt.load();
 			}
 			//call wait function here
 		};
 
 		//make sure there is enough space in the block VECTOR - if not then change the old map to a larger map
-		insert(table_index_t{size.m_size + size.m_diff}, nullptr, std::forward<Cs>(data)...); ///< Make sure there are enough MINSLOTS for blocks
+		insert(table_index_t{stack_size(size) + stack_diff(size)}, nullptr, std::forward<Cs>(data)...); ///< Make sure there are enough MINSLOTS for blocks
 
-		slot_size_t new_size = slot_size_t{ stack_diff_t{ size.m_diff + 1 }, size.m_size };	///< Increase size to validate the new row
-		while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ stack_diff_t{ new_size.m_diff - 1 } , stack_index_t{ new_size.m_size + 1} } ));
+		slot_size_t new_size = slot_size_t{ stack_diff(size) + 1, stack_size(size), NUMBITS1 };	///< Increase size to validate the new row
+		while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ stack_diff(new_size) - 1, stack_size(new_size) + 1, NUMBITS1 } ));
 
-		return stack_index_t{ size.m_size + size.m_diff };	///< Return index of new entry
+		return stack_index_t{ stack_size(size) + stack_diff(size) };	///< Return index of new entry
 	}
 
 	/////
@@ -546,22 +545,22 @@ namespace vllt {
 	// \param[in] del If true, then call desctructor on the removed slot.
 	// \returns true if a row was popped.
 	///
-	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
-	inline auto VlltStack<DATA, N0, ROW, MINSLOTS>::pop() noexcept -> tuple_opt_t {
+	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, size_t NUMBITS1>
+	inline auto VlltStack<DATA, N0, ROW, MINSLOTS, NUMBITS1>::pop() noexcept -> tuple_opt_t {
 		vtll::to_tuple<vtll::remove_atomic<DATA>> ret{};
 
 		slot_size_t size = m_size_cnt.load();
-		if (size.m_size + size.m_diff == 0) return std::nullopt;	///< Is there a row to pop off?
+		if (stack_size(size) + stack_diff(size) == 0) return std::nullopt;	///< Is there a row to pop off?
 
 		/// Make sure that no other thread is currently pushing a new row
-		while (size.m_diff > 0 || !m_size_cnt.compare_exchange_weak(size, slot_size_t{ stack_diff_t{size.m_diff - 1}, size.m_size })) {
-			if (size.m_diff > 0) { size = m_size_cnt.load(); }
-			if (size.m_size + size.m_diff == 0) return std::nullopt;	///< Is there a row to pop off?
+		while (stack_diff(size) > 0 || !m_size_cnt.compare_exchange_weak(size, slot_size_t{ stack_diff(size) - 1, stack_size(size), NUMBITS1 })) {
+			if (stack_diff(size) > 0) { size = m_size_cnt.load(); }
+			if (stack_size(size) + stack_diff(size) == 0) return std::nullopt;	///< Is there a row to pop off?
 		};
 
 		auto map_ptr{ m_block_map.load() };						///< Access the block map
 
-		auto idx = size.m_size + size.m_diff - 1;
+		auto idx = stack_size(size) + stack_diff(size) - 1;
 		vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 			[&](auto i) {
 				using type = vtll::Nth_type<DATA, i>;
@@ -573,8 +572,8 @@ namespace vllt {
 			}
 		);
 
-		slot_size_t new_size = slot_size_t{ stack_diff_t{size.m_diff - 1}, size.m_size };	///< Commit the popping of the row
-		while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ stack_diff_t{ new_size.m_diff + 1 }, stack_index_t{ new_size.m_size - 1} }));
+		slot_size_t new_size = slot_size_t{ stack_diff(size) - 1, stack_size(size), NUMBITS1 };	///< Commit the popping of the row
+		while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ stack_diff(new_size) + 1, stack_size(new_size) - 1, NUMBITS1 }));
 
 		return ret; //RVO?
 	}
@@ -583,8 +582,8 @@ namespace vllt {
 	// \brief Pop all rows and call the destructors.
 	// \returns number of popped rows.
 	///
-	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
-	inline auto VlltStack<DATA, N0, ROW, MINSLOTS>::clear() noexcept -> size_t {
+	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, size_t NUMBITS1>
+	inline auto VlltStack<DATA, N0, ROW, MINSLOTS, NUMBITS1>::clear() noexcept -> size_t {
 		size_t num = 0;
 		while (pop().has_value()) { ++num; }
 		return num;
@@ -596,8 +595,8 @@ namespace vllt {
 	// \param[in] n2 Index of second row.
 	// \returns true if the operation was successful.
 	///
-	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
-	inline auto VlltStack<DATA, N0, ROW, MINSLOTS>::swap(stack_index_t idst, stack_index_t isrc) noexcept -> void {
+	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, size_t NUMBITS1>
+	inline auto VlltStack<DATA, N0, ROW, MINSLOTS, NUMBITS1>::swap(stack_index_t idst, stack_index_t isrc) noexcept -> void {
 		assert(idst < size() && isrc < size());
 		auto src = get_tuple(isrc);
 		if (!src.has_value()) return;
