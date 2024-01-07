@@ -524,7 +524,6 @@ build extern/rebuild_cache: phony extern/CMakeFiles/rebuild_cache.util
 build cmake_object_order_depends_target_testlib: phony || tests/CMakeFiles/testlib.dir
 
 build tests/CMakeFiles/testlib.dir/testlib.cpp.obj: CXX_COMPILER__testlib_unscanned_Debug C$:/data/GitHub/ViennaLockLessTable/tests/testlib.cpp || cmake_object_order_depends_target_testlib
-  CODE_CHECK = "C:\Program Files\CMake\bin\cmake.exe" -E __run_co_compile --tidy=clang-tidy;-checks=readability-*;cppcoreguidelines-*;-header-filter=.*;-p;build;--extra-arg=-std=c++20;--extra-arg-before=--driver-mode=g++ --source=C:\data\GitHub\ViennaLockLessTable\tests\testlib.cpp -- 
   DEP_FILE = tests\CMakeFiles\testlib.dir\testlib.cpp.obj.d
   FLAGS = -O0 -g -Xclang -gcodeview -D_DEBUG -D_DLL -D_MT -Xclang --dependent-lib=msvcrtd -std=gnu++20
   INCLUDES = -IC:/data/GitHub/ViennaLockLessTable/include -IC:/data/GitHub/ViennaLockLessTable/extern/ViennaTypeListLibrary -IC:/data/GitHub/ViennaLockLessTable/extern/ViennaStrongType

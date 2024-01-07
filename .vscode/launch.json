@@ -5,21 +5,10 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "(Windows) Debug",
+            "name": "(Windows) Launch",
             "type": "cppvsdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/build/tests/Debug/testlib.exe",  
-            "args": [],
-            "stopAtEntry": false,
-            "cwd": "${workspaceFolder}",
-            "environment": [],
-            "externalConsole": true
-        },
-        {
-            "name": "(Windows) Run",
-            "type": "cppvsdbg",
-            "request": "launch",
-            "program": "${workspaceFolder}/build/tests/Release/testlib.exe",  
+            "program": "${workspaceFolder}/build/tests/testlib.exe",  
             "args": [],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",

@@ -39,25 +39,23 @@ namespace vllt {
 
 	private:
 		using cache_index_t = vsty::strong_type_t<int64_t, vsty::counter<>, std::integral_constant<int64_t, -1L>>;
+		using generation_t = vsty::strong_type_t<size_t, vsty::counter<>>;
 
 		struct cache_t {
 			T m_value;
 			cache_index_t m_next;
 		};
 
-		//struct key_t {
-		//	int32_t m_first; //index of first item in the single list, -1 if no item
-		//	uint32_t m_generation; //prevent ABA problem
-		//};
+		using key_t = vsty::strong_type_t<uint64_t, vsty::counter<>>; //bits 0..NUMBITS1-1: index of first item, bits NUMBITS1..63: generation
+		cache_index_t first(key_t key) { return cache_index_t{ key.get_bits_signed(0,NUMBITS1) }; }
+		generation_t generation(key_t key) { return generation_t{ key.get_bits(NUMBITS1) }; }		
 
-		using key2_t = vsty::strong_type_t<uint64_t, vsty::counter<>>; //bits 0..NUMBITS1-1: index of first item, bits NUMBITS1..63: generation
-
-		inline auto get(std::atomic<key2_t>& stack) noexcept -> cache_index_t; //can be empty
-		inline auto push(cache_index_t index, std::atomic<key2_t>& stack) noexcept -> void;
+		inline auto get(std::atomic<key_t>& stack) noexcept -> cache_index_t; //can be empty
+		inline auto push(cache_index_t index, std::atomic<key_t>& stack) noexcept -> void;
 
 		std::array<cache_t, N> m_cache;
-		std::atomic<key2_t> m_head{ key2_t{cache_index_t{ }, 0, NUMBITS1} }; //index of first item in the cache, -1 if no item
-		std::atomic<key2_t> m_free{ key2_t{cache_index_t{0}, 0, NUMBITS1} }; //index of first free slot in the cache, -1 if no free slot
+		std::atomic<key_t> m_head{ key_t{cache_index_t{ }, 0, NUMBITS1} }; //index of first item in the cache, -1 if no item
+		std::atomic<key_t> m_free{ key_t{cache_index_t{0}, 0, NUMBITS1} }; //index of first free slot in the cache, -1 if no free slot
 	};
 	
 	
@@ -100,11 +98,11 @@ namespace vllt {
 
 	template<typename T, size_t N, size_t NUMBITS1>
 		requires std::is_default_constructible_v<T> && std::is_move_assignable_v<T>
-	inline auto VlltCache<T, N, NUMBITS1>::get(std::atomic<key2_t>& stack) noexcept -> cache_index_t {
-		key2_t key = stack.load();
+	inline auto VlltCache<T, N, NUMBITS1>::get(std::atomic<key_t>& stack) noexcept -> cache_index_t {
+		key_t key = stack.load();
 		while( cache_index_t{ key.get_bits_signed(0,NUMBITS1) }.has_value() ) {
-			if( stack.compare_exchange_weak(key, key2_t{ m_cache[key.get_bits_signed(0,NUMBITS1)].m_next, key.get_bits_signed(NUMBITS1) + 1, NUMBITS1}) ) {
-				return cache_index_t{ key.get_bits_signed(0,NUMBITS1) };
+			if( stack.compare_exchange_weak(key, key_t{ m_cache[first(key)].m_next, generation(key) + 1, NUMBITS1}) ) {
+				return cache_index_t{ first(key) };
 			}
 		}
 		return cache_index_t{};
@@ -113,11 +111,11 @@ namespace vllt {
 
 	template<typename T, size_t N, size_t NUMBITS1>
 		requires std::is_default_constructible_v<T> && std::is_move_assignable_v<T>
-	inline auto VlltCache<T, N, NUMBITS1>::push(cache_index_t index, std::atomic<key2_t>& stack) noexcept -> void {
-		key2_t key = stack.load();
+	inline auto VlltCache<T, N, NUMBITS1>::push(cache_index_t index, std::atomic<key_t>& stack) noexcept -> void {
+		key_t key = stack.load();
 		while( true ) {
-			m_cache[index].m_next = key.get_bits_signed(0,NUMBITS1);
-			if( stack.compare_exchange_weak(key, key2_t{index, key.get_bits_signed(NUMBITS1) + 1, NUMBITS1}) ) {
+			m_cache[index].m_next = first(key);
+			if( stack.compare_exchange_weak(key, key_t{index, generation(key) + 1, NUMBITS1}) ) {
 				return;
 			}
 		}
