@@ -69,7 +69,8 @@
         "stop_token": "cpp",
         "thread": "cpp",
         "variant": "cpp",
-        "functional": "cpp"
+        "functional": "cpp",
+        "random": "cpp"
     },
     "cmake.configureOnOpen": false
 }

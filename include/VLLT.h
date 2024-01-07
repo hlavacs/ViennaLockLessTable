@@ -52,15 +52,11 @@ namespace vllt {
 
 		std::array<cache_t, N> m_cache;
 
-		struct alignas(64) key_holder_t {
-			std::atomic<key_t> m_key;
-		};
+		inline auto get(std::atomic<key_t>& stack) noexcept -> cache_index_t; //can be empty
+		inline auto push(cache_index_t index, std::atomic<key_t>& stack) noexcept -> void;
 
-		inline auto get(key_holder_t& stack) noexcept -> cache_index_t; //can be empty
-		inline auto push(cache_index_t index, key_holder_t& stack) noexcept -> void;
-
-		key_holder_t m_head{ key_t{cache_index_t{ }, 0, NUMBITS1} }; //index of first item in the cache, -1 if no item
-		key_holder_t m_free{ key_t{cache_index_t{0}, 0, NUMBITS1} }; //index of first free slot in the cache, -1 if no free slot
+		alignas(64) std::atomic<key_t> m_head{ key_t{cache_index_t{ }, 0, NUMBITS1} }; //index of first item in the cache, -1 if no item
+		alignas(64) std::atomic<key_t> m_free{ key_t{cache_index_t{0}, 0, NUMBITS1} }; //index of first free slot in the cache, -1 if no free slot
 	};
 	
 	
@@ -103,10 +99,10 @@ namespace vllt {
 
 	template<typename T, size_t N, size_t NUMBITS1>
 		requires std::is_default_constructible_v<T> && std::is_move_assignable_v<T>
-	inline auto VlltCache<T, N, NUMBITS1>::get(key_holder_t& stack) noexcept -> cache_index_t {
-		key_t key = stack.m_key.load();
+	inline auto VlltCache<T, N, NUMBITS1>::get(std::atomic<key_t>& stack) noexcept -> cache_index_t {
+		key_t key = stack.load();
 		while( cache_index_t{ key.get_bits_signed(0,NUMBITS1) }.has_value() ) {
-			if( stack.m_key.compare_exchange_weak(key, key_t{ m_cache[first(key)].m_next, generation(key) + 1, NUMBITS1}) ) {
+			if( stack.compare_exchange_weak(key, key_t{ m_cache[first(key)].m_next, generation(key) + 1, NUMBITS1}) ) {
 				return cache_index_t{ first(key) };
 			}
 		}
@@ -116,11 +112,11 @@ namespace vllt {
 
 	template<typename T, size_t N, size_t NUMBITS1>
 		requires std::is_default_constructible_v<T> && std::is_move_assignable_v<T>
-	inline auto VlltCache<T, N, NUMBITS1>::push(cache_index_t index, key_holder_t& stack) noexcept -> void {
-		key_t key = stack.m_key.load();
+	inline auto VlltCache<T, N, NUMBITS1>::push(cache_index_t index, std::atomic<key_t>& stack) noexcept -> void {
+		key_t key = stack.load();
 		while( true ) {
 			m_cache[index].m_next = first(key);
-			if( stack.m_key.compare_exchange_weak(key, key_t{index, generation(key) + 1, NUMBITS1}) ) {
+			if( stack.compare_exchange_weak(key, key_t{index, generation(key) + 1, NUMBITS1}) ) {
 				return;
 			}
 		}
@@ -188,8 +184,8 @@ namespace vllt {
 		inline auto resize(table_index_t slot, std::atomic<table_index_t>* first_slot = nullptr) -> std::shared_ptr<block_map_t>;
 
 		std::pmr::memory_resource* m_mr; ///< Memory resource for allocating blocks
-		std::pmr::polymorphic_allocator<block_map_t>	m_allocator;  ///< use this allocator
-		std::atomic<std::shared_ptr<block_map_t>>		m_block_map;///< Atomic shared ptr to the map of blocks
+		std::pmr::polymorphic_allocator<block_map_t> m_allocator;  ///< use this allocator
+		alignas(64) std::atomic<std::shared_ptr<block_map_t>> m_block_map;///< Atomic shared ptr to the map of blocks
 
 		VlltCache<block_ptr_t, 64> m_block_global_cache;
 		static inline thread_local std::stack<block_ptr_t> m_block_local_cache;
@@ -445,7 +441,7 @@ namespace vllt {
 			stack_index_t m_size{ 0 };				//number of valid entries
 		};
 
-		std::atomic<slot_size_t> m_size_cnt{ {stack_index_t{0}, stack_index_t{ 0 }} };	///< Next slot and size as atomic
+		alignas(64) std::atomic<slot_size_t> m_size_cnt{ {stack_index_t{0}, stack_index_t{ 0 }} };	///< Next slot and size as atomic
 
 		inline auto max_size() noexcept -> size_t;
 	};
@@ -676,10 +672,10 @@ namespace vllt {
 		inline auto clear() noexcept	-> size_t;			///< Set the number if rows to zero - effectively clear the table, call destructors
 
 	protected:
-		std::atomic<table_index_t>	m_next{ table_index_t{0} };	//next element to be taken out of the queue
-		std::atomic<table_index_t>	m_consumed;		//last element that was taken out and fully read and destroyed
-		std::atomic<table_index_t>	m_next_free_slot{ table_index_t{0} };		//next element to write over
-		std::atomic<table_index_t>	m_last;			//last element that has been produced and fully constructed
+		alignas(64) std::atomic<table_index_t>	m_next{ table_index_t{0} };	//next element to be taken out of the queue
+		alignas(64) std::atomic<table_index_t>	m_consumed;		//last element that was taken out and fully read and destroyed
+		alignas(64) std::atomic<table_index_t>	m_next_free_slot{ table_index_t{0} };		//next element to write over
+		alignas(64) std::atomic<table_index_t>	m_last;			//last element that has been produced and fully constructed
 	};
 
 
