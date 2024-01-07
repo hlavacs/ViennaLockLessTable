@@ -25,7 +25,7 @@ namespace vllt {
 	/// VlltCache is a simple cache for objects of type T. It is a single linked list of objects.
 	/// When an object is requested, then the first object in the list is returned. 
 	/// </summary>
-	template<typename T, size_t N = 256>
+	template<typename T, size_t N = 256, size_t NUMBITS1 = 40>
 		requires std::is_default_constructible_v<T> && std::is_move_assignable_v<T>
 	class VlltCache {
 	public:
@@ -38,40 +38,45 @@ namespace vllt {
 		inline auto push(A&& v) noexcept -> bool;
 
 	private:
+		using cache_index_t = vsty::strong_type_t<int64_t, vsty::counter<>, std::integral_constant<int64_t, -1L>>;
+
 		struct cache_t {
 			T m_value;
-			int32_t m_next;
+			cache_index_t m_next;
 		};
 
-		struct key_t {
-			int32_t m_first; //index of first item in the single list, -1 if no item
-			uint32_t m_generation; //prevent ABA problem
-		};
+		//struct key_t {
+		//	int32_t m_first; //index of first item in the single list, -1 if no item
+		//	uint32_t m_generation; //prevent ABA problem
+		//};
 
-		inline auto get(std::atomic<key_t>& stack) noexcept -> int32_t; //-1 means empty
-		inline auto push(int32_t index, std::atomic<key_t>& stack) noexcept -> void;
+		using key2_t = vsty::strong_type_t<uint64_t, vsty::counter<>>; //bits 0..NUMBITS1-1: index of first item, bits NUMBITS1..63: generation
+
+		inline auto get(std::atomic<key2_t>& stack) noexcept -> cache_index_t; //can be empty
+		inline auto push(cache_index_t index, std::atomic<key2_t>& stack) noexcept -> void;
 
 		std::array<cache_t, N> m_cache;
-		std::atomic<key_t> m_head{ {-1,0} }; //index of first item in the cache, -1 if no item
-		std::atomic<key_t> m_free{ {0,0} }; //index of first free slot in the cache, -1 if no free slot
+		std::atomic<key2_t> m_head{ key2_t{cache_index_t{ }, 0, NUMBITS1} }; //index of first item in the cache, -1 if no item
+		std::atomic<key2_t> m_free{ key2_t{cache_index_t{0}, 0, NUMBITS1} }; //index of first free slot in the cache, -1 if no free slot
 	};
 	
 	
-	template<typename T, size_t N>
+	template<typename T, size_t N, size_t NUMBITS1>
 		requires std::is_default_constructible_v<T> && std::is_move_assignable_v<T>	
-	VlltCache<T, N>::VlltCache() noexcept {
+	VlltCache<T, N, NUMBITS1>::VlltCache() noexcept {
 		int32_t i = 1;
-		for( auto& c : m_cache ) { c.m_next = i++; }
-		m_cache[N - 1].m_next = -1;
+		for( auto& c : m_cache ) { c.m_next = cache_index_t{i++}; }
+		m_cache[N - 1].m_next = cache_index_t{};
 	};
+
 
 	/// @brief Get an object from the cache.
 	/// @return Returns an object from the cache, or std::nullopt if the cache is empty.
-	template<typename T, size_t N>
+	template<typename T, size_t N, size_t NUMBITS1>
 		requires std::is_default_constructible_v<T> && std::is_move_assignable_v<T>
-	inline auto VlltCache<T, N>::get() noexcept -> std::optional<T> {
+	inline auto VlltCache<T, N, NUMBITS1>::get() noexcept -> std::optional<T> {
 		auto idx = get(m_head);
-		if( idx == -1 ) return std::nullopt;
+		if( !idx.has_value() ) return std::nullopt;
 		T value = std::move(m_cache[idx].m_value);
 		push(idx, m_free);
 		return value; //implicit move through RVO
@@ -80,39 +85,39 @@ namespace vllt {
 
 	/// @brief Push an object into the cache.
 	/// @return Returns true if there was space left, else false.
-	template<typename T, size_t N>
+	template<typename T, size_t N, size_t NUMBITS1>
 		requires std::is_default_constructible_v<T> && std::is_move_assignable_v<T>
 	template<typename A>
 			requires std::is_same_v<std::decay_t<A>, T>
-	inline auto VlltCache<T, N>::push(A&& v) noexcept -> bool {
+	inline auto VlltCache<T, N, NUMBITS1>::push(A&& v) noexcept -> bool {
 		auto idx = get(m_free);
-		if( idx == -1 ) return false;
+		if( !idx.has_value() ) return false;
 		m_cache[idx].m_value = v;
 		push(idx, m_head);
 		return true;
 	}
 
 
-	template<typename T, size_t N>
+	template<typename T, size_t N, size_t NUMBITS1>
 		requires std::is_default_constructible_v<T> && std::is_move_assignable_v<T>
-	inline auto VlltCache<T, N>::get(std::atomic<key_t>& stack) noexcept -> int32_t {
-		key_t key = stack.load();
-		while( key.m_first != -1 ) {
-			if( stack.compare_exchange_weak(key, key_t{m_cache[key.m_first].m_next, key.m_generation + 1}) ) {
-				return key.m_first;
+	inline auto VlltCache<T, N, NUMBITS1>::get(std::atomic<key2_t>& stack) noexcept -> cache_index_t {
+		key2_t key = stack.load();
+		while( cache_index_t{ key.get_bits_signed(0,NUMBITS1) }.has_value() ) {
+			if( stack.compare_exchange_weak(key, key2_t{ m_cache[key.get_bits_signed(0,NUMBITS1)].m_next, key.get_bits_signed(NUMBITS1) + 1, NUMBITS1}) ) {
+				return cache_index_t{ key.get_bits_signed(0,NUMBITS1) };
 			}
 		}
-		return -1;
+		return cache_index_t{};
 	}
 
 
-	template<typename T, size_t N>
+	template<typename T, size_t N, size_t NUMBITS1>
 		requires std::is_default_constructible_v<T> && std::is_move_assignable_v<T>
-	inline auto VlltCache<T, N>::push(int32_t index, std::atomic<key_t>& stack) noexcept -> void {
-		key_t key = stack.load();
+	inline auto VlltCache<T, N, NUMBITS1>::push(cache_index_t index, std::atomic<key2_t>& stack) noexcept -> void {
+		key2_t key = stack.load();
 		while( true ) {
-			m_cache[index].m_next = key.m_first;
-			if( stack.compare_exchange_weak(key, key_t{index, key.m_generation + 1}) ) {
+			m_cache[index].m_next = key.get_bits_signed(0,NUMBITS1);
+			if( stack.compare_exchange_weak(key, key2_t{index, key.get_bits_signed(NUMBITS1) + 1, NUMBITS1}) ) {
 				return;
 			}
 		}
