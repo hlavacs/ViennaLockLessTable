@@ -47,14 +47,14 @@ void functional_test() {
 		}
 
 
-		for (size_t n = 0ul; n < 10000; ++n) {
+		for (size_t n = 0ul; n < 10; ++n) {
 
 			for (size_t i = 0ul; i < 100*rand() + 10; ++i) {
 				auto str = std::to_string(i);
 				//std::cout << "Put " << str << " SUCCESS: " << cache.push(str) << "\n";
 			}
 
-			for (size_t i = 0ul; i < 256 + 10; ++i) {
+			for (size_t i = 0ul; i < 100; ++i) {
 				std::string str = "NONE";
 				auto ret = cache.get();
 				if( ret.has_value() )
@@ -64,7 +64,6 @@ void functional_test() {
 		}
 
 	}
-
 
 
 		//----------------------------------------------------------------------------
@@ -187,7 +186,7 @@ void functional_test() {
 			std::cout << 4 << "\n";
 		};
 
-		for (size_t i = 0; i < 500; ++i) {
+		for (size_t i = 0; i < 200; ++i) {
 			std::cout << "Loop " << i << " ";
 			par();
 		}

@@ -1,7 +1,9 @@
 # ninja log v5
-2	16	0	clean	ca20ad35778315c3
-7	4823	7263321232122250	tests/CMakeFiles/testlib.dir/testlib.cpp.obj	1ed25ada3e7716ae
-4827	4991	7263321233387485	tests/testlib.exe	d98353f2ae6143c7
-14	26	0	clean	ca20ad35778315c3
-10	6700	7263322338391866	tests/CMakeFiles/testlib.dir/testlib.cpp.obj	1ed25ada3e7716ae
-6701	6914	7263322339883314	tests/testlib.exe	d98353f2ae6143c7
+12	24	0	clean	ca20ad35778315c3
+9	5994	7263326009378600	tests/CMakeFiles/testlib.dir/testlib.cpp.obj	1ed25ada3e7716ae
+5995	6193	7263326010719043	tests/testlib.exe	d98353f2ae6143c7
+11	27	0	clean	ca20ad35778315c3
+11	8869	7263326616134739	tests/CMakeFiles/testlib.dir/testlib.cpp.obj	bb8901516338ff3
+8870	9007	7263326617790610	tests/testlib.exe	a8554ddc37e0aec4
+18	7877	7263326972919040	tests/CMakeFiles/testlib.dir/testlib.cpp.obj	bb8901516338ff3
+7877	7988	7263326974166279	tests/testlib.exe	a8554ddc37e0aec4
