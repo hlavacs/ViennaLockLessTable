@@ -54,7 +54,6 @@ namespace vllt {
 
 		struct alignas(64) key_holder_t {
 			std::atomic<key_t> m_key;
-			operator key_t& () noexcept { return m_key.load(); } //retrieve value
 		};
 
 		inline auto get(key_holder_t& stack) noexcept -> cache_index_t; //can be empty
