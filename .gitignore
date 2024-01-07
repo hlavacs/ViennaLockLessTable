@@ -27,9 +27,13 @@ _deps
 **/*.depend
 **/*.tcl
 
+# Clang cmake project files
 *.ninja_deps
 *.ninja_log
 *.exe
+*.pdb
+*.ninja
+
 
 # MSVC cmake project files
 ALL_BUILD.vcxproj
