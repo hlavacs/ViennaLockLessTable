@@ -74,6 +74,33 @@ void functional_test() {
 
 		vllt::VlltStack<types> stack;
 
+		{
+			size_t i = 10;
+			stack.push((uint32_t)i, i, 2.0 * i, 3.0f * i, true, 'A');
+			auto v = stack.pop();
+			assert(std::get<size_t>(v.value()) == i);
+		}
+
+		{
+			for (size_t i = 0ul; i < MAX; ++i) {
+				stack.push((uint32_t)i, i, 2.0 * i, 3.0f * i, true, 'A');
+			}
+			assert(stack.size() == MAX);
+
+			auto v = stack.erase(vllt::stack_index_t{ 1 });
+			assert(stack.size() == MAX-1);
+
+			v = stack.erase(vllt::stack_index_t{ 1 });
+			assert(stack.size() == MAX-2);
+
+			v = stack.erase(vllt::stack_index_t{ 1 });
+			assert(stack.size() == MAX-3);
+
+
+			stack.clear();
+			assert(stack.size() == 0);
+		}
+
 		for (size_t i = 0ul; i < MAX; ++i) {
 			stack.push((uint32_t)i, i, 2.0 * i, 3.0f * i, true, 'A');
 		}

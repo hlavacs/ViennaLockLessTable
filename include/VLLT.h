@@ -636,7 +636,7 @@ namespace vllt {
 	inline auto VlltStack<DATA, N0, ROW, MINSLOTS, NUMBITS1>::erase(stack_index_t n1) -> tuple_opt_t {
 		auto n2 = size() - 1;
 		if (n1 == n2) return pop();
-		swap(n1, n2);
+		swap(n1, stack_index_t{ n2 });
 		return pop();
 	}
 
