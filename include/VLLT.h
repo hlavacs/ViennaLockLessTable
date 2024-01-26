@@ -313,7 +313,7 @@ namespace vllt {
 			}
 
 			//calculate new size of the map, if necessary
-			//The map might grow or shrin. If it grows, then we need to copy the old block pointers into the new map.
+			//The map might grow or shrink. If it grows, then we need to copy the old block pointers into the new map.
 			size_t num_blocks = map_ptr->m_blocks.size();
 			size_t new_offset = map_ptr->m_block_offset + first_seg;
 			size_t min_size = block(slot, new_offset);
@@ -377,8 +377,8 @@ namespace vllt {
 	//---------------------------------------------------------------------------------------------------
 
 
-	using stack_index_t = vsty::strong_type_t<uint64_t, vsty::counter<>, std::integral_constant<uint32_t, std::numeric_limits<uint32_t>::max()>>;
-	using stack_diff_t = vsty::strong_type_t<int64_t, vsty::counter<>, std::integral_constant<int32_t, std::numeric_limits<int32_t>::max()>>;
+	using stack_index_t = vsty::strong_type_t<uint64_t, vsty::counter<>, std::integral_constant<uint64_t, std::numeric_limits<uint32_t>::max()>>;
+	using stack_diff_t = vsty::strong_type_t<int64_t, vsty::counter<>, std::integral_constant<int64_t, std::numeric_limits<int32_t>::max()>>;
 
 
 	/////
