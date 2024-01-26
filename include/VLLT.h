@@ -461,6 +461,8 @@ namespace vllt {
 		alignas(64) std::atomic<slot_size_t> m_size_cnt{ slot_size_t{ stack_index_t{ 0 }, stack_diff_t{0}, NUMBITS1 } };	///< Next slot and size as atomic
 
 		inline auto max_size() noexcept -> size_t;
+
+		alignas(64) std::atomic<uint64_t> m_starving{0}; ///< prevent one operation to starve the other: -1...pulls are starving 1...pushes are starving
 	};
 
 	/////
@@ -530,7 +532,9 @@ namespace vllt {
 	};
 
 	/////
-	// \brief Push a new element to the end of the stack.
+	// \brief Push a new element to the end of the stack. Before committing the new element, call the callback function.
+	// This way we can create an atomic push operation.
+	// \param[in] f Callback function that is called when a new row is pushed.
 	// \param[in] data References to the components to be added.
 	// \returns the index of the new entry.
 	///
@@ -538,6 +542,9 @@ namespace vllt {
 	template<typename... Cs>
 		requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
 	inline auto VlltStack<DATA, N0, ROW, MINSLOTS, NUMBITS1>::push_callback(push_callback_t f, Cs&&... data) noexcept -> stack_index_t {
+		if( m_starving.load()==-1 ) m_starving.wait(-1); //wait until pushes are done and pulls have a chance to catch up
+		if( stack_diff(m_size_cnt.load()) < -4 ) m_starving.store(1); //if pops are starving the pushes, then prevent pulls 
+
 		//increase size.m_diff to announce your demand for a new slot -> slot is now reserved for you
 		slot_size_t size = m_size_cnt.load();	///< Make sure that no other thread is popping currently
 		while (stack_diff(size) < 0 || !m_size_cnt.compare_exchange_weak(size, slot_size_t{ stack_size(size), stack_diff(size) + 1, NUMBITS1 } )) {
@@ -554,10 +561,20 @@ namespace vllt {
 
 		slot_size_t new_size = slot_size_t{ stack_size(size), stack_diff(size) + 1, NUMBITS1 };	///< Increase size to validate the new row
 		while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ stack_size(new_size) + 1, stack_diff(new_size) - 1, NUMBITS1 } ));
-
+		
+		if(stack_diff(new_size) - 1 == 0) { 
+			m_starving.store(0); //allow pushes again
+			m_starving.notify_all(); //notify all waiting threads
+		}
+		
 		return stack_index_t{ stack_size(size) + stack_diff(size) };	///< Return index of new entry
 	}
 
+	/////
+	// \brief Push a new element to the end of the stack
+	// \param[in] data References to the components to be added.
+	// \returns the index of the new entry.
+	///
 	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, size_t NUMBITS1>
 	template<typename... Cs>
 		requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
@@ -574,6 +591,9 @@ namespace vllt {
 	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, size_t NUMBITS1>
 	inline auto VlltStack<DATA, N0, ROW, MINSLOTS, NUMBITS1>::pop() noexcept -> tuple_opt_t {
 		vtll::to_tuple<vtll::remove_atomic<DATA>> ret{};
+
+		if( m_starving.load()==1 ) m_starving.wait(1); //wait until pulls are done and pushes have a chance to catch up
+		if( stack_diff(m_size_cnt.load()) > 4 ) m_starving.store(-1); //if pushes are starving the pulls, then prevent pushes
 
 		slot_size_t size = m_size_cnt.load();
 		if (stack_size(size) + stack_diff(size) == 0) return std::nullopt;	///< Is there a row to pop off?
@@ -601,6 +621,11 @@ namespace vllt {
 		slot_size_t new_size = slot_size_t{ stack_size(size), stack_diff(size) - 1, NUMBITS1 };	///< Commit the popping of the row
 		while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ stack_size(new_size) - 1, stack_diff(new_size) + 1, NUMBITS1 }));
 
+		if(stack_diff(new_size) + 1 == 0) { 
+			m_starving.store(0); //allow pushes again
+			m_starving.notify_all(); //notify all waiting threads
+		}
+		
 		return ret; //RVO?
 	}
 

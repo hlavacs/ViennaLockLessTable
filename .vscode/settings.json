@@ -70,7 +70,10 @@
         "thread": "cpp",
         "variant": "cpp",
         "functional": "cpp",
-        "random": "cpp"
+        "random": "cpp",
+        "list": "cpp",
+        "unordered_map": "cpp",
+        "xhash": "cpp"
     },
     "cmake.configureOnOpen": false
 }
