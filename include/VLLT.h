@@ -35,15 +35,15 @@ namespace vllt {
 	class VlltSpinlock {
 	public:
 		void lock() { 
-			for (int i=0; flag_.load(std::memory_order_relaxed) || flag_.exchange(1, std::memory_order_acquire); ++i) { 
+			for (int i=0; m_flag.load(std::memory_order_relaxed) || m_flag.exchange(1, std::memory_order_acquire); ++i) { 
 				if (i == 8) { std::this_thread::sleep_for(std::chrono::nanoseconds(1)); i = 0; } 
 			} 
 		} 
 
-		void unlock() { flag_.store(0, std::memory_order_release); } 
+		void unlock() { m_flag.store(0, std::memory_order_release); } 
 		
 	private: 
-		std::atomic<unsigned int> flag_{0};
+		std::atomic<unsigned int> m_flag{0};
 	};
 
 
@@ -203,9 +203,9 @@ namespace vllt {
 
 	protected:
 
-		static auto block(table_index_t n, size_t offset) -> block_idx_t { return block_idx_t{ (n >> L) - offset }; }
+		static auto block_idx(table_index_t n, size_t offset) -> block_idx_t { return block_idx_t{ (n >> L) - offset }; }
 		inline auto transfer_local_cache( auto& map_ptr ) -> void;	
-		inline auto get_global_cache() -> block_ptr_t;
+		inline auto get_cache() -> block_ptr_t;
 
 		inline auto resize(table_index_t slot, std::atomic<table_index_t>* first_slot = nullptr) -> std::shared_ptr<block_map_t>;
 
@@ -213,8 +213,7 @@ namespace vllt {
 		std::pmr::polymorphic_allocator<block_map_t> m_allocator;  ///< use this allocator
 		alignas(64) std::atomic<std::shared_ptr<block_map_t>> m_block_map;///< Atomic shared ptr to the map of blocks
 
-		VlltCache<block_ptr_t, 64> m_block_global_cache;
-		static inline thread_local std::stack<block_ptr_t> m_block_local_cache;
+		VlltCache<block_ptr_t, 64> m_block_cache;
 	};
 
 
@@ -230,7 +229,7 @@ namespace vllt {
 	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
 	template<size_t I, typename C>
 	inline auto VlltTable<DATA,N0,ROW,MINSLOTS>::get_component_ptr(table_index_t n, std::shared_ptr<block_map_t>& map_ptr) noexcept -> C* { ///< \returns a pointer to a component
-		auto idx = block(n, map_ptr->m_block_offset);
+		auto idx = block_idx(n, map_ptr->m_block_offset);
 		auto block_ptr = (map_ptr->m_blocks[idx]); ///< Access the block holding the slot
 		if constexpr (ROW) { return &std::get<I>((*block_ptr)[n & BIT_MASK]); }
 		else { return &std::get<I>(*block_ptr)[n & BIT_MASK]; }
@@ -261,24 +260,12 @@ namespace vllt {
 
 
 	/// <summary>
-	/// Transfer blocks that have been unnessearily allocated to a global cache.
-	/// <param name="map_ptr">Slot.</param>
-	/// </summary>
-	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
-	inline auto VlltTable<DATA,N0,ROW,MINSLOTS>::transfer_local_cache( auto& map_ptr ) -> void {
-		while (m_block_local_cache.size()) {
-			m_block_global_cache.push(m_block_local_cache.top()); //if full the block will be deallocated
-			m_block_local_cache.pop();
-		}
-	}
-
-	/// <summary>
 	/// Get a new block - either from the global cache or allocate a new one.
 	/// </summary>
 	/// <returns></returns>
 	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
-	inline auto VlltTable<DATA,N0,ROW,MINSLOTS>::get_global_cache() -> block_ptr_t {
-		auto ptr = m_block_global_cache.get();
+	inline auto VlltTable<DATA,N0,ROW,MINSLOTS>::get_cache() -> block_ptr_t {
+		auto ptr = m_block_cache.get();
 		if(ptr.has_value()) return ptr.value();
 		return std::make_shared<block_t>();
 	}
@@ -300,40 +287,44 @@ namespace vllt {
 		auto map_ptr{ m_block_map.load() };
 		if (!map_ptr) {
 			auto new_map_ptr = std::make_shared<block_map_t>( //map has always as many MINSLOTS as its capacity is -> size==capacity
-				block_map_t{ std::pmr::vector<block_ptr_t>{MINSLOTS, m_mr}, block_idx_t{ 0 } } //increase existing one
+				block_map_t{ std::pmr::vector<block_ptr_t>{MINSLOTS, m_mr}, block_idx_t{ 0 } } //create a new map
 			);
-			for (auto& ptr : new_map_ptr->m_blocks) {
+			for (auto& ptr : new_map_ptr->m_blocks) { //add empty blocks to the map
 				ptr = std::make_shared<block_t>();
 			}
 			if (m_block_map.compare_exchange_strong(map_ptr, new_map_ptr)) {	///< Try to exchange old block map with new
 				map_ptr = new_map_ptr; ///< If success, remember for later
-			} //Note: if we were beaten by other thread, then compare_exchange_strong itself puts the new value into map_ptr
+			} else {	//Note: if we were beaten by other thread, then put new blocks into the cache
+				for (auto& ptr : new_map_ptr->m_blocks) {
+					m_block_cache.push(ptr);
+				}
+			}
 		}
 
 		//Make sure that there is enough space in the block map so that blocks are there to hold the new slot.
 		//Because other threads might also do this, we need to run in a loop until we are sure that the new slot is covered.
-		while ( slot >= N * (map_ptr->m_blocks.size() + map_ptr->m_block_offset )) {
+		if ( slot >= N * (map_ptr->m_blocks.size() + map_ptr->m_block_offset )) {
 			static VlltSpinlock spinlock;
 
 			spinlock.lock(); //another thread might beat us here, so we need to check again after the lock
 			map_ptr =  m_block_map.load();
 			if( slot < N * (map_ptr->m_blocks.size() + map_ptr->m_block_offset )) {
 				spinlock.unlock();
-				break;
+				return map_ptr;
 			}
 
-			//index of the first block that currently holds information - used in a queue
+			//index of the first block that currently holds information - used only in a queue
 			block_idx_t first_seg{ 0 };
 			auto fs = first_slot ? first_slot->load() : table_index_t{0};
 			if (fs.has_value()) {
-				first_seg = block(fs, map_ptr->m_block_offset);
+				first_seg = block_idx(fs, map_ptr->m_block_offset);
 			}
 
 			//calculate new size of the map, if necessary
 			//The map might grow or shrink. If it grows, then we need to copy the old block pointers into the new map.
 			size_t num_blocks = map_ptr->m_blocks.size();
 			size_t new_offset = map_ptr->m_block_offset + first_seg;
-			size_t min_size = block(slot, new_offset);
+			size_t min_size = block_idx(slot, new_offset);
 			size_t smaller_size = std::max((num_blocks >> 2), MINSLOTS);
 			size_t medium_size = std::max((num_blocks >> 1), MINSLOTS);
 			size_t new_size = num_blocks + (num_blocks >> 1);
@@ -342,48 +333,30 @@ namespace vllt {
 			else if (first_seg > num_blocks * 0.65 && min_size < medium_size) { new_size = medium_size; }
 			else if (first_seg > (num_blocks >> 1) && min_size < num_blocks) new_size = num_blocks;
 			
-			//Test if we have been beaten by another thread. If so, then restart the loop.
-			auto map_ptr2 = m_block_map.load();
-			if (map_ptr != map_ptr2) {
-				map_ptr = map_ptr2;
-				continue;
-			}
-
 			//Allocate a new block map and populate it with empty semgement pointers.
 			auto new_map_ptr = std::make_shared<block_map_t>( //map has always as many slots as its capacity is -> size==capacity
 				block_map_t{ std::pmr::vector<block_ptr_t>{new_size, m_mr}, block_idx_t{ new_offset } } //increase existing one
 			);
 
-			//Copy the old block pointers into the new map. Create also empty blocks for the new slots (or get the from the cache).
+			//Copy the old block pointers into the new map. Create also empty blocks for the new slots (or get them from the cache).
 			size_t idx = 0;
 			size_t remain = num_blocks - first_seg;
-			std::ranges::for_each(new_map_ptr->m_blocks.begin(), new_map_ptr->m_blocks.end(), [&](auto& ptr) {
-				if (first_seg + idx < num_blocks) { ptr = map_ptr->m_blocks[first_seg + idx]; } //copy
-				else {
-					size_t i1 = idx - remain;
-					if (i1 < first_seg) { ptr = map_ptr->m_blocks[i1]; } //copy
-					else { 
-						ptr = get_global_cache();  //get from cache or create new block
-						m_block_local_cache.push(ptr); //put into temp cache
+			std::ranges::for_each(new_map_ptr->m_blocks.begin(), new_map_ptr->m_blocks.end(), 
+				[&](auto& ptr) {
+					if (first_seg + idx < num_blocks) { ptr = map_ptr->m_blocks[first_seg + idx]; } //copy
+					else {
+						size_t i1 = idx - remain;
+						if (i1 < first_seg) { ptr = map_ptr->m_blocks[i1]; } //copy
+						else { 
+							ptr = get_cache();  //get from cache or create new block
+						}
 					}
+					++idx;
 				}
-				++idx;
-			});
+			);
 
-			//Try to exchange the old block map with the new one. If we are beaten, then restart the loop.
-			if (m_block_map.compare_exchange_strong(map_ptr, new_map_ptr)) {	///< Try to exchange old block map with new
-				//also reuse blocks that we did not reuse because map was shrunk
-				auto reused = (int64_t)new_map_ptr->m_blocks.size() - (int64_t)remain;
-				auto unused = (int64_t)map_ptr->m_blocks.size() - (int64_t)new_map_ptr->m_blocks.size();
-				for (int64_t i = 0; i < unused; ++i) {
-					m_block_local_cache.push(map_ptr->m_blocks[i + reused]);
-				}
-				map_ptr = new_map_ptr; ///< If success, remember for later
-				while (m_block_local_cache.size()) m_block_local_cache.pop();  //clear local cache, we used those for the new block
-			} //Note: if we were beaten by other thread, then compare_exchange_strong itself puts the new value into map_ptr
-			else {
-				transfer_local_cache(map_ptr); //we were beaten, so save the new blocks in the global cache
-			}
+			map_ptr = new_map_ptr; ///<  remember for later
+			m_block_map.store( map_ptr );
 
 			spinlock.unlock();
 		}
@@ -727,7 +700,6 @@ namespace vllt {
 		using VlltTable<DATA, N0, ROW, MINSLOTS>::get_component_ptr;
 		using VlltTable<DATA, N0, ROW, MINSLOTS>::insert;
 		using VlltTable<DATA, N0, ROW, MINSLOTS>::resize;
-		using VlltTable<DATA, N0, ROW, MINSLOTS>::block;
 
 		using tuple_opt_t = std::optional< vtll::to_tuple< vtll::remove_atomic<DATA> > >;
 		using typename VlltTable<DATA, N0, ROW, MINSLOTS>::table_index_t;
