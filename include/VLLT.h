@@ -31,6 +31,22 @@
 
 namespace vllt {
 
+	//Pikus, Fedor G.. The Art of Writing Efficient Programs
+	class VlltSpinlock {
+	public:
+		void lock() { 
+			for (int i=0; flag_.load(std::memory_order_relaxed) || flag_.exchange(1, std::memory_order_acquire); ++i) { 
+				if (i == 8) { std::this_thread::sleep_for(std::chrono::nanoseconds(1)); i = 0; } 
+			} 
+		} 
+
+		void unlock() { flag_.store(0, std::memory_order_release); } 
+		
+	private: 
+		std::atomic<unsigned int> flag_{0};
+	};
+
+
 	/// <summary>
 	/// VlltCache is a simple cache for objects of type T. It is a single linked list of objects.
 	/// When an object is requested, then the first object in the list is returned. 
@@ -294,16 +310,17 @@ namespace vllt {
 			} //Note: if we were beaten by other thread, then compare_exchange_strong itself puts the new value into map_ptr
 		}
 
-		//Threads should not try to allocate a new block map all at once. Randomize the allocation.
-		auto sz = map_ptr->m_blocks.size() / 16;
-		double rnd = (rand() % 1000) / 1000.0;
-		//if (rnd > 0.2 && block_cache.size() < map_ptr->m_blocks.size()) { put_cache(std::make_shared<block_t>(), map_ptr); }
-		auto f = sz* rnd - sz;
-
 		//Make sure that there is enough space in the block map so that blocks are there to hold the new slot.
 		//Because other threads might also do this, we need to run in a loop until we are sure that the new slot is covered.
-		while ( slot >= N * (map_ptr->m_blocks.size() + map_ptr->m_block_offset + f)) {
-			f = 0.0;
+		while ( slot >= N * (map_ptr->m_blocks.size() + map_ptr->m_block_offset )) {
+			static VlltSpinlock spinlock;
+
+			spinlock.lock(); //another thread might beat us here, so we need to check again after the lock
+			map_ptr =  m_block_map.load();
+			if( slot < N * (map_ptr->m_blocks.size() + map_ptr->m_block_offset )) {
+				spinlock.unlock();
+				break;
+			}
 
 			//index of the first block that currently holds information - used in a queue
 			block_idx_t first_seg{ 0 };
@@ -368,6 +385,7 @@ namespace vllt {
 				transfer_local_cache(map_ptr); //we were beaten, so save the new blocks in the global cache
 			}
 
+			spinlock.unlock();
 		}
 		return map_ptr;
 	}
