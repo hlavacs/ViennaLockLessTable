@@ -286,77 +286,100 @@ namespace vllt {
 			auto new_map_ptr = std::make_shared<block_map_t>( //map has always as many MINSLOTS as its capacity is -> size==capacity
 				block_map_t{ std::pmr::vector<std::atomic<block_ptr_t>>{MINSLOTS, m_mr}, block_idx_t{ 0 } } //create a new map
 			);
-			for (auto& ptr : new_map_ptr->m_blocks) { //add empty blocks to the map
-				ptr = std::make_shared<block_t>();
-			}
+			new_map_ptr->m_blocks[0].store( std::make_shared<block_t>() ); //add the first block to the map
+			
 			if (m_block_map.compare_exchange_strong(map_ptr, new_map_ptr)) {	///< Try to exchange old block map with new
 				map_ptr = new_map_ptr; ///< If success, remember for later
 			} else {	//Note: if we were beaten by other thread, then put new blocks into the cache
-				for (auto& ptr : new_map_ptr->m_blocks) {
-					m_block_cache.push(ptr.load());
-				}
+				m_block_cache.push(new_map_ptr->m_blocks[0].load());
 			}
 		}
-
-		//Make sure that there is enough space in the block map so that blocks are there to hold the new slot.
-		//Because other threads might also do this, we need to run in a loop until we are sure that the new slot is covered.
-		if ( slot >= N * (map_ptr->m_blocks.size() + map_ptr->m_block_offset )) {
-			static VlltSpinlock spinlock;
-
-			spinlock.lock(); //another thread might beat us here, so we need to check again after the lock
-			map_ptr =  m_block_map.load();
-			if( slot < N * (map_ptr->m_blocks.size() + map_ptr->m_block_offset )) {
-				spinlock.unlock();
+		
+		while(1) {
+			//do we have enough space in the map?
+			if ( slot < N * (map_ptr->m_blocks.size() + map_ptr->m_block_offset )) {
+				auto idx = block_idx(slot, map_ptr->m_block_offset);
+				auto ptr = map_ptr->m_blocks[idx].load();
+				if( ptr == nullptr ) {
+					auto new_block = get_cache();
+					if( !map_ptr->m_blocks[idx].compare_exchange_strong( ptr, new_block ) ) {
+						m_block_cache.push(new_block);
+					} else {
+						map_ptr->m_blocks[idx].notify_all(); //notify all waiting threads
+					}
+				}
 				return map_ptr;
 			}
 
-			//index of the first block that currently holds information - used only in a queue
-			block_idx_t first_seg{ 0 };
-			auto fs = first_slot ? first_slot->load() : table_index_t{0};
-			if (fs.has_value()) {
-				first_seg = block_idx(fs, map_ptr->m_block_offset);
-			}
+			//Make sure that there is enough space in the block map so that blocks are there to hold the new slot.
+			//Because other threads might also do this, we need to run in a loop until we are sure that the new slot is covered.
+			if ( slot >= N * (map_ptr->m_blocks.size() + map_ptr->m_block_offset )) {
+				static VlltSpinlock spinlock;
 
-			//calculate new size of the map, if necessary
-			//The map might grow or shrink. If it grows, then we need to copy the old block pointers into the new map.
-			size_t num_blocks = map_ptr->m_blocks.size();
-			size_t new_offset = map_ptr->m_block_offset + first_seg;
-			size_t min_size = block_idx(slot, new_offset);
-			size_t smaller_size = std::max((num_blocks >> 2), MINSLOTS);
-			size_t medium_size = std::max((num_blocks >> 1), MINSLOTS);
-			size_t new_size = num_blocks + (num_blocks >> 1);
-			while (min_size > new_size) { new_size *= 2; }
-			if (first_seg > num_blocks * 0.85 && min_size < smaller_size) { new_size = smaller_size; }
-			else if (first_seg > num_blocks * 0.65 && min_size < medium_size) { new_size = medium_size; }
-			else if (first_seg > (num_blocks >> 1) && min_size < num_blocks) new_size = num_blocks;
-			
-			//Allocate a new block map and populate it with empty semgement pointers.
-			auto new_map_ptr = std::make_shared<block_map_t>( //map has always as many slots as its capacity is -> size==capacity
-				block_map_t{ std::pmr::vector<std::atomic<block_ptr_t>>{new_size, m_mr}, block_idx_t{ new_offset } } //increase existing one
-			);
-
-			//Copy the old block pointers into the new map. Create also empty blocks for the new slots (or get them from the cache).
-			size_t idx = 0;
-			size_t remain = num_blocks - first_seg;
-			std::ranges::for_each(new_map_ptr->m_blocks.begin(), new_map_ptr->m_blocks.end(), 
-				[&](auto& ptr) {
-					if (first_seg + idx < num_blocks) { ptr.store( map_ptr->m_blocks[first_seg + idx] ); } //copy
-					else {
-						size_t i1 = idx - remain;
-						if (i1 < first_seg) { ptr.store( map_ptr->m_blocks[i1] ); } //copy
-						else { 
-							ptr.store( get_cache() );  //get from cache or create new block
-						}
-					}
-					++idx;
+				spinlock.lock(); //another thread might beat us here, so we need to check again after the lock
+				map_ptr =  m_block_map.load();
+				if( slot < N * (map_ptr->m_blocks.size() + map_ptr->m_block_offset )) {
+					spinlock.unlock();
+					return map_ptr;
 				}
-			);
 
-			map_ptr = new_map_ptr; ///<  remember for later
-			m_block_map.store( map_ptr );
+				//index of the first block that currently holds information - used only in a queue
+				block_idx_t first_seg{ 0 };
+				auto fs = first_slot ? first_slot->load() : table_index_t{0};
+				if (fs.has_value()) {
+					first_seg = block_idx(fs, map_ptr->m_block_offset);
+				}
 
-			spinlock.unlock();
+				//calculate new size of the map, if necessary
+				//The map might grow or shrink. If it grows, then we need to copy the old block pointers into the new map.
+				size_t num_blocks = map_ptr->m_blocks.size();
+				size_t new_offset = map_ptr->m_block_offset + first_seg;
+				size_t min_size = block_idx(slot, new_offset);
+				size_t smaller_size = std::max((num_blocks >> 2), MINSLOTS);
+				size_t medium_size = std::max((num_blocks >> 1), MINSLOTS);
+				size_t new_size = num_blocks + (num_blocks >> 1);
+				while (min_size > new_size) { new_size *= 2; }
+				if (first_seg > num_blocks * 0.85 && min_size < smaller_size) { new_size = smaller_size; }
+				else if (first_seg > num_blocks * 0.65 && min_size < medium_size) { new_size = medium_size; }
+				else if (first_seg > (num_blocks >> 1) && min_size < num_blocks) new_size = num_blocks;
+				
+				//Allocate a new block map and populate it with empty semgement pointers.
+				auto new_map_ptr = std::make_shared<block_map_t>( //map has always as many slots as its capacity is -> size==capacity
+					block_map_t{ std::pmr::vector<std::atomic<block_ptr_t>>{new_size, m_mr}, block_idx_t{ new_offset } } //increase existing one
+				);
+
+				//Copy the old block pointers into the new map. Create also empty blocks for the new slots (or get them from the cache).
+				size_t idx = 0;
+				size_t remain = num_blocks - first_seg;
+				std::ranges::for_each(new_map_ptr->m_blocks.begin(), new_map_ptr->m_blocks.end(), 
+					[&](auto& ptr) {
+						if (first_seg + idx < num_blocks) { //copy
+							auto old_ptr = map_ptr->m_blocks[first_seg + idx].load();
+							if(!old_ptr) map_ptr->m_blocks[first_seg + idx].wait(old_ptr); //wait until the block is created
+							ptr.store( old_ptr ); 
+						} 
+						else {
+							size_t i1 = idx - remain;
+							if (i1 < first_seg) { //copy
+								auto old_ptr = map_ptr->m_blocks[i1].load();
+								if(!old_ptr) map_ptr->m_blocks[i1].wait(old_ptr); //wait until the block is created
+								ptr.store( old_ptr ); 
+							} 
+							else {  //get rid of this else 
+								ptr.store( get_cache() );  //get from cache or create new block
+							}
+						}
+						++idx;
+					}
+				);
+
+				map_ptr = new_map_ptr; ///<  remember for later
+				m_block_map.store( map_ptr );
+		
+				spinlock.unlock();
+			}
 		}
+		
 		return map_ptr;
 	}
 
