@@ -185,7 +185,7 @@ namespace vllt {
 
 		using block_ptr_t = std::shared_ptr<block_t>; ///< Shared pointer to a block
 		struct block_map_t {
-			std::pmr::vector<block_ptr_t> m_blocks;	///< Vector of shared pointers to the blocks
+			std::pmr::vector<std::atomic<block_ptr_t>> m_blocks;	///< Vector of shared pointers to the blocks
 			block_idx_t m_block_offset = block_idx_t{0}; ///< Segment offset for FIFO queue (offsets blocks NOT rows)
 		};
 
@@ -204,9 +204,7 @@ namespace vllt {
 	protected:
 
 		static auto block_idx(table_index_t n, size_t offset) -> block_idx_t { return block_idx_t{ (n >> L) - offset }; }
-		inline auto transfer_local_cache( auto& map_ptr ) -> void;	
 		inline auto get_cache() -> block_ptr_t;
-
 		inline auto resize(table_index_t slot, std::atomic<table_index_t>* first_slot = nullptr) -> std::shared_ptr<block_map_t>;
 
 		std::pmr::memory_resource* m_mr; ///< Memory resource for allocating blocks
@@ -230,7 +228,7 @@ namespace vllt {
 	template<size_t I, typename C>
 	inline auto VlltTable<DATA,N0,ROW,MINSLOTS>::get_component_ptr(table_index_t n, std::shared_ptr<block_map_t>& map_ptr) noexcept -> C* { ///< \returns a pointer to a component
 		auto idx = block_idx(n, map_ptr->m_block_offset);
-		auto block_ptr = (map_ptr->m_blocks[idx]); ///< Access the block holding the slot
+		auto block_ptr = map_ptr->m_blocks[idx].load(); ///< Access the block holding the slot
 		if constexpr (ROW) { return &std::get<I>((*block_ptr)[n & BIT_MASK]); }
 		else { return &std::get<I>(*block_ptr)[n & BIT_MASK]; }
 	}
@@ -277,8 +275,7 @@ namespace vllt {
 	/// If the CAS fails because another thread beat us, then CAS will copy the new pointer so we can use it.
 	/// </summary>
 	/// <param name="slot">Slot number in the table.</param>
-	/// <param name="map_ptr">Shared pointer to the block map.</param>
-	/// <param name="first_seg">Index of first block that currently holds information.</param>
+	/// <param name="first_slot">Index of first slot that currently holds information.</param>
 	/// <returns>Pointer to the block map.</returns>
 	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
 	inline auto VlltTable<DATA,N0,ROW,MINSLOTS>::resize(table_index_t slot, std::atomic<table_index_t>* first_slot) -> std::shared_ptr<block_map_t> {
@@ -287,7 +284,7 @@ namespace vllt {
 		auto map_ptr{ m_block_map.load() };
 		if (!map_ptr) {
 			auto new_map_ptr = std::make_shared<block_map_t>( //map has always as many MINSLOTS as its capacity is -> size==capacity
-				block_map_t{ std::pmr::vector<block_ptr_t>{MINSLOTS, m_mr}, block_idx_t{ 0 } } //create a new map
+				block_map_t{ std::pmr::vector<std::atomic<block_ptr_t>>{MINSLOTS, m_mr}, block_idx_t{ 0 } } //create a new map
 			);
 			for (auto& ptr : new_map_ptr->m_blocks) { //add empty blocks to the map
 				ptr = std::make_shared<block_t>();
@@ -296,7 +293,7 @@ namespace vllt {
 				map_ptr = new_map_ptr; ///< If success, remember for later
 			} else {	//Note: if we were beaten by other thread, then put new blocks into the cache
 				for (auto& ptr : new_map_ptr->m_blocks) {
-					m_block_cache.push(ptr);
+					m_block_cache.push(ptr.load());
 				}
 			}
 		}
@@ -335,7 +332,7 @@ namespace vllt {
 			
 			//Allocate a new block map and populate it with empty semgement pointers.
 			auto new_map_ptr = std::make_shared<block_map_t>( //map has always as many slots as its capacity is -> size==capacity
-				block_map_t{ std::pmr::vector<block_ptr_t>{new_size, m_mr}, block_idx_t{ new_offset } } //increase existing one
+				block_map_t{ std::pmr::vector<std::atomic<block_ptr_t>>{new_size, m_mr}, block_idx_t{ new_offset } } //increase existing one
 			);
 
 			//Copy the old block pointers into the new map. Create also empty blocks for the new slots (or get them from the cache).
@@ -343,12 +340,12 @@ namespace vllt {
 			size_t remain = num_blocks - first_seg;
 			std::ranges::for_each(new_map_ptr->m_blocks.begin(), new_map_ptr->m_blocks.end(), 
 				[&](auto& ptr) {
-					if (first_seg + idx < num_blocks) { ptr = map_ptr->m_blocks[first_seg + idx]; } //copy
+					if (first_seg + idx < num_blocks) { ptr.store( map_ptr->m_blocks[first_seg + idx] ); } //copy
 					else {
 						size_t i1 = idx - remain;
-						if (i1 < first_seg) { ptr = map_ptr->m_blocks[i1]; } //copy
+						if (i1 < first_seg) { ptr.store( map_ptr->m_blocks[i1] ); } //copy
 						else { 
-							ptr = get_cache();  //get from cache or create new block
+							ptr.store( get_cache() );  //get from cache or create new block
 						}
 					}
 					++idx;
