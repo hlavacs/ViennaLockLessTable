@@ -15,7 +15,7 @@ auto wait_for(double us) {
 	return res;
 }
 
-/*
+
 void functional_test1() {
 
 	using types = vtll::tl<uint32_t, size_t, double, float, bool, char>;
@@ -73,7 +73,7 @@ void functional_test1() {
 	{
 		std::cout << "STACK\n";
 
-		vllt::VlltStack<types> stack;
+		vllt::VlltTable<types> stack;
 
 		{
 			size_t i = 10;
@@ -82,19 +82,21 @@ void functional_test1() {
 			assert(std::get<size_t>(v.value()) == i);
 		}
 
+		/*
+
 		{
 			for (size_t i = 0ul; i < MAX; ++i) {
 				stack.push_back((uint32_t)i, i, 2.0 * i, 3.0f * i, true, 'A');
 			}
 			assert(stack.size() == MAX);
 
-			auto v = stack.erase(vllt::stack_index_t{ 1 });
+			auto v = stack.erase(vllt::table_index_t{ 1 });
 			assert(stack.size() == MAX-1);
 
-			v = stack.erase(vllt::stack_index_t{ 1 });
+			v = stack.erase(vllt::table_index_t{ 1 });
 			assert(stack.size() == MAX-2);
 
-			v = stack.erase(vllt::stack_index_t{ 1 });
+			v = stack.erase(vllt::table_index_t{ 1 });
 			assert(stack.size() == MAX-3);
 
 
@@ -106,16 +108,16 @@ void functional_test1() {
 			stack.push_back((uint32_t)i, i, 2.0 * i, 3.0f * i, true, 'A');
 		}
 
-		stack.swap(vllt::stack_index_t{0}, vllt::stack_index_t{1});
-		auto d1 = stack.get<0>(vllt::stack_index_t{0});
-		auto d2 = stack.get<double>(vllt::stack_index_t{ 0 });
-		auto tup = stack.get_tuple(vllt::stack_index_t{0});
+		stack.swap(vllt::table_index_t{0}, vllt::table_index_t{1});
+		auto d1 = stack.get<0>(vllt::table_index_t{0});
+		auto d2 = stack.get<double>(vllt::table_index_t{ 0 });
+		auto tup = stack.get_tuple(vllt::table_index_t{0});
 
 		assert(std::get<0>(tup.value()) == 1);
-		stack.swap(vllt::stack_index_t{ 0 }, vllt::stack_index_t{ 1 });
+		stack.swap(vllt::table_index_t{ 0 }, vllt::table_index_t{ 1 });
 		assert(std::get<0>(tup.value()) == 0);
 
-		for (vllt::stack_index_t i = vllt::stack_index_t{ 0 }; i < stack.size(); ++i) {
+		for (vllt::table_index_t i = vllt::table_index_t{ 0 }; i < stack.size(); ++i) {
 			auto v = stack.get<size_t>(i).value();
 			assert(v == i);
 		}
@@ -218,12 +220,13 @@ void functional_test1() {
 			std::cout << "Loop " << i << " ";
 			par();
 		}
+		*/
 	}
+	
 }
-*/
 
-void functional_test() {
-}
+
+
 
 
 std::mutex g_mutex;
@@ -367,6 +370,14 @@ void performance_stack() {
 
 }
 */
+
+
+void functional_test() {
+
+
+}
+
+
 
 int main() {
 	std::cout << std::thread::hardware_concurrency() << " Threads\n";

@@ -213,7 +213,7 @@ namespace vllt {
 
 		template<typename... Cs>
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
-		inline auto push_back(Cs&&... data) -> void;
+		inline auto push_back(Cs&&... data) -> table_index_t;
 
 		//-------------------------------------------------------------------------------------------
 		//erase data
@@ -237,6 +237,7 @@ namespace vllt {
 		using slot_size_t = vsty::strong_type_t<uint64_t, vsty::counter<>>;
 		table_index_t table_size(slot_size_t size) { return table_index_t{ size.get_bits(0, NUMBITS1) }; }	
 		table_diff_t  table_diff(slot_size_t size) { return table_diff_t{ size.get_bits_signed(NUMBITS1) }; }
+		alignas(64) std::atomic<slot_size_t> m_size_cnt{ slot_size_t{ table_index_t{ 0 }, table_diff_t{0}, NUMBITS1 } };	///< Next slot and size as atomic
 
 		VlltCache<block_ptr_t, 64> m_block_cache;
 	};
@@ -288,7 +289,7 @@ namespace vllt {
 	template<size_t I, typename C>
 	inline auto VlltTable<DATA,N0,ROW,MINSLOTS>::get_component_ptr(table_index_t n) noexcept -> C* { ///< \returns a pointer to a component
 		auto idx = block_idx(n);
-		auto block_ptr = m_blocks.load(); ///< Access the block holding the slot
+		auto block_ptr = m_block_map.load()->m_blocks[idx].load(); ///< Access the block holding the slot
 		if constexpr (ROW) { return &std::get<I>((*block_ptr)[n & BIT_MASK]); }
 		else { return &std::get<I>(*block_ptr)[n & BIT_MASK]; }
 	}
@@ -304,8 +305,26 @@ namespace vllt {
 	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
 	template<typename... Cs>
 		requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
-	inline auto VlltTable<DATA,N0,ROW,MINSLOTS>::push_back(Cs&&... data) -> void {
+	inline auto VlltTable<DATA,N0,ROW,MINSLOTS>::push_back(Cs&&... data) -> table_index_t {
+
+		//if( m_starving.load()==-1 ) m_starving.wait(-1); //wait until pushes are done and pulls have a chance to catch up
+		//if( stack_diff(m_size_cnt.load()) < -4 ) m_starving.store(1); //if pops are starving the pushes, then prevent pulls 
+
+		//increase size.m_diff to announce your demand for a new slot -> slot is now reserved for you
+		slot_size_t size = m_size_cnt.load();	///< Make sure that no other thread is popping currently
+		while (table_diff(size) < 0 || !m_size_cnt.compare_exchange_weak(size, slot_size_t{ table_size(size), table_diff(size) + 1, NUMBITS1 } )) {
+			if ( table_diff(size)  < 0 ) { //here compare_exchange_weak was NOT called to copy manually
+				size = m_size_cnt.load();
+			}
+			//call wait function here
+		};
+
+		//make sure there is enough space in the block VECTOR - if not then change the old map to a larger map
+		//VlltTable<DATA, N0, ROW, MINSLOTS>::push_back(table_index_t{stack_size(size) + stack_diff(size)}, std::forward<Cs>(data)...); ///< Make sure there are enough MINSLOTS for blocks
+
+		auto n = (table_index_t{table_size(size) + table_diff(size)}); ///< Get the index of the new row
 		auto map_ptr = resize(n); //if need be, grow the map of blocks
+
 		//copy or move the data to the new slot, using a recursive templated lambda
 		auto f = [&]<size_t I, typename T, typename... Ts>(auto && fun, T && dat, Ts&&... dats) {
 			if constexpr (vtll::is_atomic<T>::value) get_component_ptr<I>(n)->store(dat); //copy value for atomic
@@ -313,6 +332,18 @@ namespace vllt {
 			if constexpr (sizeof...(dats) > 0) { fun.template operator() < I + 1 > (fun, std::forward<Ts>(dats)...); } //recurse
 		};
 		f.template operator() < 0 > (f, std::forward<Cs>(data)...);
+
+		//if(f.has_value()) f.value()( table_index_t{ table_size(size) + table_diff(size) } ); ///< Call callback function
+
+		slot_size_t new_size = slot_size_t{ table_size(size), table_diff(size) + 1, NUMBITS1 };	///< Increase size to validate the new row
+		while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ table_size(new_size) + 1, table_diff(new_size) - 1, NUMBITS1 } ));
+		
+		if(table_diff(new_size) - 1 == 0) { 
+			//m_starving.store(0); //allow pushes again
+			//m_starving.notify_all(); //notify all waiting threads
+		}
+		
+		return table_index_t{ table_size(size) + table_diff(size) };	///< Return index of new entry
 	}
 
 
@@ -409,14 +440,14 @@ namespace vllt {
 	inline auto VlltTable<DATA, N0, ROW, MINSLOTS>::pop_back() noexcept -> tuple_value_opt_t {
 	vtll::to_tuple<vtll::remove_atomic<DATA>> ret{};
 
-		if( m_starving.load()==1 ) m_starving.wait(1); //wait until pulls are done and pushes have a chance to catch up
-		if( table_diff(m_size_cnt.load()) > 4 ) m_starving.store(-1); //if pushes are starving the pulls, then prevent pushes
+		//if( m_starving.load()==1 ) m_starving.wait(1); //wait until pulls are done and pushes have a chance to catch up
+		//if( table_diff(m_size_cnt.load()) > 4 ) m_starving.store(-1); //if pushes are starving the pulls, then prevent pushes
 
 		slot_size_t size = m_size_cnt.load();
 		if (table_size(size) + table_diff(size) == 0) return std::nullopt;	///< Is there a row to pop off?
 
 		/// Make sure that no other thread is currently pushing a new row
-		while (table_diff(size) > 0 || !m_size_cnt.compare_exchange_weak(size, slot_size_t{ stack_size(size), stack_diff(size) - 1, NUMBITS1 })) {
+		while (table_diff(size) > 0 || !m_size_cnt.compare_exchange_weak(size, slot_size_t{ table_size(size), table_diff(size) - 1, NUMBITS1 })) {
 			if (table_diff(size) > 0) { size = m_size_cnt.load(); }
 			if (table_size(size) + table_diff(size) == 0) return std::nullopt;	///< Is there a row to pop off?
 		};
@@ -427,20 +458,20 @@ namespace vllt {
 		vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 			[&](auto i) {
 				using type = vtll::Nth_type<DATA, i>;
-				if		constexpr (std::is_move_assignable_v<type>) { std::get<i>(ret) = std::move(* (this->template get_component_ptr<i>(table_index_t{ idx }, map_ptr)) ); }	//move
+				if		constexpr (std::is_move_assignable_v<type>) { std::get<i>(ret) = std::move(* (this->template get_component_ptr<i>(table_index_t{ idx })) ); }	//move
 				else if constexpr (std::is_copy_assignable_v<type>) { std::get<i>(ret) = *(this->template get_component_ptr<i>(table_index_t{ idx }, map_ptr)); }				//copy
 				else if constexpr (vtll::is_atomic<type>::value) { std::get<i>(ret) = this->template get_component_ptr<i>(table_index_t{ idx }, map_ptr)->load(); } 		//atomic
 
-				if constexpr (std::is_destructible_v<type> && !std::is_trivially_destructible_v<type>) { this->template get_component_ptr<i>(table_index_t{ idx }, map_ptr)->~type(); }	///< Call destructor
+				if constexpr (std::is_destructible_v<type> && !std::is_trivially_destructible_v<type>) { this->template get_component_ptr<i>(table_index_t{ idx })->~type(); }	///< Call destructor
 			}
 		);
 
 		slot_size_t new_size = slot_size_t{ table_size(size), table_diff(size) - 1, NUMBITS1 };	///< Commit the popping of the row
-		while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ stack_size(new_size) - 1, stack_diff(new_size) + 1, NUMBITS1 }));
+		while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ table_size(new_size) - 1, table_diff(new_size) + 1, NUMBITS1 }));
 
 		if(table_diff(new_size) + 1 == 0) { 
-			m_starving.store(0); //allow pushes again
-			m_starving.notify_all(); //notify all waiting threads
+			//m_starving.store(0); //allow pushes again
+			//m_starving.notify_all(); //notify all waiting threads
 		}
 		
 		return ret; //RVO?
