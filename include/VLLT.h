@@ -168,8 +168,10 @@ namespace vllt {
 	protected:
 		static_assert(std::is_default_constructible_v<DATA>, "Your components are not default constructible!");
 
-		using table_index_t = vsty::strong_type_t<size_t, vsty::counter<>, 
-			std::integral_constant<size_t, std::numeric_limits<size_t>::max()>>;///< Strong integer type for indexing rows, 0 to number rows - 1
+		const size_t NUMBITS1 = 44; ///< Number of bits for the index of the first item in the stack
+		using table_index_t = vsty::strong_type_t<uint64_t, vsty::counter<>, std::integral_constant<uint64_t, std::numeric_limits<uint64_t>::max()>>;///< Strong integer type for indexing rows, 0 to number rows - 1
+		using table_diff_t  = vsty::strong_type_t<uint64_t, vsty::counter<>, std::integral_constant<uint64_t, std::numeric_limits<uint64_t>::max()>>;
+
 		using block_idx_t = vsty::strong_type_t<size_t, vsty::counter<>>; ///< Strong integer type for indexing blocks, 0 to size map - 1
 
 		static const size_t N = vtll::smallest_pow2_leq_value< N0 >::value;	///< Force N to be power of 2
@@ -177,7 +179,9 @@ namespace vllt {
 		static const size_t BIT_MASK = N - 1;	///< Bit mask to mask off lower bits to get index inside block
 
 		using tuple_value_t = vtll::to_tuple<DATA>;	///< Tuple holding the entries as value
+		using tuple_value_opt_t = std::optional< vtll::to_tuple<DATA> >;	///< Tuple holding the entries as value
 		using tuple_ref_t = vtll::to_ref_tuple<DATA>; ///< Tuple holding refs to the entries
+		using tuple_ref_opt_t = std::optional< tuple_ref_t >;
 
 		using array_tuple_t1 = std::array<tuple_value_t, N>;///< ROW: an array of tuples
 		using array_tuple_t2 = vtll::to_tuple<vtll::transform_size_t<DATA, std::array, N>>;	///< COLUMN: a tuple of arrays
@@ -186,7 +190,6 @@ namespace vllt {
 		using block_ptr_t = std::shared_ptr<block_t>; ///< Shared pointer to a block
 		struct block_map_t {
 			std::pmr::vector<std::atomic<block_ptr_t>> m_blocks;	///< Vector of shared pointers to the blocks
-			block_idx_t m_block_offset = block_idx_t{0}; ///< Segment offset for FIFO queue (offsets blocks NOT rows)
 		};
 
 	public:
@@ -194,26 +197,83 @@ namespace vllt {
 			: m_mr{ mr }, m_allocator{ mr }, m_block_map{ nullptr } {};
 		~VlltTable() noexcept {};
 
+
+		//-------------------------------------------------------------------------------------------
+		//read data
+
+		inline auto size() noexcept -> size_t; ///< \returns the current numbers of rows in the table
+
+		inline auto get(table_index_t n) noexcept -> tuple_ref_opt_t;	///< \returns a tuple with refs to all components
+
 		template<size_t I, typename C = vtll::Nth_type<DATA, I>>
-		inline auto get_component_ptr(table_index_t n, std::shared_ptr<block_map_t>& map_ptr) noexcept -> C*;
+		inline auto get_component_ptr(table_index_t n) noexcept -> C*;
+
+		//-------------------------------------------------------------------------------------------
+		//add data
 
 		template<typename... Cs>
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
-		auto insert(table_index_t n, std::atomic<table_index_t>* first_slot, Cs&&... data) -> void;
+		inline auto push_back(Cs&&... data) -> void;
+
+		//-------------------------------------------------------------------------------------------
+		//erase data
+
+		inline auto pop_back() noexcept -> tuple_value_opt_t; ///< Remove the last row, call destructor on components
+		inline auto clear() noexcept -> size_t; ///< Set the number if rows to zero - effectively clear the table, call destructors
+		inline auto swap(table_index_t n1, table_index_t n2) noexcept -> void;	///< Swap contents of two rows
+		inline auto erase(table_index_t n1) -> void; ///< Remove a row, call destructor on components
 
 	protected:
 
-		static auto block_idx(table_index_t n, size_t offset) -> block_idx_t { return block_idx_t{ (n >> L) - offset }; }
+		inline auto max_size() noexcept -> size_t;
+		static inline auto block_idx(table_index_t n) -> block_idx_t { return block_idx_t{ (n >> L) }; }
 		inline auto get_cache() -> block_ptr_t;
-		inline auto resize(table_index_t slot, std::atomic<table_index_t>* first_slot = nullptr) -> std::shared_ptr<block_map_t>;
+		inline auto resize(table_index_t slot) -> std::shared_ptr<block_map_t>;
 
 		std::pmr::memory_resource* m_mr; ///< Memory resource for allocating blocks
 		std::pmr::polymorphic_allocator<block_map_t> m_allocator;  ///< use this allocator
 		alignas(64) std::atomic<std::shared_ptr<block_map_t>> m_block_map;///< Atomic shared ptr to the map of blocks
 
+		using slot_size_t = vsty::strong_type_t<uint64_t, vsty::counter<>>;
+		table_index_t table_size(slot_size_t size) { return table_index_t{ size.get_bits(0, NUMBITS1) }; }	
+		table_diff_t  table_diff(slot_size_t size) { return table_diff_t{ size.get_bits_signed(NUMBITS1) }; }
+
 		VlltCache<block_ptr_t, 64> m_block_cache;
 	};
 
+
+	/////
+	// \brief Return number of rows when growing including new rows not yet established.
+	// \returns number of rows when growing including new rows not yet established.
+	///
+	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
+	inline auto VlltTable<DATA, N0, ROW, MINSLOTS>::max_size() noexcept -> size_t {
+		auto size = m_size_cnt.load();
+		return std::max(static_cast<decltype(stack_size(size))>(stack_size(size) + stack_diff(size)), stack_size(size));
+	};
+
+	/////
+	// \brief Return number of valid rows.
+	// \returns number of valid rows.
+	///
+	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
+	inline auto VlltTable<DATA, N0, ROW, MINSLOTS>::size() noexcept -> size_t {
+		auto size = m_size_cnt.load();
+		return std::min(static_cast<decltype(stack_size(size))>(stack_size(size) + stack_diff(size)), stack_size(size));
+	};
+
+
+	/////
+	// \brief Get a tuple with pointers to all components of an entry.
+	// \param[in] n Index to the entry.
+	// \returns a tuple with pointers to all components of entry n.
+	///
+	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
+	inline auto VlltTable<DATA, N0, ROW, MINSLOTS>::get(table_index_t n) noexcept -> std::optional<tuple_ref_t> {
+		if (n >= size()) return std::nullopt;
+		auto map_ptr = m_block_map.load();
+		return { [&] <size_t... Is>(std::index_sequence<Is...>) { return std::tie(* (this->template get_component_ptr<Is>(table_index_t{n}, map_ptr))...); }(std::make_index_sequence<vtll::size<DATA>::value>{}) };
+	};
 
 
 	/// <summary>
@@ -226,9 +286,9 @@ namespace vllt {
 	/// <returns>Pointer to the component.</returns>
 	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
 	template<size_t I, typename C>
-	inline auto VlltTable<DATA,N0,ROW,MINSLOTS>::get_component_ptr(table_index_t n, std::shared_ptr<block_map_t>& map_ptr) noexcept -> C* { ///< \returns a pointer to a component
-		auto idx = block_idx(n, map_ptr->m_block_offset);
-		auto block_ptr = map_ptr->m_blocks[idx].load(); ///< Access the block holding the slot
+	inline auto VlltTable<DATA,N0,ROW,MINSLOTS>::get_component_ptr(table_index_t n) noexcept -> C* { ///< \returns a pointer to a component
+		auto idx = block_idx(n);
+		auto block_ptr = m_blocks.load(); ///< Access the block holding the slot
 		if constexpr (ROW) { return &std::get<I>((*block_ptr)[n & BIT_MASK]); }
 		else { return &std::get<I>(*block_ptr)[n & BIT_MASK]; }
 	}
@@ -238,19 +298,18 @@ namespace vllt {
 	/// If not allocate a new map to hold the segements, and allocate new blocks.
 	/// </summary>
 	/// <param name="n">Row number in the table.</param>
-	/// <param name="map_ptr">Shared pointer to the block map.</param>
 	/// <param name="first_seg">Index of first block that currently holds information.</param>
 	/// <param name="last_seg">Index of the last block that currently holds informaton.</param>
 	/// <param name="data">The data for the new row.</param>
 	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
 	template<typename... Cs>
 		requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
-	inline auto VlltTable<DATA,N0,ROW,MINSLOTS>::insert(table_index_t n, std::atomic<table_index_t>* first_slot, Cs&&... data) -> void {
-		auto map_ptr = resize(n, first_slot); //if need be, grow the map of blocks
+	inline auto VlltTable<DATA,N0,ROW,MINSLOTS>::push_back(Cs&&... data) -> void {
+		auto map_ptr = resize(n); //if need be, grow the map of blocks
 		//copy or move the data to the new slot, using a recursive templated lambda
 		auto f = [&]<size_t I, typename T, typename... Ts>(auto && fun, T && dat, Ts&&... dats) {
-			if constexpr (vtll::is_atomic<T>::value) get_component_ptr<I>(n, map_ptr)->store(dat); //copy value for atomic
-			else *get_component_ptr<I>(n, map_ptr) = std::forward<T>(dat); //move or copy
+			if constexpr (vtll::is_atomic<T>::value) get_component_ptr<I>(n)->store(dat); //copy value for atomic
+			else *get_component_ptr<I>(n) = std::forward<T>(dat); //move or copy
 			if constexpr (sizeof...(dats) > 0) { fun.template operator() < I + 1 > (fun, std::forward<Ts>(dats)...); } //recurse
 		};
 		f.template operator() < 0 > (f, std::forward<Cs>(data)...);
@@ -275,121 +334,185 @@ namespace vllt {
 	/// If the CAS fails because another thread beat us, then CAS will copy the new pointer so we can use it.
 	/// </summary>
 	/// <param name="slot">Slot number in the table.</param>
-	/// <param name="first_slot">Index of first slot that currently holds information.</param>
 	/// <returns>Pointer to the block map.</returns>
 	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
-	inline auto VlltTable<DATA,N0,ROW,MINSLOTS>::resize(table_index_t slot, std::atomic<table_index_t>* first_slot) -> std::shared_ptr<block_map_t> {
+	inline auto VlltTable<DATA,N0,ROW,MINSLOTS>::resize(table_index_t slot) -> std::shared_ptr<block_map_t> {
 
 		//Get a pointer to the block map. If there is none, then allocate a new one.
 		auto map_ptr{ m_block_map.load() };
 		if (!map_ptr) {
 			auto new_map_ptr = std::make_shared<block_map_t>( //map has always as many MINSLOTS as its capacity is -> size==capacity
-				block_map_t{ std::pmr::vector<std::atomic<block_ptr_t>>{MINSLOTS, m_mr}, block_idx_t{ 0 } } //create a new map
+				block_map_t{ std::pmr::vector<std::atomic<block_ptr_t>>{MINSLOTS, m_mr} } //create a new map
 			);
-			new_map_ptr->m_blocks[0].store( std::make_shared<block_t>() ); //add the first block to the map
-			
-			if (m_block_map.compare_exchange_strong(map_ptr, new_map_ptr)) {	///< Try to exchange old block map with new
-				map_ptr = new_map_ptr; ///< If success, remember for later
-			} else {	//Note: if we were beaten by other thread, then put new blocks into the cache
-				m_block_cache.push(new_map_ptr->m_blocks[0].load());
-			}
+			m_block_map.compare_exchange_strong(map_ptr, new_map_ptr); //try to exchange old block map with new
+			map_ptr = m_block_map.load();
 		}
-		
+
+		//Make sure that there is enough space in the block map so that blocks are there to hold the new slot.
+		//Because other threads might also do this, we need to run in a loop until we are sure that the new slot is covered.
+		auto idx = block_idx(slot);
+
 		while(1) {
-			//do we have enough space in the map?
-			if ( slot < N * (map_ptr->m_blocks.size() + map_ptr->m_block_offset )) {
-				auto idx = block_idx(slot, map_ptr->m_block_offset);
+
+			if ( idx < map_ptr->m_blocks.size() ) {	//test if the block is already there
 				auto ptr = map_ptr->m_blocks[idx].load();
-				if( ptr == nullptr ) {
-					auto new_block = get_cache();
-					if( !map_ptr->m_blocks[idx].compare_exchange_strong( ptr, new_block ) ) {
-						m_block_cache.push(new_block);
-					} else {
-						map_ptr->m_blocks[idx].notify_all(); //notify all waiting threads
-					}
-				}
+				if( ptr ) return map_ptr;	  //yes -> return
+				auto new_block = get_cache(); //no -> get a new block
+				if( !map_ptr->m_blocks[idx].compare_exchange_strong( ptr, new_block ) ) { m_block_cache.push(new_block); }
 				return map_ptr;
 			}
 
-			//Make sure that there is enough space in the block map so that blocks are there to hold the new slot.
-			//Because other threads might also do this, we need to run in a loop until we are sure that the new slot is covered.
-			if ( slot >= N * (map_ptr->m_blocks.size() + map_ptr->m_block_offset )) {
-				static VlltSpinlock spinlock;
-
-				spinlock.lock(); //another thread might beat us here, so we need to check again after the lock
-				map_ptr =  m_block_map.load();
-				if( slot < N * (map_ptr->m_blocks.size() + map_ptr->m_block_offset )) {
-					spinlock.unlock();
-					return map_ptr;
-				}
-
-				//index of the first block that currently holds information - used only in a queue
-				block_idx_t first_seg{ 0 };
-				auto fs = first_slot ? first_slot->load() : table_index_t{0};
-				if (fs.has_value()) {
-					first_seg = block_idx(fs, map_ptr->m_block_offset);
-				}
-
-				//calculate new size of the map, if necessary
-				//The map might grow or shrink. If it grows, then we need to copy the old block pointers into the new map.
-				size_t num_blocks = map_ptr->m_blocks.size();
-				size_t new_offset = map_ptr->m_block_offset + first_seg;
-				size_t min_size = block_idx(slot, new_offset);
-				size_t smaller_size = std::max((num_blocks >> 2), MINSLOTS);
-				size_t medium_size = std::max((num_blocks >> 1), MINSLOTS);
-				size_t new_size = num_blocks + (num_blocks >> 1);
-				while (min_size > new_size) { new_size *= 2; }
-				if (first_seg > num_blocks * 0.85 && min_size < smaller_size) { new_size = smaller_size; }
-				else if (first_seg > num_blocks * 0.65 && min_size < medium_size) { new_size = medium_size; }
-				else if (first_seg > (num_blocks >> 1) && min_size < num_blocks) new_size = num_blocks;
-				
-				//Allocate a new block map and populate it with empty semgement pointers.
-				auto new_map_ptr = std::make_shared<block_map_t>( //map has always as many slots as its capacity is -> size==capacity
-					block_map_t{ std::pmr::vector<std::atomic<block_ptr_t>>{new_size, m_mr}, block_idx_t{ new_offset } } //increase existing one
-				);
-
-				//Copy the old block pointers into the new map. Create also empty blocks for the new slots (or get them from the cache).
-				size_t idx = 0;
-				size_t remain = num_blocks - first_seg;
-				std::ranges::for_each(new_map_ptr->m_blocks.begin(), new_map_ptr->m_blocks.end(), 
-					[&](auto& ptr) {
-						if (first_seg + idx < num_blocks) { //copy
-							auto old_ptr = map_ptr->m_blocks[first_seg + idx].load();
-							if(!old_ptr) map_ptr->m_blocks[first_seg + idx].wait(old_ptr); //wait until the block is created
-							ptr.store( old_ptr ); 
-						} 
-						else {
-							size_t i1 = idx - remain;
-							if (i1 < first_seg) { //copy
-								auto old_ptr = map_ptr->m_blocks[i1].load();
-								if(!old_ptr) map_ptr->m_blocks[i1].wait(old_ptr); //wait until the block is created
-								ptr.store( old_ptr ); 
-							} 
-							else {  //get rid of this else 
-								ptr.store( get_cache() );  //get from cache or create new block
-							}
-						}
-						++idx;
-					}
-				);
-
-				map_ptr = new_map_ptr; ///<  remember for later
-				m_block_map.store( map_ptr );
-		
+			static VlltSpinlock spinlock;
+			spinlock.lock(); //another thread might beat us here, so we need to check again after the lock
+			map_ptr =  m_block_map.load();
+			if( idx < map_ptr->m_blocks.size() ) {
 				spinlock.unlock();
+				continue;	//another thread increased the size of the map, but the block might not be there, so test again
 			}
+
+			//Allocate a new block map and populate it with empty semgement pointers.
+			auto num_blocks = map_ptr->m_blocks.size();
+			auto new_map_ptr = std::make_shared<block_map_t>( //map has always as many slots as its capacity is -> size==capacity
+				block_map_t{ std::pmr::vector<std::atomic<block_ptr_t>>{num_blocks << 2, m_mr} } //increase existing one
+			);
+
+			//Copy the old block pointers into the new map. Create also empty blocks for the new slots (or get them from the cache).
+			size_t idx = 0;
+			std::ranges::for_each( map_ptr->m_blocks.begin(), map_ptr->m_blocks.end(), 
+				[&](auto& ptr) {
+					auto block_ptr = ptr.load();
+					if( block_ptr ) new_map_ptr->m_blocks[idx].store( block_ptr ); //copy
+					else {
+						auto new_block = get_cache(); //no -> get a new block
+						if( !map_ptr->m_blocks[idx].compare_exchange_strong( block_ptr, new_block ) ) { m_block_cache.push(new_block); }
+					}
+					++idx;
+				}
+			);
+
+			map_ptr = new_map_ptr; ///<  remember for later	
+			m_block_map.store( map_ptr );
+			spinlock.unlock();
 		}
 		
 		return map_ptr;
 	}
 
 
+	/////
+	// \brief Pop the last row if there is one.
+	// \param[in] tup Pointer to tuple to move the row data into.
+	// \param[in] del If true, then call desctructor on the removed slot.
+	// \returns true if a row was popped.
+	///
+	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
+	inline auto VlltTable<DATA, N0, ROW, MINSLOTS>::pop_back() noexcept -> tuple_value_opt_t {
+	vtll::to_tuple<vtll::remove_atomic<DATA>> ret{};
+
+		if( m_starving.load()==1 ) m_starving.wait(1); //wait until pulls are done and pushes have a chance to catch up
+		if( table_diff(m_size_cnt.load()) > 4 ) m_starving.store(-1); //if pushes are starving the pulls, then prevent pushes
+
+		slot_size_t size = m_size_cnt.load();
+		if (table_size(size) + table_diff(size) == 0) return std::nullopt;	///< Is there a row to pop off?
+
+		/// Make sure that no other thread is currently pushing a new row
+		while (table_diff(size) > 0 || !m_size_cnt.compare_exchange_weak(size, slot_size_t{ stack_size(size), stack_diff(size) - 1, NUMBITS1 })) {
+			if (table_diff(size) > 0) { size = m_size_cnt.load(); }
+			if (table_size(size) + table_diff(size) == 0) return std::nullopt;	///< Is there a row to pop off?
+		};
+
+		auto map_ptr{ m_block_map.load() };						///< Access the block map
+
+		auto idx = table_size(size) + table_diff(size) - 1;
+		vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
+			[&](auto i) {
+				using type = vtll::Nth_type<DATA, i>;
+				if		constexpr (std::is_move_assignable_v<type>) { std::get<i>(ret) = std::move(* (this->template get_component_ptr<i>(table_index_t{ idx }, map_ptr)) ); }	//move
+				else if constexpr (std::is_copy_assignable_v<type>) { std::get<i>(ret) = *(this->template get_component_ptr<i>(table_index_t{ idx }, map_ptr)); }				//copy
+				else if constexpr (vtll::is_atomic<type>::value) { std::get<i>(ret) = this->template get_component_ptr<i>(table_index_t{ idx }, map_ptr)->load(); } 		//atomic
+
+				if constexpr (std::is_destructible_v<type> && !std::is_trivially_destructible_v<type>) { this->template get_component_ptr<i>(table_index_t{ idx }, map_ptr)->~type(); }	///< Call destructor
+			}
+		);
+
+		slot_size_t new_size = slot_size_t{ table_size(size), table_diff(size) - 1, NUMBITS1 };	///< Commit the popping of the row
+		while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ stack_size(new_size) - 1, stack_diff(new_size) + 1, NUMBITS1 }));
+
+		if(table_diff(new_size) + 1 == 0) { 
+			m_starving.store(0); //allow pushes again
+			m_starving.notify_all(); //notify all waiting threads
+		}
+		
+		return ret; //RVO?
+	}
+
+
+
+	/////
+	// \brief Pop all rows and call the destructors.
+	// \returns number of popped rows.
+	///
+	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
+	inline auto VlltTable<DATA, N0, ROW, MINSLOTS>::clear() noexcept -> size_t {
+		size_t num = 0;
+		while (pop_back().has_value()) { ++num; }
+		return num;
+	}
+
+
+	/////
+	// \brief Swap the values of two rows.
+	// \param[in] n1 Index of first row.
+	// \param[in] n2 Index of second row.
+	// \returns true if the operation was successful.
+	///
+	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
+	inline auto VlltTable<DATA, N0, ROW, MINSLOTS>::swap(table_index_t idst, table_index_t isrc) noexcept -> void {
+		assert(idst < size() && isrc < size());
+		auto src = get(isrc);
+		if (!src.has_value()) return;
+		auto dst = get(idst);
+		if (!dst.has_value()) return;
+		vtll::static_for<size_t, 0, vtll::size<DATA>::value >([&](auto i) {
+			using type = vtll::Nth_type<DATA, i>;
+			//std::cout << typeid(type).name() << "\n";
+			if constexpr (std::is_move_assignable_v<type> && std::is_move_constructible_v<type>) {
+				std::swap(std::get<i>(dst.value()), std::get<i>(src.value()));
+			}
+			else if constexpr (std::is_copy_assignable_v<type> && std::is_copy_constructible_v<type>) {
+				auto& tmp{ std::get<i>(src.value()) };
+				std::get<i>(src.value()) = std::get<i>(dst.value());
+				std::get<i>(dst.value()) = tmp;
+			}
+			else if constexpr (vtll::is_atomic<type>::value) {
+				type tmp{ std::get<i>(src.value()).load() };
+				std::get<i>(src.value()).store(std::get<i>(dst.value()).load());
+				std::get<i>(dst.value()).store(tmp.load());
+			}
+		});
+		return;
+	}
+
+
+	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
+	inline auto VlltTable<DATA, N0, ROW, MINSLOTS>::erase(table_index_t n1) -> void {
+		auto n2 = size() - 1;
+		if (n1 == n2) return pop_back();
+		swap(n1, table_index_t{ n2 });
+		return pop_back();
+	}
+
+
+
+
+
 
 	//---------------------------------------------------------------------------------------------------
 
+/*
 
-	using stack_index_t = vsty::strong_type_t<uint64_t, vsty::counter<>, std::integral_constant<uint64_t, std::numeric_limits<uint32_t>::max()>>;
-	using stack_diff_t = vsty::strong_type_t<int64_t, vsty::counter<>, std::integral_constant<int64_t, std::numeric_limits<int32_t>::max()>>;
+	using stack_index_t = vsty::strong_type_t<uint64_t, vsty::counter<>, std::integral_constant<uint64_t, std::numeric_limits<uint64_t>::max()>>;
+	using stack_diff_t = vsty::strong_type_t<int64_t, vsty::counter<>, std::integral_constant<int64_t, std::numeric_limits<int64_t>::max()>>;
 
 
 	/////
@@ -418,7 +541,7 @@ namespace vllt {
 		using VlltTable<DATA, N0, ROW, MINSLOTS>::m_mr;
 		using VlltTable<DATA, N0, ROW, MINSLOTS>::m_block_map;
 		using VlltTable<DATA, N0, ROW, MINSLOTS>::get_component_ptr;
-		using VlltTable<DATA, N0, ROW, MINSLOTS>::insert;
+		//using VlltTable<DATA, N0, ROW, MINSLOTS>::insert;
 
 		using tuple_opt_t = std::optional< vtll::to_tuple< vtll::remove_atomic<DATA> > >;
 		using typename VlltTable<DATA, N0, ROW, MINSLOTS>::table_index_t;
@@ -449,16 +572,16 @@ namespace vllt {
 
 		template<typename... Cs>
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
-		inline auto push_callback(push_callback_t f, Cs&&... data) noexcept -> stack_index_t;	///< Push new component data to the end of the table
+		inline auto push_back_callback(push_callback_t f, Cs&&... data) noexcept -> stack_index_t;	///< Push new component data to the end of the table
 
 		template<typename... Cs>
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
-		inline auto push(Cs&&... data) noexcept -> stack_index_t;	///< Push new component data to the end of the table
+		inline auto push_back(Cs&&... data) noexcept -> stack_index_t;	///< Push new component data to the end of the table
 
 		//-------------------------------------------------------------------------------------------
 		//remove and swap data
 
-		inline auto pop() noexcept		-> tuple_opt_t; ///< Remove the last row, call destructor on components
+		inline auto pop_back() noexcept	-> tuple_opt_t; ///< Remove the last row, call destructor on components
 		inline auto clear() noexcept	-> size_t; ///< Set the number if rows to zero - effectively clear the table, call destructors
 		inline auto swap(stack_index_t n1, stack_index_t n2) noexcept -> void;	///< Swap contents of two rows
 		inline auto erase(stack_index_t n1) -> tuple_opt_t; ///< Remove a row, call destructor on components
@@ -552,7 +675,7 @@ namespace vllt {
 	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, size_t NUMBITS1>
 	template<typename... Cs>
 		requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
-	inline auto VlltStack<DATA, N0, ROW, MINSLOTS, NUMBITS1>::push_callback(push_callback_t f, Cs&&... data) noexcept -> stack_index_t {
+	inline auto VlltStack<DATA, N0, ROW, MINSLOTS, NUMBITS1>::push_back_callback(push_callback_t f, Cs&&... data) noexcept -> stack_index_t {
 		if( m_starving.load()==-1 ) m_starving.wait(-1); //wait until pushes are done and pulls have a chance to catch up
 		if( stack_diff(m_size_cnt.load()) < -4 ) m_starving.store(1); //if pops are starving the pushes, then prevent pulls 
 
@@ -566,7 +689,7 @@ namespace vllt {
 		};
 
 		//make sure there is enough space in the block VECTOR - if not then change the old map to a larger map
-		insert(table_index_t{stack_size(size) + stack_diff(size)}, nullptr, std::forward<Cs>(data)...); ///< Make sure there are enough MINSLOTS for blocks
+		VlltTable<DATA, N0, ROW, MINSLOTS>::push_back(table_index_t{stack_size(size) + stack_diff(size)}, std::forward<Cs>(data)...); ///< Make sure there are enough MINSLOTS for blocks
 
 		if(f.has_value()) f.value()( stack_index_t{ stack_size(size) + stack_diff(size) } ); ///< Call callback function
 
@@ -589,8 +712,8 @@ namespace vllt {
 	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, size_t NUMBITS1>
 	template<typename... Cs>
 		requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
-	inline auto VlltStack<DATA, N0, ROW, MINSLOTS, NUMBITS1>::push(Cs&&... data) noexcept -> stack_index_t {
-		return push_callback( {}, std::forward<Cs>(data)...);
+	inline auto VlltStack<DATA, N0, ROW, MINSLOTS, NUMBITS1>::push_back(Cs&&... data) noexcept -> stack_index_t {
+		return push_back_callback( {}, std::forward<Cs>(data)...);
 	}
 
 	/////
@@ -600,7 +723,7 @@ namespace vllt {
 	// \returns true if a row was popped.
 	///
 	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, size_t NUMBITS1>
-	inline auto VlltStack<DATA, N0, ROW, MINSLOTS, NUMBITS1>::pop() noexcept -> tuple_opt_t {
+	inline auto VlltStack<DATA, N0, ROW, MINSLOTS, NUMBITS1>::pop_back() noexcept -> tuple_opt_t {
 		vtll::to_tuple<vtll::remove_atomic<DATA>> ret{};
 
 		if( m_starving.load()==1 ) m_starving.wait(1); //wait until pulls are done and pushes have a chance to catch up
@@ -647,7 +770,7 @@ namespace vllt {
 	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, size_t NUMBITS1>
 	inline auto VlltStack<DATA, N0, ROW, MINSLOTS, NUMBITS1>::clear() noexcept -> size_t {
 		size_t num = 0;
-		while (pop().has_value()) { ++num; }
+		while (pop_back().has_value()) { ++num; }
 		return num;
 	}
 
@@ -687,169 +810,13 @@ namespace vllt {
 	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, size_t NUMBITS1>
 	inline auto VlltStack<DATA, N0, ROW, MINSLOTS, NUMBITS1>::erase(stack_index_t n1) -> tuple_opt_t {
 		auto n2 = size() - 1;
-		if (n1 == n2) return pop();
+		if (n1 == n2) return pop_back();
 		swap(n1, stack_index_t{ n2 });
-		return pop();
+		return pop_back();
 	}
 
 
-	//----------------------------------------------------------------------------------------------------
-
-
-	///
-	// \brief VlltFIFOQueue is a FIFO queue that can be ued by multiple threads in parallel
-	//
-	// It has the following properties:
-	// 1) It stores tuples of data
-	// 2) Lockless multithreaded access.
-	//
-	// The FIFO queue is a stack thet keeps block pointers in a map.
-	// Segments that are empty are recycled to the end of the blocks map.
-	// An offset is maintained that is subtracted from a table index.
-	//
-	//
-
-	template<typename DATA, size_t N0 = 1 << 10, bool ROW = true, size_t MINSLOTS = 16>
-	class VlltFIFOQueue : public VlltTable<DATA, N0, ROW, MINSLOTS> {
-
-	public:
-		using VlltTable<DATA, N0, ROW, MINSLOTS>::N;
-		using VlltTable<DATA, N0, ROW, MINSLOTS>::L;
-		using VlltTable<DATA, N0, ROW, MINSLOTS>::m_block_map;
-		using VlltTable<DATA, N0, ROW, MINSLOTS>::m_mr;
-		using VlltTable<DATA, N0, ROW, MINSLOTS>::get_component_ptr;
-		using VlltTable<DATA, N0, ROW, MINSLOTS>::insert;
-		using VlltTable<DATA, N0, ROW, MINSLOTS>::resize;
-
-		using tuple_opt_t = std::optional< vtll::to_tuple< vtll::remove_atomic<DATA> > >;
-		using typename VlltTable<DATA, N0, ROW, MINSLOTS>::table_index_t;
-		using typename VlltTable<DATA, N0, ROW, MINSLOTS>::block_t;
-		using typename VlltTable<DATA, N0, ROW, MINSLOTS>::block_ptr_t;
-		using typename VlltTable<DATA, N0, ROW, MINSLOTS>::block_map_t;
-
-		VlltFIFOQueue() {};
-
-		template<typename... Cs>
-			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
-		inline auto push(Cs&&... data) noexcept -> table_index_t;	///< Push new component data to the end of the table
-
-		inline auto pop() noexcept		-> tuple_opt_t;	///< Remove the last row, call destructor on components
-		inline auto size() noexcept		-> size_t;				///< Number of elements in the queue
-		inline auto clear() noexcept	-> size_t;			///< Set the number if rows to zero - effectively clear the table, call destructors
-
-	protected:
-		alignas(64) std::atomic<table_index_t>	m_next{ table_index_t{0} };	//next element to be taken out of the queue
-		alignas(64) std::atomic<table_index_t>	m_consumed;		//last element that was taken out and fully read and destroyed
-		alignas(64) std::atomic<table_index_t>	m_next_free_slot{ table_index_t{0} };		//next element to write over
-		alignas(64) std::atomic<table_index_t>	m_last;			//last element that has been produced and fully constructed
-	};
-
-
-	///
-	// \brief Push a new element to the end of the stack.
-	// \param[in] data References to the components to be added.
-	// \returns the index of the new entry.
-	///
-	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
-	template<typename... Cs>
-		requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
-	inline auto VlltFIFOQueue<DATA, N0, ROW, MINSLOTS>::push(Cs&&... data) noexcept -> table_index_t {
-		auto next_free_slot = m_next_free_slot.load();
-		while (!m_next_free_slot.compare_exchange_weak(next_free_slot, table_index_t{ next_free_slot + 1 })); ///< Slot number to put the new data into	
-
-		insert(next_free_slot, &m_consumed, std::forward<Cs>(data)...);
-
-		table_index_t expected = next_free_slot > 0 ? table_index_t{ next_free_slot - 1 } : table_index_t{};
-		auto old_last{ expected };
-		while (!m_last.compare_exchange_weak(old_last, next_free_slot)) { old_last = expected; };
-
-		return next_free_slot;	///< Return index of new entry
-	}
-
-	/// <summary>
-	/// Pop the next item from the queue.
-	/// Move its content into the return value (tuple),
-	/// then remove it from the queue.
-	/// </summary>
-	/// <typeparam name="DATA">Type list of data items.</typeparam>
-	/// <typeparam name="N0">Number of items per block.</typeparam>
-	/// <typeparam name="ROW">ROW or COLUMN layout.</typeparam>
-	/// <typeparam name="MINSLOTS">Default number of MINSLOTS in the first block map.</typeparam>
-	/// <returns>Tuple with values from the next item, or nullopt.</returns>
-	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
-	inline auto VlltFIFOQueue<DATA, N0, ROW, MINSLOTS>::pop() noexcept -> tuple_opt_t {
-		vtll::to_tuple<vtll::remove_atomic<DATA>> ret{};
-
-		if (!m_last.load().has_value()) return std::nullopt;
-
-		table_index_t last;
-		auto next = m_next.load();
-		do {
-			last = m_last.load();
-			if (!(next <= last)) return std::nullopt;
-		} while (!m_next.compare_exchange_weak(next, table_index_t{ next + 1ul }));  ///< Slot number to put the new data into	
-		
-		auto map_ptr{ m_block_map.load() };						///< Access the block map
-
-		vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
-			[&](auto i) {
-				using type = vtll::Nth_type<DATA, i>;
-				if		constexpr (std::is_move_assignable_v<type>) { std::get<i>(ret) = std::move(*(this->template get_component_ptr<i>(next, map_ptr))); } //move
-				else if constexpr (std::is_copy_assignable_v<type>) { std::get<i>(ret) = *(this->template get_component_ptr<i>(next, map_ptr)); } 			//copy
-				else if constexpr (vtll::is_atomic<type>::value) { std::get<i>(ret) = this->template get_component_ptr<i>(next, map_ptr)->load(); } 	//atomic
-
-				if constexpr (std::is_destructible_v<type> && !std::is_trivially_destructible_v<type>) { this->template get_component_ptr<i>(next, map_ptr)->~type(); }	///< Call destructor
-			}
-		);
-
-		table_index_t expected = (next > 0 ? table_index_t{ next - 1ull } : table_index_t{});
-		auto consumed{ expected };
-		while (!m_consumed.compare_exchange_weak(consumed, next)) { consumed = expected; };
-
-		return ret;		//RVO?
-	}
-
-	/// <summary>
-	/// Get the number of items currently in the queue.
-	/// </summary>
-	/// <typeparam name="DATA">Type list of data items.</typeparam>
-	/// <typeparam name="N0">Number of items per block.</typeparam>
-	/// <typeparam name="ROW">ROW or COLUMN layout.</typeparam>
-	/// <typeparam name="MINSLOTS">Default number of MINSLOTS in the first block map.</typeparam>
-	/// <returns>Number of items currently in the queue.</returns>
-	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
-	inline auto VlltFIFOQueue<DATA, N0, ROW, MINSLOTS>::size() noexcept -> size_t {
-		auto last = m_last.load();
-		auto consumed = m_consumed.load();
-		size_t sz{0};
-		if (last.has_value()) {	//have items been produced yet?
-			sz += last;			//yes -> count them
-			if (consumed.has_value()) sz -= consumed; //have items been consumed yet?
-			else ++sz;	//no -> we start at zero, so increase by 1
-		}
-
-		return sz;
-	}
-
-	/// <summary>
-	/// Remove all items from the queue.
-	/// </summary>
-	/// <typeparam name="DATA">Type list of data items.</typeparam>
-	/// <typeparam name="N0">Number of items per block.</typeparam>
-	/// <typeparam name="ROW">ROW or COLUMN layout.</typeparam>
-	/// <typeparam name="MINSLOTS">Default number of MINSLOTS in the first block map.</typeparam>
-	/// <returns>Number of items removed from the queue.</returns>
-	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
-	inline auto VlltFIFOQueue<DATA, N0, ROW, MINSLOTS>::clear() noexcept -> size_t {
-		size_t num = 0;
-		while (pop().has_value()) { ++num; }
-		
-		//auto next_free_slot = m_next_free_slot.load();
-		//auto map_ptr{ m_block_map.load() };		///< Shared pointer to current block ptr map, can be nullptr
-		//resize(next_free_slot, map_ptr, &m_consumed);
-
-		return num;
-	}
+*/
 
 }
 

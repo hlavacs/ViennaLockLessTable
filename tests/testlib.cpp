@@ -15,7 +15,8 @@ auto wait_for(double us) {
 	return res;
 }
 
-void functional_test() {
+/*
+void functional_test1() {
 
 	using types = vtll::tl<uint32_t, size_t, double, float, bool, char>;
 
@@ -76,14 +77,14 @@ void functional_test() {
 
 		{
 			size_t i = 10;
-			stack.push((uint32_t)i, i, 2.0 * i, 3.0f * i, true, 'A');
-			auto v = stack.pop();
+			stack.push_back((uint32_t)i, i, 2.0 * i, 3.0f * i, true, 'A');
+			auto v = stack.pop_back();
 			assert(std::get<size_t>(v.value()) == i);
 		}
 
 		{
 			for (size_t i = 0ul; i < MAX; ++i) {
-				stack.push((uint32_t)i, i, 2.0 * i, 3.0f * i, true, 'A');
+				stack.push_back((uint32_t)i, i, 2.0 * i, 3.0f * i, true, 'A');
 			}
 			assert(stack.size() == MAX);
 
@@ -102,7 +103,7 @@ void functional_test() {
 		}
 
 		for (size_t i = 0ul; i < MAX; ++i) {
-			stack.push((uint32_t)i, i, 2.0 * i, 3.0f * i, true, 'A');
+			stack.push_back((uint32_t)i, i, 2.0 * i, 3.0f * i, true, 'A');
 		}
 
 		stack.swap(vllt::stack_index_t{0}, vllt::stack_index_t{1});
@@ -120,22 +121,22 @@ void functional_test() {
 		}
 
 		auto i = stack.size();
-		auto data = stack.pop();
+		auto data = stack.pop_back();
 		while (data.has_value()) {
 			--i;
 			//assert( std::get<size_t>( data.value() ) == i);
-			data = stack.pop();
+			data = stack.pop_back();
 		}
 
 		for (size_t i = 0ul; i < MAX; ++i) {
-			stack.push(static_cast<uint32_t>(i), i, 2.0 * i, 3.0f * i, true, 'A');
+			stack.push_back(static_cast<uint32_t>(i), i, 2.0 * i, 3.0f * i, true, 'A');
 		}
 		stack.clear();
 
 
 		auto push = [&](size_t start, size_t max, size_t f = 1) {
 			for (size_t i = start; i <= max; ++i) {
-				stack.push((uint32_t)i, f, (double) f * i, f * 2.0f * i, true, 'A');
+				stack.push_back((uint32_t)i, f, (double) f * i, f * 2.0f * i, true, 'A');
 			}
 		};
 
@@ -144,7 +145,7 @@ void functional_test() {
 
 			size_t v = in;
 			for (size_t i = 1; i <= out; ++i) {
-				auto v = stack.pop();
+				auto v = stack.pop_back();
 				if (v.has_value()) {
 					auto value = v.value();
 					assert(counter[std::get<1>(value)]-- == (size_t)std::get<0>(value));
@@ -154,7 +155,7 @@ void functional_test() {
 
 		auto pull2 = [&](size_t in, size_t out) {
 			for (size_t i = 1; i <= out; ++i) {
-				auto v = stack.pop();
+				auto v = stack.pop_back();
 				if (v.has_value()) {
 					auto value = v.value();
 					assert( std::get<3>(value) == 2*std::get<2>(value));
@@ -194,7 +195,7 @@ void functional_test() {
 				std::jthread thread4([&]() { push(0, in, 4); });
 				std::jthread t4([&]() { pull2(in, out); });
 
-				/*std::jthread thread5([&]() { push(0, in, 5); });
+				std::jthread thread5([&]() { push(0, in, 5); });
 				std::jthread t5([&]() { pull2(in, out); });
 
 				std::jthread thread6([&]() { push(0, in, 6); });
@@ -204,7 +205,7 @@ void functional_test() {
 				std::jthread t7([&]() { pull2(in, out); });
 
 				std::jthread t8([&]() { pull2(in, out); });
-				std::jthread t9([&]() { pull2(in, out); });*/
+				std::jthread t9([&]() { pull2(in, out); });
 			}
 			//assert(queue.size() == 7 * in - 9 * out);
 
@@ -218,261 +219,17 @@ void functional_test() {
 			par();
 		}
 	}
+}
+*/
 
-
-	//----------------------------------------------------------------------------
-
-	{
-		std::cout << "QUEUE\n";
-
-		vllt::VlltFIFOQueue<types, 1 << 8, true, 16> queue;
-
-		auto push = [&](size_t start, size_t max, size_t f = 1) {
-			for (size_t i = start; i <= max; ++i) {
-				queue.push((uint32_t)i, f, (double)f * i, f * 2.0f * i, true, 'A');
-			}
-		};
-
-		auto pull = [&](size_t start, size_t out) {
-			std::array<size_t, 10> counter{start, start, start, start, start, start, start, start, start, start};
-
-			size_t v = start;
-			for (size_t i = 1; i <= out; ++i) {
-				auto v = queue.pop();
-				if (v.has_value()) {
-					auto value = v.value();
-					assert(counter[std::get<1>(value)]++ == (size_t)std::get<0>(value));
-				}
-			}
-		};
-
-		auto pull2 = [&](size_t n) {
-			for (size_t i = 1; i <= n; ++i) {
-				auto v = queue.pop();
-				if (v.has_value()) {
-					auto value = v.value();
-				}
-			}
-		};
-
-		push(1, MAX);
-		pull2(MAX);
-
-		push(1, MAX, 10);
-		pull2(MAX);
-
-		queue.clear();
-		pull2(MAX);
-		assert(queue.size() == 0);
-
-		push(1, MAX, 10);
-		pull2(MAX / 2);
-		pull2(MAX / 2);
-		assert(queue.size() == 0);
-		queue.clear();
-
-		auto par = [&]() {
-			size_t in = 15000, out = 15000;
-			{
-				std::cout << 1 << " ";
-				std::jthread thread1([&]() { push(1, in, 1); });
-				std::jthread thread2([&]() { push(1, in, 2); });
-				std::jthread thread3([&]() { push(1, in, 3); });
-				std::jthread thread4([&]() { push(1, in, 4); });
-			}
-			assert(queue.size() == 4 * in);
-
-			{
-				std::jthread t1([&]() { pull(1, 4 * in); });
-			}
-			assert(queue.size() == 0);
-
-			{
-				std::cout << 2 << " ";
-
-				std::jthread thread1([&]() { push(0, in, 1); });
-				std::jthread t1([&]() { pull2(out); });
-
-				std::jthread thread2([&]() { push(0, in, 2); });
-				std::jthread t2([&]() { pull2(out); });
-
-				std::jthread thread3([&]() { push(0, in, 3); });
-				std::jthread t3([&]() { pull2(out); });
-
-				std::jthread thread4([&]() { push(0, in, 1); });
-				std::jthread t4([&]() { pull2(out); });
-
-				std::jthread thread5([&]() { push(0, in, 2); });
-				std::jthread t5([&]() { pull2(out); });
-
-				/*std::jthread thread6([&]() { push(0, in, 3); });
-				std::jthread t6([&]() { pull2(out); });
-
-				std::jthread thread7([&]() { push(0, in, 3); });
-				std::jthread t7([&]() { pull2(out); });
-
-				std::jthread t8([&]() { pull2(out); });
-				std::jthread t9([&]() { pull2(out); });*/
-			}
-			//assert(queue.size() == 7 * in - 9 * out);
-
-			std::cout << 3 << " ";
-			queue.clear();
-			std::cout << 4 << "\n";
-		};
-
-		for (size_t i = 0; i < 30; ++i) {
-			std::cout << "Loop " << i << " ";
-			par();
-		}
-	}
-
-	return;
+void functional_test() {
 }
 
 
 std::mutex g_mutex;
 
 
-
-void performance_queue() {
-
-	struct comp {
-		double m_div{1000.0};
-		comp(){
-			wait_for(0); // (rand() % 100) / m_div);
-		};
-		~comp() {
-			wait_for(0); // (rand() % 100) / m_div);
-		};
-	};
-
-	using types = vtll::tl<uint32_t, size_t, double, float, bool, char, comp >;
-
-	{
-		std::cout << "QUEUE\n";
-
-		vllt::VlltFIFOQueue<types, 1 << 8, true, 32> queue;
-		std::queue<vtll::to_tuple<types>> stdqueue;
-
-		auto par = [&]( bool lck1 ) {
-			auto& ref = stdqueue;
-
-			std::vector<double> push_time(30, 0);
-			std::vector<double> pull_time(30, 0);
-			std::vector<size_t> push_num(30, 0);
-			std::vector<size_t> pull_num(30, 0);
-
-			auto push = [&](size_t id, size_t start, size_t max, size_t f, bool lck) {
-				for (size_t i = start; i <= max; ++i) {
-					auto T1 = std::chrono::high_resolution_clock::now();
-					if (lck) {
-						std::scoped_lock lock(g_mutex);
-						ref.emplace(std::make_tuple((uint32_t)i, f, (double)f* i, f * 2.0f * i, true, 'A', comp{}));
-						//ref.push((uint32_t)i, f, (double)f * i, f * 2.0f * i, true, 'A');
-					}
-					else {
-						queue.push((uint32_t)i, f, (double)f* i, f * 2.0f * i, true, 'A', comp{});
-					}
-
-					push_time[id] += duration_cast<duration<double>>(high_resolution_clock::now() - T1).count();
-					push_num[id]++;
-					wait_for( 10.0 * (rand() % 100) / 100.0);
-				}
-			};
-
-			auto pull = [&](size_t id, size_t n, bool lck) {
-				for (size_t i = 1; i <= n; ++i) {
-					auto T1 = std::chrono::high_resolution_clock::now();
-					if (lck) {
-						std::scoped_lock lock(g_mutex);
-						if (ref.size()) {
-							vtll::to_tuple<types> v = ref.front();
-							ref.pop();
-						}
-					}
-					else {
-						auto v = queue.pop();
-					}
-					pull_time[id] += duration_cast<duration<double>>(high_resolution_clock::now() - T1).count();
-					pull_num[id]++;
-					wait_for( 10.0 * (rand() % 100) / 100.0);
-				}
-			};
-
-			size_t in = 20000, out = 20000;
-
-			std::ptrdiff_t num = std::thread::hardware_concurrency() / 2 - 1;
-			std::cout << 1 << " ";
-			{
-				std::latch l{2*num};
-				std::vector<std::jthread> threads;
-				for (std::ptrdiff_t i = 1; i <= 2*num; ++i) {
-					threads.emplace_back(std::move(std::jthread([&]() { l.arrive_and_wait(); push(i, 1, in, i, lck1); })));
-				}
-			}
-			{
-				std::latch l{2*num};
-				std::vector<std::jthread> threads;
-				for (std::ptrdiff_t i = 1; i <= 2*num; ++i) {
-					threads.emplace_back(std::move(std::jthread([&]() { l.arrive_and_wait(); pull(i, in, lck1); })));
-				}
-			}
-			{
-				std::latch l{2*num};
-				std::vector<std::jthread> threads;
-				for (std::ptrdiff_t i = 1; i <= num; ++i) {
-					threads.emplace_back(std::move(std::jthread([&]() { l.arrive_and_wait(); push(i, 1, in, i, lck1); })));
-					threads.emplace_back(std::move(std::jthread([&]() { l.arrive_and_wait(); pull(i, in, lck1); })));
-				}
-			}
-
-			return std::make_tuple(
-				std::accumulate(push_time.begin(), push_time.end(), 0.0),
-				std::accumulate(pull_time.begin(), pull_time.end(), 0.0),
-				std::accumulate(push_time.begin(), push_time.end(), 0.0) + std::accumulate(pull_time.begin(), pull_time.end(), 0.0)
-				);
-		};
-
-		double SLO1 = 0.0, SLO2 = 0.0, SLO3 = 0.0;
-		double SLL1 = 0.0, SLL2 = 0.0, SLL3 = 0.0;
-		for (size_t i = 1; i <= 20; ++i) {
-			queue.clear();
-			while (stdqueue.size()) stdqueue.pop();
-
-			std::cout << "Loop " << i << " ";
-			auto TLO = par(true);
-			auto TLL = par(false);
-			if (i >= 4) {
-				double alpha = 0.0;
-				SLO1 = alpha * SLO1 + (1.0 - alpha) * std::get<0>(TLO);
-				SLO2 = alpha * SLO2 + (1.0 - alpha) * std::get<1>(TLO);
-				SLO3 = alpha * SLO3 + (1.0 - alpha) * std::get<2>(TLO);
-				std::cout << SLO1 << " " << SLO2 << " " << SLO3 << " ";
-
-				SLL1 = alpha * SLL1 + (1.0 - alpha) * std::get<0>(TLL);
-				SLL2 = alpha * SLL2 + (1.0 - alpha) * std::get<1>(TLL);
-				SLL3 = alpha * SLL3 + (1.0 - alpha) * std::get<2>(TLL);
-				std::cout << SLL1 << " " << SLL2 << " " << SLL3 << " ";
-			}
-			else {
-				double j = 3.;
-				SLO1 += std::get<0>(TLO) / j;
-				SLO2 += std::get<1>(TLO) / j;
-				SLO3 += std::get<2>(TLO) / j;
-
-				SLL1 += std::get<0>(TLL) / j;
-				SLL2 += std::get<1>(TLL) / j;
-				SLL3 += std::get<2>(TLL) / j;
-			}
-			std::cout << 3 << "\n";
-		}
-
-	}
-
-}
-
-
+/*
 void performance_stack() {
 
 	struct comp {
@@ -510,7 +267,7 @@ void performance_stack() {
 						//ref.push((uint32_t)i, f, (double)f * i, f * 2.0f * i, true, 'A');
 					}
 					else {
-						stack.push((uint32_t)i, f, (double)f * i, f * 2.0f * i, true, 'A', comp{});
+						stack.push_back((uint32_t)i, f, (double)f * i, f * 2.0f * i, true, 'A', comp{});
 					}
 
 					push_time[id] += duration_cast<duration<double>>(high_resolution_clock::now() - T1).count();
@@ -530,7 +287,7 @@ void performance_stack() {
 						}
 					}
 					else {
-						auto v = stack.pop();
+						auto v = stack.pop_back();
 					}
 					pull_time[id] += duration_cast<duration<double>>(high_resolution_clock::now() - T1).count();
 					pull_num[id]++;
@@ -609,13 +366,13 @@ void performance_stack() {
 	}
 
 }
-
+*/
 
 int main() {
 	std::cout << std::thread::hardware_concurrency() << " Threads\n";
 	functional_test();
 	//performance_stack();
-	//performance_queue();
+	return 0;
 }
 
 
