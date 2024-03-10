@@ -415,11 +415,11 @@ namespace vllt {
 					if( block_ptr ) new_map_ptr->m_blocks[idx].store( block_ptr ); //copy
 					else {
 						auto new_block = get_cache(); //no -> get a new block
-						if( !map_ptr->m_blocks[idx].compare_exchange_strong( block_ptr, new_block ) ) { 
-							m_block_cache.push(new_block); 
-							new_map_ptr->m_blocks[idx].store( block_ptr );
-						} else {
+						if( map_ptr->m_blocks[idx].compare_exchange_strong( block_ptr, new_block ) ) { 
 							new_map_ptr->m_blocks[idx].store( new_block );
+						} else {
+							m_block_cache.push(new_block); //another thread beat us, so we can use the new block
+							new_map_ptr->m_blocks[idx].store( block_ptr ); //use block frm other thread
 						}
 					}
 					++idx;
