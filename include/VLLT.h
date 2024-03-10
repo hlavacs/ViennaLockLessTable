@@ -152,6 +152,7 @@ namespace vllt {
 
 	//---------------------------------------------------------------------------------------------------
 
+	using table_index_t = vsty::strong_type_t<uint64_t, vsty::counter<>, std::integral_constant<uint64_t, std::numeric_limits<uint64_t>::max()>>;///< Strong integer type for indexing rows, 0 to number rows - 1
 
 
 	/// <summary>
@@ -169,7 +170,6 @@ namespace vllt {
 		static_assert(std::is_default_constructible_v<DATA>, "Your components are not default constructible!");
 
 		const size_t NUMBITS1 = 44; ///< Number of bits for the index of the first item in the stack
-		using table_index_t = vsty::strong_type_t<uint64_t, vsty::counter<>, std::integral_constant<uint64_t, std::numeric_limits<uint64_t>::max()>>;///< Strong integer type for indexing rows, 0 to number rows - 1
 		using table_diff_t  = vsty::strong_type_t<uint64_t, vsty::counter<>, std::integral_constant<uint64_t, std::numeric_limits<uint64_t>::max()>>;
 
 		using block_idx_t = vsty::strong_type_t<size_t, vsty::counter<>>; ///< Strong integer type for indexing blocks, 0 to size map - 1
@@ -250,7 +250,7 @@ namespace vllt {
 	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
 	inline auto VlltTable<DATA, N0, ROW, MINSLOTS>::max_size() noexcept -> size_t {
 		auto size = m_size_cnt.load();
-		return std::max(static_cast<decltype(stack_size(size))>(stack_size(size) + stack_diff(size)), stack_size(size));
+		return std::max(static_cast<decltype(table_size(size))>(table_size(size) + table_diff(size)), table_size(size));
 	};
 
 	/////
@@ -260,7 +260,7 @@ namespace vllt {
 	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
 	inline auto VlltTable<DATA, N0, ROW, MINSLOTS>::size() noexcept -> size_t {
 		auto size = m_size_cnt.load();
-		return std::min(static_cast<decltype(stack_size(size))>(stack_size(size) + stack_diff(size)), stack_size(size));
+		return std::min(static_cast<decltype(table_size(size))>(table_size(size) + table_diff(size)), table_size(size));
 	};
 
 
@@ -272,8 +272,7 @@ namespace vllt {
 	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
 	inline auto VlltTable<DATA, N0, ROW, MINSLOTS>::get(table_index_t n) noexcept -> std::optional<tuple_ref_t> {
 		if (n >= size()) return std::nullopt;
-		auto map_ptr = m_block_map.load();
-		return { [&] <size_t... Is>(std::index_sequence<Is...>) { return std::tie(* (this->template get_component_ptr<Is>(table_index_t{n}, map_ptr))...); }(std::make_index_sequence<vtll::size<DATA>::value>{}) };
+		return { [&] <size_t... Is>(std::index_sequence<Is...>) { return std::tie(* (this->template get_component_ptr<Is>(table_index_t{n}))...); }(std::make_index_sequence<vtll::size<DATA>::value>{}) };
 	};
 
 

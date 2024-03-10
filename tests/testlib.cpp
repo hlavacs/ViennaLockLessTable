@@ -71,7 +71,7 @@ void functional_test1() {
 
 
 	{
-		std::cout << "STACK\n";
+		std::cout << "TABLE\n";
 
 		vllt::VlltTable<types> stack;
 
@@ -374,7 +374,33 @@ void performance_stack() {
 
 void functional_test() {
 
+	using types = vtll::tl<uint32_t, size_t, double, float, bool, char>;
 
+	const size_t MAX = 1024*16*10;
+
+	{
+		std::cout << "TABLE\n";
+
+		vllt::VlltTable<types> stack;
+		vllt::VlltTable<types> stack2;
+
+		for(size_t i=0; i<1000; ++i) {
+			stack.push_back((uint32_t)i, i, 2.0 * i, 3.0f * i, true, 'A');
+			stack2.push_back((uint32_t)i, i, 2.0 * i, 3.0f * i, true, 'A');
+			auto v = stack.pop_back();
+			assert(std::get<size_t>(v.value()) == i);
+		}
+		for(size_t i=999; i>0; --i) {
+			auto v = stack2.pop_back();
+			assert(std::get<size_t>(v.value()) == i);
+		}
+		{
+			auto v = stack2.get(vllt::table_index_t{0});
+			assert(std::get<size_t&>(v.value()) == 0);
+		}
+
+
+	}
 }
 
 
