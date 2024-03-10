@@ -164,7 +164,7 @@ namespace vllt {
 	/// <typeparam name="ROW">If true, then data is stored rowwise, else columnwise.</typeparam>
 	/// <typeparam name="MINSLOTS">Miniumum number of available slots in the block map.</typeparam>
 	/// <returns>Pointer to the component.</returns>
-	template<typename DATA, size_t N0 = 1 << 10, bool ROW = true, size_t MINSLOTS = 16>
+	template<typename DATA, size_t N0 = 1 << 5, bool ROW = true, size_t MINSLOTS = 16>
 	class VlltTable {
 	protected:
 		static_assert(std::is_default_constructible_v<DATA>, "Your components are not default constructible!");
@@ -229,6 +229,7 @@ namespace vllt {
 		static inline auto block_idx(table_index_t n) -> block_idx_t { return block_idx_t{ (n >> L) }; }
 		inline auto get_cache() -> block_ptr_t;
 		inline auto resize(table_index_t slot) -> std::shared_ptr<block_map_t>;
+		inline auto shrink() -> void;
 
 		std::pmr::memory_resource* m_mr; ///< Memory resource for allocating blocks
 		std::pmr::polymorphic_allocator<block_map_t> m_allocator;  ///< use this allocator
@@ -414,7 +415,12 @@ namespace vllt {
 					if( block_ptr ) new_map_ptr->m_blocks[idx].store( block_ptr ); //copy
 					else {
 						auto new_block = get_cache(); //no -> get a new block
-						if( !map_ptr->m_blocks[idx].compare_exchange_strong( block_ptr, new_block ) ) { m_block_cache.push(new_block); }
+						if( !map_ptr->m_blocks[idx].compare_exchange_strong( block_ptr, new_block ) ) { 
+							m_block_cache.push(new_block); 
+							new_map_ptr->m_blocks[idx].store( block_ptr );
+						} else {
+							new_map_ptr->m_blocks[idx].store( new_block );
+						}
 					}
 					++idx;
 				}
@@ -426,6 +432,11 @@ namespace vllt {
 		}
 		
 		return map_ptr;
+	}
+
+	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
+	inline auto VlltTable<DATA,N0,ROW,MINSLOTS>::shrink() -> void {
+
 	}
 
 
@@ -464,6 +475,8 @@ namespace vllt {
 				if constexpr (std::is_destructible_v<type> && !std::is_trivially_destructible_v<type>) { this->template get_component_ptr<i>(table_index_t{ idx })->~type(); }	///< Call destructor
 			}
 		);
+
+		shrink(); ///< Shrink the block map if necessary
 
 		slot_size_t new_size = slot_size_t{ table_size(size), table_diff(size) - 1, NUMBITS1 };	///< Commit the popping of the row
 		while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ table_size(new_size) - 1, table_diff(new_size) + 1, NUMBITS1 }));
