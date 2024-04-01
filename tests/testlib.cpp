@@ -16,7 +16,7 @@ auto wait_for(double us) {
 }
 
 
-void functional_test1() {
+void functional_test() {
 
 	using types = vtll::tl<uint32_t, size_t, double, float, bool, char>;
 
@@ -81,8 +81,6 @@ void functional_test1() {
 			auto v = stack.pop_back();
 			assert(std::get<size_t>(v.value()) == i);
 		}
-
-		/*
 
 		{
 			for (size_t i = 0ul; i < MAX; ++i) {
@@ -220,7 +218,7 @@ void functional_test1() {
 			std::cout << "Loop " << i << " ";
 			par();
 		}
-		*/
+		
 	}
 	
 }
@@ -372,7 +370,7 @@ void performance_stack() {
 */
 
 
-void functional_test() {
+void functional_test2() {
 
 	using types = vtll::tl<uint32_t, size_t, double, float, bool, char>;
 

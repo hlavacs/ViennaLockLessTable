@@ -203,10 +203,15 @@ namespace vllt {
 
 		inline auto size() noexcept -> size_t; ///< \returns the current numbers of rows in the table
 
-		inline auto get(table_index_t n) noexcept -> tuple_ref_opt_t;	///< \returns a tuple with refs to all components
-
 		template<size_t I, typename C = vtll::Nth_type<DATA, I>>
 		inline auto get_component_ptr(table_index_t n) noexcept -> C*;
+
+		template<T>
+		inline auto get(table_index_t n) noexcept requires !std::is_same_v<T,void> -> tuple_ref_opt_t;	///< \returns a tuple with refs to all components
+
+		//template<size_t I>
+		//inline auto get(table_index_t n) noexcept -> typename vtll::Nth_type<DATA, I>>;
+
 
 		//-------------------------------------------------------------------------------------------
 		//add data
@@ -221,7 +226,7 @@ namespace vllt {
 		inline auto pop_back() noexcept -> tuple_value_opt_t; ///< Remove the last row, call destructor on components
 		inline auto clear() noexcept -> size_t; ///< Set the number if rows to zero - effectively clear the table, call destructors
 		inline auto swap(table_index_t n1, table_index_t n2) noexcept -> void;	///< Swap contents of two rows
-		inline auto erase(table_index_t n1) -> void; ///< Remove a row, call destructor on components
+		inline auto erase(table_index_t n1) -> tuple_value_opt_t; ///< Remove a row, call destructor on components
 
 	protected:
 
@@ -265,18 +270,6 @@ namespace vllt {
 	};
 
 
-	/////
-	// \brief Get a tuple with pointers to all components of an entry.
-	// \param[in] n Index to the entry.
-	// \returns a tuple with pointers to all components of entry n.
-	///
-	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
-	inline auto VlltTable<DATA, N0, ROW, MINSLOTS>::get(table_index_t n) noexcept -> std::optional<tuple_ref_t> {
-		if (n >= size()) return std::nullopt;
-		return { [&] <size_t... Is>(std::index_sequence<Is...>) { return std::tie(* (this->template get_component_ptr<Is>(table_index_t{n}))...); }(std::make_index_sequence<vtll::size<DATA>::value>{}) };
-	};
-
-
 	/// <summary>
 	/// Return a pointer to a component.
 	/// </summary>
@@ -293,6 +286,22 @@ namespace vllt {
 		if constexpr (ROW) { return &std::get<I>((*block_ptr)[n & BIT_MASK]); }
 		else { return &std::get<I>(*block_ptr)[n & BIT_MASK]; }
 	}
+
+
+	/////
+	// \brief Get a tuple with pointers to all components of an entry.
+	// \param[in] n Index to the entry.
+	// \returns a tuple with pointers to all components of entry n.
+	///
+	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
+	template<T>
+	inline auto VlltTable<DATA, N0, ROW, MINSLOTS>::get(table_index_t n) noexcept requires !std::is_same_v<T,void> -> tuple_ref_opt_t {
+		if (n >= size()) return std::nullopt;
+		return { [&] <size_t... Is>(std::index_sequence<Is...>) { return std::tie(* (this->template get_component_ptr<Is>(table_index_t{n}))...); }(std::make_index_sequence<vtll::size<DATA>::value>{}) };
+	};
+
+
+
 
 	/// <summary>
 	/// Insert a new row at the end of the table. Make sure that there are enough blocks to store the new data.
@@ -538,7 +547,7 @@ namespace vllt {
 
 
 	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS>
-	inline auto VlltTable<DATA, N0, ROW, MINSLOTS>::erase(table_index_t n1) -> void {
+	inline auto VlltTable<DATA, N0, ROW, MINSLOTS>::erase(table_index_t n1) -> tuple_value_opt_t {
 		auto n2 = size() - 1;
 		if (n1 == n2) return pop_back();
 		swap(n1, table_index_t{ n2 });
