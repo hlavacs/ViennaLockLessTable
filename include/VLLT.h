@@ -227,9 +227,10 @@ namespace vllt {
 		requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
 	inline auto VlltStaticTable<DATA,N0,ROW,MINSLOTS,FAIR>::push_back(Cs&&... data) -> table_index_t {
 
-		//if( m_starving.load()==-1 ) m_starving.wait(-1); //wait until pushes are done and pulls have a chance to catch up
-		//if( stack_diff(m_size_cnt.load()) < -4 ) m_starving.store(1); //if pops are starving the pushes, then prevent pulls 
-
+		if constexpr (FAIR) {
+			if( m_starving.load()==-1 ) m_starving.wait(-1); //wait until pushes are done and pulls have a chance to catch up
+			if( stack_diff(m_size_cnt.load()) < -4 ) m_starving.store(1); //if pops are starving the pushes, then prevent pulls 
+		}
 		//increase size.m_diff to announce your demand for a new slot -> slot is now reserved for you
 		slot_size_t size = m_size_cnt.load();	///< Make sure that no other thread is popping currently
 		while (table_diff(size) < 0 || !m_size_cnt.compare_exchange_weak(size, slot_size_t{ table_size(size), table_diff(size) + 1, NUMBITS1 } )) {
@@ -253,14 +254,16 @@ namespace vllt {
 		};
 		f.template operator() < 0 > (f, std::forward<Cs>(data)...);
 
-		//if(f.has_value()) f.value()( table_index_t{ table_size(size) + table_diff(size) } ); ///< Call callback function
+		if(f.has_value()) f.value()( table_index_t{ table_size(size) + table_diff(size) } ); ///< Call callback function
 
 		slot_size_t new_size = slot_size_t{ table_size(size), table_diff(size) + 1, NUMBITS1 };	///< Increase size to validate the new row
 		while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ table_size(new_size) + 1, table_diff(new_size) - 1, NUMBITS1 } ));
 		
-		if(table_diff(new_size) - 1 == 0) { 
-			//m_starving.store(0); //allow pushes again
-			//m_starving.notify_all(); //notify all waiting threads
+		if constexpr (FAIR) {
+			if(table_diff(new_size) - 1 == 0) { 
+				m_starving.store(0); //allow pushes again
+				m_starving.notify_all(); //notify all waiting threads
+			}
 		}
 		
 		return table_index_t{ table_size(size) + table_diff(size) };	///< Return index of new entry
@@ -361,8 +364,10 @@ namespace vllt {
 	inline auto VlltStaticTable<DATA, N0, ROW, MINSLOTS, FAIR>::pop_back() noexcept -> tuple_value_opt_t {
 	vtll::to_tuple<vtll::remove_atomic<DATA>> ret{};
 
-		//if( m_starving.load()==1 ) m_starving.wait(1); //wait until pulls are done and pushes have a chance to catch up
-		//if( table_diff(m_size_cnt.load()) > 4 ) m_starving.store(-1); //if pushes are starving the pulls, then prevent pushes
+		if constexpr (FAIR) {
+			if( m_starving.load()==1 ) m_starving.wait(1); //wait until pulls are done and pushes have a chance to catch up
+			if( table_diff(m_size_cnt.load()) > 4 ) m_starving.store(-1); //if pushes are starving the pulls, then prevent pushes
+		}
 
 		slot_size_t size = m_size_cnt.load();
 		if (table_size(size) + table_diff(size) == 0) return std::nullopt;	///< Is there a row to pop off?
@@ -392,10 +397,12 @@ namespace vllt {
 		slot_size_t new_size = slot_size_t{ table_size(size), table_diff(size) - 1, NUMBITS1 };	///< Commit the popping of the row
 		while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ table_size(new_size) - 1, table_diff(new_size) + 1, NUMBITS1 }));
 
-		if(table_diff(new_size) + 1 == 0) { 
-			//m_starving.store(0); //allow pushes again
-			//m_starving.notify_all(); //notify all waiting threads
-		}
+		if constexpr (FAIR) {
+			if(table_diff(new_size) + 1 == 0) { 
+				m_starving.store(0); //allow pushes again
+				m_starving.notify_all(); //notify all waiting threads
+			}
+		}	
 		
 		return ret; //RVO?
 	}
