@@ -17,7 +17,12 @@ auto wait_for(double us) {
 
 
 void functional_test() {
+	using types = vtll::tl<double, float, int, char, std::string>;
+	vllt::VlltStaticTable<types> table;
 
+	table.push_back(std::nullopt, 1.0, 2.0f, 3, 'a', std::string("Hello"));
+
+	auto view = table.view<vtll::tl<double,float>, vtll::tl<int, char, std::string>>();
 
 }
 
