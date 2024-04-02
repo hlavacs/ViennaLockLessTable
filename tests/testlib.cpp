@@ -18,11 +18,27 @@ auto wait_for(double us) {
 
 void functional_test() {
 	using types = vtll::tl<double, float, int, char, std::string>;
-	vllt::VlltStaticTable<types> table;
+	vllt::VlltStaticTable<types, vllt::VLLT_SYNC_EXTERNAL> table;
 
-	table.push_back(std::nullopt, 1.0, 2.0f, 3, 'a', std::string("Hello"));
+	for( int i = 0; i < 100000; i++ ) {
+		table.push_back(std::nullopt, (double)i, (float)i, i, 'a', std::string("Hello"));
+	}
 
-	auto view = table.view<vtll::tl<double,float>, vtll::tl<int, char, std::string>>();
+	{
+		auto view = table.view<vtll::tl<double,float>, vtll::tl<int, char, std::string>>();
+
+		for( int i = 0; i < table.size(); i++ ) {	
+			auto data = view.get( vllt::table_index_t{i} ).value();
+			assert( std::get<0>(data) == (double)i && std::get<1>(data) == (float)i );
+			assert( std::get<2>(data) == i && std::get<3>(data) == 'a' && std::get<4>(data) == "Hello" );
+		}
+	}
+
+	{
+		auto view2 = table.view< vtll::tl<>, vtll::tl<double,float, int, char, std::string>>();
+		auto last = view2.pop_back();
+		view2.clear();
+	}
 
 }
 

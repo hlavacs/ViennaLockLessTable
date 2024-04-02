@@ -42,6 +42,11 @@ namespace vllt {
 
 		void unlock() { m_flag.store(0, std::memory_order_release); } 
 
+		bool try_lock() { 
+			int flag = 0;
+			return m_flag.compare_exchange_strong(flag, -1);
+		}
+
 		void shared_lock() { 
 			int flag = m_flag.load(std::memory_order_relaxed);
 			for( int i=0; flag<0 || m_flag.compare_exchange_weak(flag, flag+1); ++i ) { 
@@ -51,9 +56,17 @@ namespace vllt {
 
 		void shared_unlock() {
 			--m_flag;
-		} 
+		}
 
-	private: 
+		bool try_shared_lock() { 
+			int flag = m_flag.load(std::memory_order_relaxed);
+			for(int i=0; flag >= 0 && !m_flag.compare_exchange_strong(flag, flag+1); ++i) {
+				if (i == 8) { std::this_thread::sleep_for(std::chrono::nanoseconds(1)); i = 0; }
+			}
+			return flag >= 0;
+		}
+
+	private:
 		std::atomic<int> m_flag{0};
 	};
 
@@ -65,25 +78,31 @@ namespace vllt {
 
 	//---------------------------------------------------------------------------------------------------
 
+	enum sync_t {
+		VLLT_SYNC_EXTERNAL = 0,
+		VLLT_SYNC_INTERNAL = 1,
+		VLLT_SYNC_DEBUG = 2
+	};
 
-	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR>
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR>
 	concept VlltStaticTableConcept = vtll::unique<DATA>::value;
 
-	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR>
-		requires VlltStaticTableConcept<DATA,N0, ROW, MINSLOTS, FAIR>
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR>
+		requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
 	class VlltStaticTable;
 
-	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
 	concept VlltStaticTableViewConcept = (
-		VlltStaticTableConcept<DATA,N0, ROW, MINSLOTS, FAIR> 
+		VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR> 
 		&& (vtll::size< vtll::intersection< vtll::tl<READ, WRITE>> >::value == 0) 
 		&& (vtll::has_all_types<DATA, READ>::value) 
 		&& (vtll::has_all_types<DATA, WRITE>::value)
 	);
 
-	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
 		//requires VlltStaticTableViewConcept<DATA, N0, ROW, MINSLOTS, FAIR, READ, WRITE>
 	class VlltStaticTableView;
+
 
 
 	/// <summary>
@@ -95,13 +114,13 @@ namespace vllt {
 	/// <typeparam name="ROW">If true, then data is stored rowwise, else columnwise.</typeparam>
 	/// <typeparam name="MINSLOTS">Miniumum number of available slots in the block map.</typeparam>
 	/// <typeparam name="FAIR">Balance adding and popping to prevent starving.</typeparam>
-	template<typename DATA, size_t N0 = 1 << 5, bool ROW = true, size_t MINSLOTS = 16, bool FAIR = false>
-		requires VlltStaticTableConcept<DATA,N0, ROW, MINSLOTS, FAIR>
+	template<typename DATA, sync_t SYNC = VLLT_SYNC_EXTERNAL, size_t N0 = 1 << 5, bool ROW = true, size_t MINSLOTS = 16, bool FAIR = false>
+		requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
 	class VlltStaticTable {
 
 		public:
-		template<typename U1, size_t U2, bool U3, size_t U4, bool U5, typename U6, typename U7>
-			//requires VlltStaticTableViewConcept<U1, U2, U3, U4, U5, U6, U7>
+		template<typename U1, sync_t U2, size_t U3, bool U4, size_t U5, bool U6, typename U7, typename U8>
+			//requires VlltStaticTableViewConcept<U1, U2, U3, U4, U5, U6, U7, U8>
 		friend class VlltStaticTableView;
 
 
@@ -117,11 +136,8 @@ namespace vllt {
 		static const size_t BIT_MASK = N - 1;	///< Bit mask to mask off lower bits to get index inside block
 
 		using tuple_value_t = vtll::to_tuple<DATA>;	///< Tuple holding the entries as value
-		using tuple_value_opt_t = std::optional< vtll::to_tuple<DATA> >;	///< Tuple holding the entries as value
-		using tuple_ref_t = vtll::to_ref_tuple<DATA>; ///< Tuple holding refs to the entries
-		using tuple_ref_opt_t = std::optional< tuple_ref_t >;
+		using tuple_ref_t = vtll::to_ref_tuple<DATA>; ///< Tuple holding refs to the entries	
 		using tuple_const_ref_t = vtll::to_const_ref_tuple<DATA>; ///< Tuple holding refs to the entries
-		using tuple_const_ref_opt_t = std::optional< tuple_const_ref_t >;
 
 		using array_tuple_t1 = std::array<tuple_value_t, N>;///< ROW: an array of tuples
 		using array_tuple_t2 = vtll::to_tuple<vtll::transform_size_t<DATA, std::array, N>>;	///< COLUMN: a tuple of arrays
@@ -141,8 +157,8 @@ namespace vllt {
 		inline auto size() noexcept -> size_t; ///< \returns the current numbers of rows in the table
 
 		template<typename READ, typename WRITE>
-		inline auto view() noexcept -> VlltStaticTableView<DATA, N0, ROW, MINSLOTS, FAIR, READ, WRITE> { 
-			return VlltStaticTableView<DATA, N0, ROW, MINSLOTS, FAIR, READ, WRITE>(this); 
+		inline auto view() noexcept -> VlltStaticTableView<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, READ, WRITE> { 
+			return VlltStaticTableView<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, READ, WRITE>(this); 
 		};
 
 		template<typename... Cs>
@@ -161,15 +177,15 @@ namespace vllt {
 		inline auto get_ref_tuple(table_index_t n) noexcept -> vtll::to_ref_tuple<Ts>;	///< \returns a tuple with refs to all components
 
 		template<typename Ts>
-		inline auto get_const_ref_tuple(table_index_t n) noexcept -> tuple_const_ref_opt_t { return get_ref_tuple<Ts>(n); };	///< \returns a tuple with refs to all components
+		inline auto get_const_ref_tuple(table_index_t n) noexcept -> vtll::to_const_ref_tuple<Ts> { return get_ref_tuple<Ts>(n); };	///< \returns a tuple with refs to all components
 
 		//-------------------------------------------------------------------------------------------
 		//erase data
 
-		inline auto pop_back() noexcept -> tuple_value_opt_t; ///< Remove the last row, call destructor on components
+		inline auto pop_back() noexcept -> tuple_value_t; ///< Remove the last row, call destructor on components
 		inline auto clear() noexcept -> size_t; ///< Set the number if rows to zero - effectively clear the table, call destructors
 		inline auto swap(table_index_t n1, table_index_t n2) noexcept -> void;	///< Swap contents of two rows
-		inline auto erase(table_index_t n1) -> tuple_value_opt_t; ///< Remove a row, call destructor on components
+		inline auto erase(table_index_t n1) -> tuple_value_t; ///< Remove a row, call destructor on components
 
 		//-------------------------------------------------------------------------------------------
 		//manage data
@@ -197,9 +213,9 @@ namespace vllt {
 	// \brief Return number of rows when growing including new rows not yet established.
 	// \returns number of rows when growing including new rows not yet established.
 	///
-	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA,N0, ROW, MINSLOTS, FAIR>
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
 
-	inline auto VlltStaticTable<DATA, N0, ROW, MINSLOTS, FAIR>::max_size() noexcept -> size_t {
+	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::max_size() noexcept -> size_t {
 		auto size = m_size_cnt.load();
 		return std::max(static_cast<decltype(table_size(size))>(table_size(size) + table_diff(size)), table_size(size));
 	};
@@ -208,8 +224,8 @@ namespace vllt {
 	// \brief Return number of valid rows.
 	// \returns number of valid rows.
 	///
-	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA,N0, ROW, MINSLOTS, FAIR>
-	inline auto VlltStaticTable<DATA, N0, ROW, MINSLOTS, FAIR>::size() noexcept -> size_t {
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
+	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::size() noexcept -> size_t {
 		auto size = m_size_cnt.load();
 		return std::min(static_cast<decltype(table_size(size))>(table_size(size) + table_diff(size)), table_size(size));
 	};
@@ -223,9 +239,9 @@ namespace vllt {
 	/// <param name="n">Slot number in the table.</param>
 	/// <param name="map_ptr">Pointer to the table block holding the row.</param>
 	/// <returns>Pointer to the component.</returns>
-	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA,N0, ROW, MINSLOTS, FAIR>
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
 	template<size_t I, typename C>
-	inline auto VlltStaticTable<DATA,N0,ROW,MINSLOTS,FAIR>::get_component_ptr(table_index_t n) noexcept -> C* { ///< \returns a pointer to a component
+	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::get_component_ptr(table_index_t n) noexcept -> C* { ///< \returns a pointer to a component
 		auto idx = block_idx(n);
 		auto block_ptr = m_block_map.load()->m_blocks[idx].load(); ///< Access the block holding the slot
 		if constexpr (ROW) { return &std::get<I>((*block_ptr)[n & BIT_MASK]); }
@@ -238,10 +254,9 @@ namespace vllt {
 	// \param[in] n Index to the entry.
 	// \returns a tuple with pointers to all components of entry n.
 	///
-	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA,N0, ROW, MINSLOTS, FAIR>
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
 	template<typename Ts>
-	inline auto VlltStaticTable<DATA, N0, ROW, MINSLOTS, FAIR>::get_ref_tuple(table_index_t n) noexcept -> vtll::to_ref_tuple<Ts> {
-		if (n >= size()) return std::nullopt;
+	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::get_ref_tuple(table_index_t n) noexcept -> vtll::to_ref_tuple<Ts> {
 		return { [&] <size_t... Is>(std::index_sequence<Is...>) { 
 			return std::tie(*get_component_ptr< vtll::index_of<DATA, vtll::Nth_type<Ts,Is>>::value >(table_index_t{n})...); 
 		} (std::make_index_sequence<vtll::size<Ts>::value>{}) };
@@ -256,10 +271,10 @@ namespace vllt {
 	/// <param name="first_seg">Index of first block that currently holds information.</param>
 	/// <param name="last_seg">Index of the last block that currently holds informaton.</param>
 	/// <param name="data">The data for the new row.</param>
-	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA,N0, ROW, MINSLOTS, FAIR>
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
 	template<typename... Cs>
 		requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
-	inline auto VlltStaticTable<DATA,N0,ROW,MINSLOTS,FAIR>::push_back(push_callback_t callback, Cs&&... data) -> table_index_t {
+	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::push_back(push_callback_t callback, Cs&&... data) -> table_index_t {
 
 		if constexpr (FAIR) {
 			if( m_starving.load()==-1 ) m_starving.wait(-1); //wait until pushes are done and pulls have a chance to catch up
@@ -312,8 +327,8 @@ namespace vllt {
 	/// </summary>
 	/// <param name="slot">Slot number in the table.</param>
 	/// <returns>Pointer to the block map.</returns>
-	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA,N0, ROW, MINSLOTS, FAIR>
-	inline auto VlltStaticTable<DATA,N0,ROW,MINSLOTS,FAIR>::resize(table_index_t slot) -> std::shared_ptr<block_map_t> {
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
+	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::resize(table_index_t slot) -> std::shared_ptr<block_map_t> {
 
 		//Get a pointer to the block map. If there is none, then allocate a new one.
 		auto map_ptr{ m_block_map.load() };
@@ -386,9 +401,8 @@ namespace vllt {
 	}
 
 	/// <summary>
-	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA,N0, ROW, MINSLOTS, FAIR>
-	inline auto VlltStaticTable<DATA,N0,ROW,MINSLOTS,FAIR>::shrink() -> void {
-		
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
+	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::shrink() -> void {
 		
 	}
 
@@ -399,8 +413,8 @@ namespace vllt {
 	// \param[in] del If true, then call desctructor on the removed slot.
 	// \returns true if a row was popped.
 	///
-	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA,N0, ROW, MINSLOTS, FAIR>
-	inline auto VlltStaticTable<DATA, N0, ROW, MINSLOTS, FAIR>::pop_back() noexcept -> tuple_value_opt_t {
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
+	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::pop_back() noexcept -> tuple_value_t {
 	vtll::to_tuple<vtll::remove_atomic<DATA>> ret{};
 
 		if constexpr (FAIR) {
@@ -409,12 +423,10 @@ namespace vllt {
 		}
 
 		slot_size_t size = m_size_cnt.load();
-		if (table_size(size) + table_diff(size) == 0) return std::nullopt;	///< Is there a row to pop off?
 
 		/// Make sure that no other thread is currently pushing a new row
 		while (table_diff(size) > 0 || !m_size_cnt.compare_exchange_weak(size, slot_size_t{ table_size(size), table_diff(size) - 1, NUMBITS1 })) {
 			if (table_diff(size) > 0) { size = m_size_cnt.load(); }
-			if (table_size(size) + table_diff(size) == 0) return std::nullopt;	///< Is there a row to pop off?
 		};
 
 		auto map_ptr{ m_block_map.load() };						///< Access the block map
@@ -451,10 +463,10 @@ namespace vllt {
 	// \brief Pop all rows and call the destructors.
 	// \returns number of popped rows.
 	///
-	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA,N0, ROW, MINSLOTS, FAIR>
-	inline auto VlltStaticTable<DATA, N0, ROW, MINSLOTS, FAIR>::clear() noexcept -> size_t {
-		size_t num = 0;
-		while (pop_back().has_value()) { ++num; }
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
+	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::clear() noexcept -> size_t {
+		size_t num = size();
+		for( size_t i = 0; i < size(); ++i ) { pop_back(); }
 		return num;
 	}
 
@@ -465,8 +477,8 @@ namespace vllt {
 	// \param[in] n2 Index of second row.
 	// \returns true if the operation was successful.
 	///
-	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA,N0, ROW, MINSLOTS, FAIR>
-	inline auto VlltStaticTable<DATA, N0, ROW, MINSLOTS, FAIR>::swap(table_index_t idst, table_index_t isrc) noexcept -> void {
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
+	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::swap(table_index_t idst, table_index_t isrc) noexcept -> void {
 		assert(idst < size() && isrc < size());
 		auto src = get_ref_tuple<DATA>(isrc);
 		if (!src.has_value()) return;
@@ -493,8 +505,8 @@ namespace vllt {
 	}
 
 
-	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA,N0, ROW, MINSLOTS, FAIR>
-	inline auto VlltStaticTable<DATA, N0, ROW, MINSLOTS, FAIR>::erase(table_index_t n1) -> tuple_value_opt_t {
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
+	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::erase(table_index_t n1) -> tuple_value_t {
 		auto n2 = size() - 1;
 		if (n1 == n2) return pop_back();
 		swap(n1, table_index_t{ n2 });
@@ -506,34 +518,41 @@ namespace vllt {
 
 
 	/// <summary>
-	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
-		//requires VlltStaticTableViewConcept<DATA, N0, ROW, MINSLOTS, FAIR, READ, WRITE>
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
+		//requires VlltStaticTableViewConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, READ, WRITE>
 	class VlltStaticTableView {
 
 		static const bool OWNER = (vtll::has_all_types<DATA, WRITE>::value && vtll::has_all_types<WRITE, DATA>::value);
 
-	public:
-		using tuple_value_t = vtll::to_tuple<DATA>;	///< Tuple holding the entries as value
-		using tuple_value_opt_t = std::optional< vtll::to_tuple<DATA> >;	///< Tuple holding the entries as value
-		using tuple_ref_t = vtll::to_ref_tuple<WRITE>; ///< Tuple holding refs to the entries
-		using tuple_ref_opt_t = std::optional< tuple_ref_t >;
-		using tuple_const_ref_t = vtll::to_const_ref_tuple<READ>; ///< Tuple holding refs to the entries
-		using tuple_const_ref_opt_t = std::optional< tuple_const_ref_t >;
+		VlltStaticTableView(VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>* table ) : m_table{ table } {	
+			if constexpr (SYNC == VLLT_SYNC_EXTERNAL) return;
 
-		friend class VlltStaticTable<DATA, N0, ROW, MINSLOTS, FAIR>;
-
-	private:
-		VlltStaticTableView(VlltStaticTable<DATA, N0, ROW, MINSLOTS, FAIR>* table, table_index_t n = table_index_t{0}) : m_table{ table }, m_n{ n } {			
 			vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 				[&](auto i) {
-					if constexpr ( vtll::has_type<READ,vtll::Nth_type<DATA,i>>::value ) { m_table->m_access_mutex[i].shared_lock(); }
-					else if constexpr ( vtll::has_type<WRITE,vtll::Nth_type<DATA,i>>::value) { m_table->m_access_mutex[i].lock(); }
+					if constexpr ( vtll::size<READ>::value >0 && vtll::has_type<READ,vtll::Nth_type<DATA,i>>::value ) { 
+						if constexpr (SYNC == VLLT_SYNC_DEBUG) assert(m_table->m_access_mutex[i].try_shared_lock());
+						else m_table->m_access_mutex[i].shared_lock(); 
+					}
+					else if constexpr ( vtll::size<WRITE>::value >0 &&vtll::has_type<WRITE,vtll::Nth_type<DATA,i>>::value) { 
+						if constexpr (SYNC == VLLT_SYNC_DEBUG) assert(m_table->m_access_mutex[i].try_lock());
+						else m_table->m_access_mutex[i].lock(); 
+					}
 				}
 			);
-		};
+		};	
+		
+		using tuple_value_t = vtll::to_tuple<DATA>;	///< Tuple holding the entries as value
+		using tuple_ref_t = vtll::to_ref_tuple<WRITE>; ///< Tuple holding refs to the entries
+		using tuple_const_ref_t = vtll::to_const_ref_tuple<READ>; ///< Tuple holding refs to the entries
+		
+		using tuple_return_t = vtll::to_tuple< vtll::cat< vtll::to_const_ref<READ>, vtll::to_ref<WRITE> > >;
+
+		friend class VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>;
 
 	public:
 		~VlltStaticTableView() {
+			if constexpr (SYNC == VLLT_SYNC_EXTERNAL) return;
+
 			vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 				[&](auto i) {
 					if constexpr ( vtll::has_type<READ,vtll::Nth_type<DATA,i>>::value ) { m_table->m_access_mutex[i].shared_unlock(); }
@@ -546,29 +565,28 @@ namespace vllt {
 		VlltStaticTableView& operator=(VlltStaticTableView& other) = delete;
 		VlltStaticTableView(VlltStaticTableView&& other) = delete;
 		VlltStaticTableView& operator=(VlltStaticTableView&& other) = delete;
-
-		inline auto operator++() noexcept -> VlltStaticTableView& { ++m_n; return *this; };
-		inline auto operator--() noexcept -> VlltStaticTableView& { --m_n; return *this; };
-		inline auto operator==(const VlltStaticTableView& other) noexcept -> bool { return m_table == other.m_table && m_N == other.m_n; };
-		inline auto operator!=(const VlltStaticTableView& other) noexcept -> bool { return m_table == other.m_table && m_n != other.m_n; };
 	
-		inline decltype(auto) operator*() {
-			return std::tuple_cat( m_table->template get_const_ref_tuple<READ>(m_n), m_table->template get_ref_tuple<WRITE>(m_n) ); 
-		};
-		inline decltype(auto) operator->() {
-			return std::tuple_cat( m_table->template get_const_ref_tuple<READ>(m_n), m_table->template get_ref_tuple<WRITE>(m_n) ); 
+		inline auto get(table_index_t n) -> std::optional< tuple_return_t > {
+			if(n >= m_table->size()) return std::nullopt;
+			return std::tuple_cat( m_table->template get_const_ref_tuple<READ>(n), m_table->template get_ref_tuple<WRITE>(n) ); 
 		};
 
-		inline auto pop_back() noexcept -> tuple_value_opt_t requires OWNER { return m_table->pop_back(); }; 
+		inline auto pop_back() noexcept -> std::optional< tuple_value_t > requires OWNER {
+			if(m_table->size()==0) return std::nullopt;
+			return { m_table->pop_back() }; 
+		}; 
+
 		inline auto clear() noexcept -> size_t requires OWNER { return m_table->clear(); };
 		inline auto swap(table_index_t other) noexcept -> void requires OWNER { m_table->swap(m_n, other); };	
-		inline auto erase() -> tuple_value_opt_t requires OWNER { return m_table->erase(m_n); }
+		
+		inline auto erase(table_index_t n) -> std::optional< tuple_value_t > requires OWNER {
+			if(n >= m_table->size()) return std::nullopt;
+			return { m_table->erase(n) }; 
+		}
 
 	private:
-		VlltStaticTable<DATA, N0, ROW, MINSLOTS, FAIR>* m_table;
-		table_index_t m_n;
+		VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>* m_table;
 	};
-
 
 
 
