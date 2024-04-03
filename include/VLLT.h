@@ -12,7 +12,6 @@
 #include <type_traits>
 #include <vector>
 #include <queue>
-#include <optional>
 #include <thread>
 #include <latch>
 #include <numeric>
@@ -20,6 +19,10 @@
 #include <cstdlib>
 #include <random>
 #include <functional>
+#include <cstddef>  // for std::ptrdiff_t
+#include <iterator> // for std::random_access_iterator_tag
+#include <compare>
+
 
 #include "VTLL.h"
 #include "VSTY.h"
@@ -100,8 +103,10 @@ namespace vllt {
 	);
 
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
-		//requires VlltStaticTableViewConcept<DATA, N0, ROW, MINSLOTS, FAIR, READ, WRITE>
 	class VlltStaticTableView;
+
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
+	class VtllStaticIterator;
 
 	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR>
 	class VlltStaticStack;
@@ -120,10 +125,12 @@ namespace vllt {
 		requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
 	class VlltStaticTable {
 
-		public:
+	public:
 		template<typename U1, sync_t U2, size_t U3, bool U4, size_t U5, bool U6, typename U7, typename U8>
-			//requires VlltStaticTableViewConcept<U1, U2, U3, U4, U5, U6, U7, U8>
 		friend class VlltStaticTableView;
+
+		template<typename U1, sync_t U2, size_t U3, bool U4, size_t U5, bool U6, typename U7, typename U8>
+		friend class VlltStaticIterator;
 
 
 	protected:
@@ -526,11 +533,10 @@ namespace vllt {
 
 
 	//---------------------------------------------------------------------------------------------------
-
+	//table view
 
 	/// <summary>
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
-		//requires VlltStaticTableViewConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, READ, WRITE>
 	class VlltStaticTableView {
 
 		static const bool OWNER = (vtll::has_all_types<DATA, WRITE>::value && vtll::has_all_types<WRITE, DATA>::value);
@@ -599,6 +605,81 @@ namespace vllt {
 
 	private:
 		VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>* m_table;
+	};
+
+	//---------------------------------------------------------------------------------------------------
+	//table view iterator
+
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
+	class VtllStaticIterator {
+	public:
+    	using difference_type = VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::table_diff_t;
+		using value_type = vtll::to_tuple< vtll::cat< READ, WRITE > >;
+   	 	using pointer = table_index_t;
+    	using reference = vtll::to_tuple< vtll::cat< vtll::to_const_ref<READ>, vtll::to_ref<WRITE> > >;
+
+    	using iterator_category = std::random_access_iterator_tag;
+
+    	VtllStaticIterator(VlltStaticTableView<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>* view , table_index_t n = table_index_t{}) 
+			: m_view{ view }. m_n{n} {};	
+
+    	reference operator*() const { return m_view->get(m_n); }
+    	pointer operator->() const { return m_view->get(m_n); }
+    	reference operator[](difference_type n) const { return *(m_ptr + n); }
+
+    	VtllStaticIterator& operator++() 		{ ++m_n; return *this; }
+    	VtllStaticIterator operator++(int) 		{ VtllStaticIterator temp = *this; ++m_n; return temp; }
+    	VtllStaticIterator& operator--() 		{ --m_n; return *this; }
+    	VtllStaticIterator operator--(int) 		{ DoubleIterator temp = *this; --m_n; return temp;}
+    	VtllStaticIterator& operator+=(difference_type n) { m_n += n; return *this;}
+    	VtllStaticIterator& operator-=(difference_type n) { m_n -= n; return *this; }
+
+    	auto operator<=>(const Foo& rhs) const = default;
+
+		friend auto operator<=>(const VtllStaticIterator& lhs, const VtllStaticIterator& rhs) {
+			return lhs.m_ptr <=> rhs.m_ptr;
+		}
+
+		/*
+    	friend bool operator==(const DoubleIterator& lhs, const DoubleIterator& rhs) {
+        	return lhs.m_ptr == rhs.m_ptr;
+    	}
+    	friend bool operator!=(const DoubleIterator& lhs, const DoubleIterator& rhs) {
+        	return !(lhs == rhs);
+    	}
+    	friend bool operator<(const DoubleIterator& lhs, const DoubleIterator& rhs) {
+        	return lhs.m_ptr < rhs.m_ptr;
+    	}
+    	friend bool operator>(const DoubleIterator& lhs, const DoubleIterator& rhs) {
+       		return rhs < lhs;
+    	}
+    	friend bool operator<=(const DoubleIterator& lhs, const DoubleIterator& rhs) {
+        	return !(rhs < lhs);
+    	}
+    	friend bool operator>=(const DoubleIterator& lhs, const DoubleIterator& rhs) {
+        	return !(lhs < rhs);
+    	}*/
+
+    	friend DoubleIterator operator+(const DoubleIterator& it, difference_type n) {
+        	DoubleIterator temp = it;
+       		temp += n;
+        	return temp;
+    	}
+    	friend DoubleIterator operator+(difference_type n, const DoubleIterator& it) {
+       		return it + n;
+    	}
+    	friend DoubleIterator operator-(const DoubleIterator& it, difference_type n) {
+        	DoubleIterator temp = it;
+        	temp -= n;
+        	return temp;
+    	}
+    	friend difference_type operator-(const DoubleIterator& lhs, const DoubleIterator& rhs) {
+        	return lhs.m_ptr - rhs.m_ptr;
+    	}
+
+	private:
+		table_index_t m_n;
+		VlltStaticTableView<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>* m_view;
 	};
 
 
