@@ -647,7 +647,7 @@ namespace vllt {
    	 	using pointer = table_index_t;
     	using reference = vtll::to_tuple< vtll::cat< vtll::to_const_ref<READ>, vtll::to_ref<WRITE> > >;
 
-    	using iterator_category = std::forward_iterator_tag;
+    	using iterator_category = std::random_access_iterator_tag ;
 
     	VtllStaticIterator(view_type& view , table_index_t n = table_index_t{}) : m_view{ view }, m_n{n} {};
 
@@ -657,7 +657,7 @@ namespace vllt {
 
     	reference operator*() const { return m_view.get(m_n).value(); }
     	pointer operator->() const { return m_view.get(m_n).value(); }
-    	//reference operator[](difference_type n) const { return *(m_ptr + n); }
+    	reference operator[](difference_type n) const { return m_view.get(m_n + n); }
 
     	VtllStaticIterator& operator++() 		{ ++m_n; return *this; }
     	VtllStaticIterator operator++(int) 		{ VtllStaticIterator temp = *this; ++m_n; return temp; }

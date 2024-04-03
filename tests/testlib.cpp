@@ -37,13 +37,13 @@ void functional_test() {
 	}
 
 	{
-		auto view = table.view< vllt::VlltWrite, double, float, int, char, std::string>();
+		auto view = table.view< double, vllt::VlltWrite, float, int, char, std::string>();
 		for( decltype(auto) el : view ) {
-			std::get<double&>(el) = 0.0;
+			auto d = std::get<const double&>(el);
 			std::get<float&>(el) = 0.0f;
-			std::get<2>(el) = 0;
-			std::get<3>(el) = 'b';
-			std::get<4>(el) = "0.0f";
+			std::get<int&>(el) = 0;
+			std::get<char&>(el) = 'b';
+			std::get<std::string&>(el) = "0.0f";
 		}
 
 		
