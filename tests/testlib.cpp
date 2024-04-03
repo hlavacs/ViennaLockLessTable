@@ -37,8 +37,8 @@ void functional_test() {
 	{
 		auto view = table.view< vllt::VlltWrite, double, float, int, char, std::string>();
 		for( decltype(auto) el : view ) {
-			std::get<0>(el) = 0.0;
-			std::get<1>(el) = 0.0f;
+			std::get<double&>(el) = 0.0;
+			std::get<float&>(el) = 0.0f;
 			std::get<2>(el) = 0;
 			std::get<3>(el) = 'b';
 			std::get<4>(el) = "0.0f";
