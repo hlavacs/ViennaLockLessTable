@@ -25,7 +25,7 @@ void functional_test() {
 	}
 
 	{
-		auto view = table.view<vtll::tl<double,float>, vtll::tl<int, char, std::string>>();
+		auto view = table.view<double, float, int, char, std::string>();
 
 		for( int i = 0; i < table.size(); i++ ) {	
 			auto data = view.get( vllt::table_index_t{i} ).value();
@@ -35,9 +35,22 @@ void functional_test() {
 	}
 
 	{
-		auto view2 = table.view< vtll::tl<>, vtll::tl<double,float, int, char, std::string>>();
-		auto last = view2.pop_back();
-		view2.clear();
+		auto view = table.view< vllt::VlltWrite, double, float, int, char, std::string>();
+		for( decltype(auto) el : view ) {
+			std::get<0>(el) = 0.0;
+			std::get<1>(el) = 0.0f;
+			std::get<2>(el) = 0;
+			std::get<3>(el) = 'b';
+			std::get<4>(el) = "0.0f";
+		}
+
+		
+	}
+
+	{
+		auto view = table.view< vllt::VlltWrite, double,float, int, char, std::string>();
+		auto last = view.pop_back();
+		view.clear();
 	}
 
 }

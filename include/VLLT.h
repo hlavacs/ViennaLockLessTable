@@ -77,6 +77,8 @@ namespace vllt {
 	//---------------------------------------------------------------------------------------------------
 
 	using table_index_t = vsty::strong_type_t<uint64_t, vsty::counter<>, std::integral_constant<uint64_t, std::numeric_limits<uint64_t>::max()>>;///< Strong integer type for indexing rows, 0 to number rows - 1
+	using table_diff_t  = vsty::strong_type_t<uint64_t, vsty::counter<>, std::integral_constant<uint64_t, std::numeric_limits<uint64_t>::max()>>;
+
 	using push_callback_t = std::optional<std::function<void(const table_index_t)>>; ///< Callback function that is called when a new row is pushed
 
 	//---------------------------------------------------------------------------------------------------
@@ -86,6 +88,9 @@ namespace vllt {
 		VLLT_SYNC_INTERNAL = 1,
 		VLLT_SYNC_DEBUG = 2
 	};
+
+	struct VlltRead {};
+	struct VlltWrite {};
 
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR>
 	concept VlltStaticTableConcept = vtll::unique<DATA>::value;
@@ -137,7 +142,6 @@ namespace vllt {
 		static_assert(std::is_default_constructible_v<DATA>, "Your components are not default constructible!");
 
 		const size_t NUMBITS1 = 44; ///< Number of bits for the index of the first item in the stack
-		using table_diff_t  = vsty::strong_type_t<uint64_t, vsty::counter<>, std::integral_constant<uint64_t, std::numeric_limits<uint64_t>::max()>>;
 		using block_idx_t = vsty::strong_type_t<size_t, vsty::counter<>>; ///< Strong integer type for indexing blocks, 0 to size map - 1
 
 		static const size_t N = vtll::smallest_pow2_leq_value< N0 >::value;	///< Force N to be power of 2
@@ -165,19 +169,17 @@ namespace vllt {
 
 		inline auto size() noexcept -> size_t; ///< \returns the current numbers of rows in the table
 
-		template<typename READ, typename WRITE>
-		inline auto view() noexcept { 
-			return VlltStaticTableView<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, READ, WRITE>(this); 
-		};
+		template<typename... Ts >
+		inline auto view() noexcept;
 
 		template<typename READ, typename WRITE>
-		inline auto stack() noexcept { 
-			return VlltStaticStack<DATA, N0, ROW, MINSLOTS, FAIR>(this); 
-		};
+		inline auto stack() noexcept { return VlltStaticStack<DATA, N0, ROW, MINSLOTS, FAIR>(this); };
 
 		template<typename... Cs>
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
-		inline auto push_back(push_callback_t, Cs&&... data) -> table_index_t;
+		inline auto push_back(push_callback_t, Cs&&... data) noexcept -> table_index_t;
+
+		friend bool operator==(const VlltStaticTable& lhs, const VlltStaticTable& rhs) noexcept { return &lhs == &rhs; }
 
 	protected:
 
@@ -245,6 +247,22 @@ namespace vllt {
 	};
 
 
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
+	template<typename... Ts >
+	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>:: view() noexcept {
+		using parameters = vtll::tl<Ts...>;
+		static const size_t write = vtll::index_of<parameters, VlltWrite>::value;
+		static const bool write_valid = (write != std::numeric_limits<size_t>::max());
+
+		using read_list1 = typename std::conditional< sizeof...(Ts) == 0 || (write_valid && write == 0), vtll::tl<>, vtll::sublist<parameters, 0, write> >::type;
+		using read_list = vtll::remove_types< read_list1, vtll::tl<VlltWrite> >; //cannot use write - 1 if write == 0!
+
+		using write_list = typename std::conditional< sizeof...(Ts) == 0 || !write_valid, vtll::tl<>, vtll::sublist<parameters, write + 1, sizeof...(Ts) - 1> >::type;
+
+		return VlltStaticTableView<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, read_list, write_list>(*this); 
+	}
+
+
 	/// <summary>
 	/// Return a pointer to a component.
 	/// </summary>
@@ -288,7 +306,7 @@ namespace vllt {
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
 	template<typename... Cs>
 		requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
-	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::push_back(push_callback_t callback, Cs&&... data) -> table_index_t {
+	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::push_back(push_callback_t callback, Cs&&... data) noexcept -> table_index_t {
 
 		if constexpr (FAIR) {
 			if( m_starving.load()==-1 ) m_starving.wait(-1); //wait until pushes are done and pulls have a chance to catch up
@@ -539,25 +557,7 @@ namespace vllt {
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
 	class VlltStaticTableView {
 
-		static const bool OWNER = (vtll::has_all_types<DATA, WRITE>::value && vtll::has_all_types<WRITE, DATA>::value);
-
-		VlltStaticTableView(VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>* table ) : m_table{ table } {	
-			if constexpr (SYNC == VLLT_SYNC_EXTERNAL) return;
-
-			vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
-				[&](auto i) {
-					if constexpr ( vtll::size<READ>::value >0 && vtll::has_type<READ,vtll::Nth_type<DATA,i>>::value ) { 
-						if constexpr (SYNC == VLLT_SYNC_DEBUG) assert(m_table->m_access_mutex[i].try_shared_lock());
-						else m_table->m_access_mutex[i].shared_lock(); 
-					}
-					else if constexpr ( vtll::size<WRITE>::value >0 &&vtll::has_type<WRITE,vtll::Nth_type<DATA,i>>::value) { 
-						if constexpr (SYNC == VLLT_SYNC_DEBUG) assert(m_table->m_access_mutex[i].try_lock());
-						else m_table->m_access_mutex[i].lock(); 
-					}
-				}
-			);
-		};	
-		
+		using table_type = VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>;
 		using tuple_value_t = vtll::to_tuple<DATA>;	///< Tuple holding the entries as value
 		using tuple_ref_t = vtll::to_ref_tuple<WRITE>; ///< Tuple holding refs to the entries
 		using tuple_const_ref_t = vtll::to_const_ref_tuple<READ>; ///< Tuple holding refs to the entries
@@ -566,14 +566,35 @@ namespace vllt {
 
 		friend class VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>;
 
+		
+		static const bool OWNER = (vtll::has_all_types<DATA, WRITE>::value && vtll::has_all_types<WRITE, DATA>::value);
+
+		VlltStaticTableView(table_type& table ) : m_table{ table } {	
+			if constexpr (SYNC == VLLT_SYNC_EXTERNAL) return;
+
+			vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
+				[&](auto i) {
+					if constexpr ( vtll::size<READ>::value >0 && vtll::has_type<READ,vtll::Nth_type<DATA,i>>::value ) { 
+						if constexpr (SYNC == VLLT_SYNC_DEBUG) assert(m_table.m_access_mutex[i].try_shared_lock());
+						else m_table.m_access_mutex[i].shared_lock(); 
+					}
+					else if constexpr ( vtll::size<WRITE>::value >0 &&vtll::has_type<WRITE,vtll::Nth_type<DATA,i>>::value) { 
+						if constexpr (SYNC == VLLT_SYNC_DEBUG) assert(m_table.m_access_mutex[i].try_lock());
+						else m_table.m_access_mutex[i].lock(); 
+					}
+				}
+			);
+		};	
+		
+
 	public:
 		~VlltStaticTableView() {
 			if constexpr (SYNC == VLLT_SYNC_EXTERNAL) return;
 
 			vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 				[&](auto i) {
-					if constexpr ( vtll::has_type<READ,vtll::Nth_type<DATA,i>>::value ) { m_table->m_access_mutex[i].shared_unlock(); }
-					else if constexpr ( vtll::has_type<WRITE,vtll::Nth_type<DATA,i>>::value) { m_table->m_access_mutex[i].unlock(); }
+					if constexpr ( vtll::has_type<READ,vtll::Nth_type<DATA,i>>::value ) { m_table.m_access_mutex[i].shared_unlock(); }
+					else if constexpr ( vtll::has_type<WRITE,vtll::Nth_type<DATA,i>>::value) { m_table.m_access_mutex[i].unlock(); }
 				}
 			);
 		};
@@ -583,28 +604,35 @@ namespace vllt {
 		VlltStaticTableView(VlltStaticTableView&& other) = delete;
 		VlltStaticTableView& operator=(VlltStaticTableView&& other) = delete;
 	
-		inline auto size() noexcept -> size_t {]return m_table->size(); }
+		inline auto size() noexcept -> size_t { return m_table.size(); }
 
 		template<typename... Cs>
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
 		inline auto push_back(push_callback_t callback, Cs&&... data) -> table_index_t requires OWNER { 
-			return m_table->push_back(callback, std::forward<Cs>(data)...); 
+			return m_table.push_back(callback, std::forward<Cs>(data)...); 
 		};
 
 		inline auto get(table_index_t n) -> std::optional< tuple_return_t > {
-			if(n >= m_table->size()) return std::nullopt;
-			return std::tuple_cat( m_table->template get_const_ref_tuple<READ>(n), m_table->template get_ref_tuple<WRITE>(n) ); 
+			if(n >= m_table.size()) return std::nullopt;
+			return std::tuple_cat( m_table.template get_const_ref_tuple<READ>(n), m_table.template get_ref_tuple<WRITE>(n) ); 
 		};
 
-		inline auto pop_back() noexcept -> std::optional< tuple_value_t > requires OWNER { return m_table->pop_back(); }; 
+		inline auto pop_back() noexcept -> std::optional< tuple_value_t > requires OWNER { return m_table.pop_back(); }; 
 
-		inline auto clear() noexcept -> size_t requires OWNER { return m_table->clear(); };
-		inline auto swap(table_index_t other) noexcept -> void requires OWNER { m_table->swap(m_n, other); };	
+		inline auto clear() noexcept -> size_t requires OWNER { return m_table.clear(); };
+		inline auto swap(table_index_t other) noexcept -> void requires OWNER { m_table.swap(m_n, other); };	
 		
-		inline auto erase(table_index_t n) -> std::optional< tuple_value_t > requires OWNER { return m_table->erase(n); }
+		inline auto erase(table_index_t n) -> std::optional< tuple_value_t > requires OWNER { return m_table.erase(n); }
+
+    	friend bool operator==(const VlltStaticTableView& lhs, const VlltStaticTableView& rhs) {
+        	return lhs.m_table == rhs.m_table;
+    	}
+
+		auto begin() { return VtllStaticIterator<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, READ, WRITE>(*this, table_index_t{0}); } 
+		auto end() { return VtllStaticIterator<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, READ, WRITE>(*this, table_index_t{size() - 1}); } 
 
 	private:
-		VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>* m_table;
+		table_type& m_table;
 	};
 
 	//---------------------------------------------------------------------------------------------------
@@ -613,54 +641,46 @@ namespace vllt {
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
 	class VtllStaticIterator {
 	public:
-    	using difference_type = VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::table_diff_t;
+		using view_type = VlltStaticTableView<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, READ, WRITE>;		
+    	using difference_type = table_diff_t;
 		using value_type = vtll::to_tuple< vtll::cat< READ, WRITE > >;
    	 	using pointer = table_index_t;
     	using reference = vtll::to_tuple< vtll::cat< vtll::to_const_ref<READ>, vtll::to_ref<WRITE> > >;
 
-    	using iterator_category = std::random_access_iterator_tag;
+    	using iterator_category = std::forward_iterator_tag;
 
-    	VtllStaticIterator(VlltStaticTableView<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>* view , table_index_t n = table_index_t{}) 
-			: m_view{ view }. m_n{n} {};	
+    	VtllStaticIterator(view_type& view , table_index_t n = table_index_t{}) : m_view{ view }, m_n{n} {};
 
-    	reference operator*() const { return m_view->get(m_n); }
-    	pointer operator->() const { return m_view->get(m_n); }
-    	reference operator[](difference_type n) const { return *(m_ptr + n); }
+    	VtllStaticIterator(VtllStaticIterator& view) : m_view{ &view }, m_n{view.m_n} {};
+
+    	VtllStaticIterator& operator=(VtllStaticIterator& rhs){ m_view = rhs.m_view; m_n = rhs.m_n; return *this; };
+
+    	reference operator*() const { return m_view.get(m_n).value(); }
+    	pointer operator->() const { return m_view.get(m_n).value(); }
+    	//reference operator[](difference_type n) const { return *(m_ptr + n); }
 
     	VtllStaticIterator& operator++() 		{ ++m_n; return *this; }
     	VtllStaticIterator operator++(int) 		{ VtllStaticIterator temp = *this; ++m_n; return temp; }
     	VtllStaticIterator& operator--() 		{ --m_n; return *this; }
-    	VtllStaticIterator operator--(int) 		{ DoubleIterator temp = *this; --m_n; return temp;}
+    	VtllStaticIterator operator--(int) 		{ VtllStaticIterator temp = *this; --m_n; return temp;}
     	VtllStaticIterator& operator+=(difference_type n) { m_n += n; return *this;}
     	VtllStaticIterator& operator-=(difference_type n) { m_n -= n; return *this; }
 
-    	auto operator<=>(const Foo& rhs) const = default;
-
-		friend auto operator<=>(const VtllStaticIterator& lhs, const VtllStaticIterator& rhs) {
-			return lhs.m_ptr <=> rhs.m_ptr;
+    	auto operator!=(const VtllStaticIterator& rhs) {
+			return m_view != rhs.m_view || m_n != rhs.m_n;
 		}
 
-		/*
-    	friend bool operator==(const DoubleIterator& lhs, const DoubleIterator& rhs) {
-        	return lhs.m_ptr == rhs.m_ptr;
-    	}
-    	friend bool operator!=(const DoubleIterator& lhs, const DoubleIterator& rhs) {
-        	return !(lhs == rhs);
-    	}
-    	friend bool operator<(const DoubleIterator& lhs, const DoubleIterator& rhs) {
-        	return lhs.m_ptr < rhs.m_ptr;
-    	}
-    	friend bool operator>(const DoubleIterator& lhs, const DoubleIterator& rhs) {
-       		return rhs < lhs;
-    	}
-    	friend bool operator<=(const DoubleIterator& lhs, const DoubleIterator& rhs) {
-        	return !(rhs < lhs);
-    	}
-    	friend bool operator>=(const DoubleIterator& lhs, const DoubleIterator& rhs) {
-        	return !(lhs < rhs);
-    	}*/
+    	std::partial_ordering operator<=>(const VtllStaticIterator& rhs) {
+			if(m_view == rhs.m_view) return m_n <=> rhs.m_n;
+			return std::partial_ordering::unordered;
+		}
 
-    	friend DoubleIterator operator+(const DoubleIterator& it, difference_type n) {
+		friend std::partial_ordering operator<=>(const VtllStaticIterator& lhs, const VtllStaticIterator& rhs) {
+			if(lhs.m_view == rhs.m_view) return lhs.m_n <=> rhs.m_n;
+			return std::partial_ordering::unordered;
+		}
+
+    	/*friend DoubleIterator operator+(const DoubleIterator& it, difference_type n) {
         	DoubleIterator temp = it;
        		temp += n;
         	return temp;
@@ -675,11 +695,11 @@ namespace vllt {
     	}
     	friend difference_type operator-(const DoubleIterator& lhs, const DoubleIterator& rhs) {
         	return lhs.m_ptr - rhs.m_ptr;
-    	}
+    	}*/
 
 	private:
 		table_index_t m_n;
-		VlltStaticTableView<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>* m_view;
+		view_type& m_view;
 	};
 
 
