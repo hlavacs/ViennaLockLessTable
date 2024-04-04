@@ -1,6 +1,3 @@
-
-
-
 #include "VLLT.h"
 
 using namespace std::chrono;
