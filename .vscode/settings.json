@@ -75,5 +75,6 @@
         "unordered_map": "cpp",
         "xhash": "cpp"
     },
-    "cmake.configureOnOpen": false
+    "cmake.configureOnOpen": false,
+    "C_Cpp.errorSquiggles": "disabled"
 }

@@ -89,7 +89,6 @@ namespace vllt {
 		VLLT_SYNC_DEBUG = 2
 	};
 
-	struct VlltRead {};
 	struct VlltWrite {};
 
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR>
@@ -137,6 +136,9 @@ namespace vllt {
 		template<typename U1, sync_t U2, size_t U3, bool U4, size_t U5, bool U6, typename U7, typename U8>
 		friend class VlltStaticIterator;
 
+		using tuple_value_t = vtll::to_tuple<DATA>;	///< Tuple holding the entries as value
+		using tuple_ref_t = vtll::to_ref_tuple<DATA>; ///< Tuple holding refs to the entries	
+		using tuple_const_ref_t = vtll::to_const_ref_tuple<DATA>; ///< Tuple holding refs to the entries
 
 	protected:
 		static_assert(std::is_default_constructible_v<DATA>, "Your components are not default constructible!");
@@ -148,9 +150,6 @@ namespace vllt {
 		static const size_t L = vtll::index_largest_bit< std::integral_constant<size_t, N> >::value - 1; ///< Index of largest bit in N
 		static const size_t BIT_MASK = N - 1;	///< Bit mask to mask off lower bits to get index inside block
 
-		using tuple_value_t = vtll::to_tuple<DATA>;	///< Tuple holding the entries as value
-		using tuple_ref_t = vtll::to_ref_tuple<DATA>; ///< Tuple holding refs to the entries	
-		using tuple_const_ref_t = vtll::to_const_ref_tuple<DATA>; ///< Tuple holding refs to the entries
 
 		using array_tuple_t1 = std::array<tuple_value_t, N>;///< ROW: an array of tuples
 		using array_tuple_t2 = vtll::to_tuple<vtll::transform_size_t<DATA, std::array, N>>;	///< COLUMN: a tuple of arrays
@@ -501,7 +500,7 @@ namespace vllt {
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::clear() noexcept -> size_t {
 		size_t num = size();
-		for( size_t i = 0; i < size(); ++i ) { pop_back(); }
+		while(pop_back().has_value()) {}
 		return num;
 	}
 
@@ -516,23 +515,20 @@ namespace vllt {
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::swap(table_index_t idst, table_index_t isrc) noexcept -> void {
 		assert(idst < size() && isrc < size());
 		auto src = get_ref_tuple<DATA>(isrc);
-		if (!src.has_value()) return;
 		auto dst = get_ref_tuple<DATA>(idst);
-		if (!dst.has_value()) return;
 		vtll::static_for<size_t, 0, vtll::size<DATA>::value >([&](auto i) {
 			using type = vtll::Nth_type<DATA, i>;
-			//std::cout << typeid(type).name() << "\n";
 			if constexpr (std::is_move_assignable_v<type> && std::is_move_constructible_v<type>) {
-				std::swap(std::get<i>(dst.value()), std::get<i>(src.value()));
+				std::swap(std::get<i>(dst), std::get<i>(src));
 			}
 			else if constexpr (std::is_copy_assignable_v<type> && std::is_copy_constructible_v<type>) {
-				auto& tmp{ std::get<i>(src.value()) };
-				std::get<i>(src.value()) = std::get<i>(dst.value());
+				auto& tmp{ std::get<i>(src) };
+				std::get<i>(src.value()) = std::get<i>(dst);
 				std::get<i>(dst.value()) = tmp;
 			}
 			else if constexpr (vtll::is_atomic<type>::value) {
-				type tmp{ std::get<i>(src.value()).load() };
-				std::get<i>(src.value()).store(std::get<i>(dst.value()).load());
+				type tmp{ std::get<i>(src).load() };
+				std::get<i>(src.value()).store(std::get<i>(dst).load());
 				std::get<i>(dst.value()).store(tmp.load());
 			}
 		});
@@ -557,8 +553,10 @@ namespace vllt {
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
 	class VlltStaticTableView {
 
+	public:
 		using table_type = VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>;
-		using tuple_value_t = vtll::to_tuple<DATA>;	///< Tuple holding the entries as value
+
+		using tuple_value_t = table_type::tuple_value_t;	///< Tuple holding the entries as value
 		using tuple_ref_t = vtll::to_ref_tuple<WRITE>; ///< Tuple holding refs to the entries
 		using tuple_const_ref_t = vtll::to_const_ref_tuple<READ>; ///< Tuple holding refs to the entries
 		
@@ -612,12 +610,11 @@ namespace vllt {
 			return m_table.push_back(callback, std::forward<Cs>(data)...); 
 		};
 
-		inline auto get(table_index_t n) -> std::optional< tuple_return_t > {
-			if(n >= m_table.size()) return std::nullopt;
+		inline auto get(table_index_t n) -> tuple_return_t {
 			return std::tuple_cat( m_table.template get_const_ref_tuple<READ>(n), m_table.template get_ref_tuple<WRITE>(n) ); 
 		};
 
-		inline auto pop_back() noexcept -> std::optional< tuple_value_t > requires OWNER { return m_table.pop_back(); }; 
+		inline auto pop_back() noexcept requires OWNER { return m_table.pop_back(); }; 
 
 		inline auto clear() noexcept -> size_t requires OWNER { return m_table.clear(); };
 		inline auto swap(table_index_t other) noexcept -> void requires OWNER { m_table.swap(m_n, other); };	
@@ -655,8 +652,8 @@ namespace vllt {
 
     	VtllStaticIterator& operator=(VtllStaticIterator& rhs){ m_view = rhs.m_view; m_n = rhs.m_n; return *this; };
 
-    	reference operator*() const { return m_view.get(m_n).value(); }
-    	pointer operator->() const { return m_view.get(m_n).value(); }
+    	reference operator*() const { return m_view.get(m_n); }
+    	pointer operator->() const { return m_view.get(m_n); }
     	reference operator[](difference_type n) const { return m_view.get(m_n + n); }
 
     	VtllStaticIterator& operator++() 		{ ++m_n; return *this; }

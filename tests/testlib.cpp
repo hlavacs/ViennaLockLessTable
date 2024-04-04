@@ -25,13 +25,13 @@ void functional_test() {
 	}
 
 	{
-		auto view  = table.view<double, float, int, char, std::string>();
-		auto view2 = table.view<double, float, int, char, std::string>();
-		auto view3 = table.view<double, float, int, char, std::string>();
+		auto view1  = table.view<double, float, int, char, std::string>();
+		auto view2  = table.view<double, float, int, char, std::string>();
+		auto view3  = table.view<double, float, int, char, std::string>();
 
 		for( int i = 0; i < table.size(); i++ ) {	
-			auto data = view.get( vllt::table_index_t{i} ).value();
-			assert( std::get<0>(data) == (double)i && std::get<1>(data) == (float)i );
+			auto data = view1.get( vllt::table_index_t{i} );
+			assert( std::get<0>(data) == (double)i && std::get<1>(data) == (float)i ); 
 			assert( std::get<2>(data) == i && std::get<3>(data) == 'a' && std::get<4>(data) == "Hello" );
 		}
 	}
@@ -51,8 +51,9 @@ void functional_test() {
 
 	{
 		auto view = table.view< vllt::VlltWrite, double,float, int, char, std::string>();
-		auto last = view.pop_back();
+		auto last = view.pop_back().value();
 		view.clear();
+		std::cout << "Size: " << view.size() << std::endl;
 	}
 
 }
