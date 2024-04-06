@@ -77,7 +77,8 @@ namespace vllt {
 	//---------------------------------------------------------------------------------------------------
 
 	using table_index_t = vsty::strong_type_t<uint64_t, vsty::counter<>, std::integral_constant<uint64_t, std::numeric_limits<uint64_t>::max()>>;///< Strong integer type for indexing rows, 0 to number rows - 1
-	using table_diff_t  = vsty::strong_type_t<uint64_t, vsty::counter<>, std::integral_constant<uint64_t, std::numeric_limits<uint64_t>::max()>>;
+	using table_diff_t  = vsty::strong_type_t<int64_t, vsty::counter<>, std::integral_constant<int64_t, std::numeric_limits<int64_t>::max()>>;
+	auto operator+(table_index_t lhs, table_diff_t rhs) { return table_index_t{ lhs.value() + rhs.value() }; }
 
 	using push_callback_t = std::optional<std::function<void(const table_index_t)>>; ///< Callback function that is called when a new row is pushed
 
@@ -654,7 +655,7 @@ namespace vllt {
 
     	reference operator*() const { return m_view.get(m_n); }
     	pointer operator->() const { return m_view.get(m_n); }
-    	reference operator[](difference_type n) const { return m_view.get(m_n + n); }
+    	reference operator[](difference_type n) const { return m_view.get( m_n + n ); }
 
     	VtllStaticIterator& operator++() 		{ ++m_n; return *this; }
     	VtllStaticIterator operator++(int) 		{ VtllStaticIterator temp = *this; ++m_n; return temp; }

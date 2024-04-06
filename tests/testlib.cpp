@@ -42,8 +42,15 @@ void functional_test() {
 			std::get<char&>(el) = 'b';
 			std::get<std::string&>(el) = "0.0f";
 		}
+	}
 
-		
+	{
+		auto view = table.view< vllt::VlltWrite, double, float, int, char, std::string>();
+		auto it = view.begin();
+		for( int64_t i=0; i< view.size(); ++i) {
+			std::get<double&>( it[ vllt::table_diff_t{i} ] ) = 0.0;
+		}
+
 	}
 
 	{
