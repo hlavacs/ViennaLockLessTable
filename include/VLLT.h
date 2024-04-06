@@ -710,7 +710,7 @@ namespace vllt {
 	public:
 		VlltStaticStack(VlltStaticTable<DATA, VLLT_SYNC_EXTERNAL, N0, ROW, MINSLOTS, FAIR>& table ) : m_table{ table } {};
 
-		inline auto size() noexcept -> size_t {]return m_table.size(); }
+		inline auto size() noexcept -> size_t { return m_table.size(); }
 
 		template<typename... Cs>
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
