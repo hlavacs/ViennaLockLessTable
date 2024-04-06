@@ -708,20 +708,20 @@ namespace vllt {
 		using tuple_value_t = vtll::to_tuple<DATA>;	///< Tuple holding the entries as value
 
 	public:
-		VlltStaticStack(VlltStaticTable<DATA, VLLT_SYNC_EXTERNAL, N0, ROW, MINSLOTS, FAIR>* table ) : m_table{ table } {};
+		VlltStaticStack(VlltStaticTable<DATA, VLLT_SYNC_EXTERNAL, N0, ROW, MINSLOTS, FAIR>& table ) : m_table{ table } {};
 
-		inline auto size() noexcept -> size_t {]return m_table->size(); }
+		inline auto size() noexcept -> size_t {]return m_table.size(); }
 
 		template<typename... Cs>
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
 		inline auto push_back(push_callback_t callback, Cs&&... data) -> table_index_t { 
-			return m_table->push_back(callback, std::forward<Cs>(data)...); 
+			return m_table.push_back(callback, std::forward<Cs>(data)...); 
 		};
 
-		inline auto pop_back() noexcept -> std::optional< tuple_value_t > { return m_table->pop_back(); }; 
+		inline auto pop_back() noexcept -> std::optional< tuple_value_t > { return m_table.pop_back(); }; 
 
 	private:
-		VlltStaticTable<DATA, VLLT_SYNC_EXTERNAL, N0, ROW, MINSLOTS, FAIR>* m_table;
+		VlltStaticTable<DATA, VLLT_SYNC_EXTERNAL, N0, ROW, MINSLOTS, FAIR>& m_table;
 	};
 
 
