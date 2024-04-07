@@ -113,7 +113,7 @@ namespace vllt {
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
 	class VtllStaticIterator;
 
-	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR>
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR>
 	class VlltStaticStack;
 
 
@@ -173,12 +173,16 @@ namespace vllt {
 		inline auto view() noexcept;
 
 		template<typename READ, typename WRITE>
-		inline auto stack() noexcept { return VlltStaticStack<DATA, N0, ROW, MINSLOTS, FAIR>(this); };
+		inline auto stack() noexcept { return VlltStaticStack<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>(this); };
 
 		template<typename... Cs>
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
 		inline auto push_back(push_callback_t, Cs&&... data) noexcept -> table_index_t;
 
+		template<typename... Cs>
+			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
+		inline auto push_back(Cs&&... data) noexcept -> table_index_t { return push_back(std::nullopt, std::forward<Cs>(data)...); }
+ 
 		friend bool operator==(const VlltStaticTable& lhs, const VlltStaticTable& rhs) noexcept { return &lhs == &rhs; }
 
 	protected:
@@ -223,6 +227,8 @@ namespace vllt {
 		table_diff_t  table_diff(slot_size_t size) { return table_diff_t{ size.get_bits_signed(NUMBITS1) }; }
 		alignas(64) std::atomic<slot_size_t> m_size_cnt{ slot_size_t{ table_index_t{ 0 }, table_diff_t{0}, NUMBITS1 } };	///< Next slot and size as atomic
 		alignas(64) std::atomic<uint64_t> m_starving{0}; ///< prevent one operation to starve the other: -1...pulls are starving 1...pushes are starving
+		alignas(64) std::atomic<size_t> m_num_views{0}; ///< number of views on the table
+		alignas(64) std::atomic<size_t> m_num_stacks{0}; ///< number of stacks on the table
 	};
 
 
@@ -321,9 +327,6 @@ namespace vllt {
 			}
 			//call wait function here
 		};
-
-		//make sure there is enough space in the block VECTOR - if not then change the old map to a larger map
-		//VlltTable<DATA, N0, ROW, MINSLOTS>::push_back(table_index_t{stack_size(size) + stack_diff(size)}, std::forward<Cs>(data)...); ///< Make sure there are enough MINSLOTS for blocks
 
 		auto n = (table_index_t{table_size(size) + table_diff(size)}); ///< Get the index of the new row
 		auto map_ptr = resize(n); //if need be, grow the map of blocks
@@ -569,11 +572,13 @@ namespace vllt {
 
 		friend class VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>;
 
-		
 		static const bool OWNER = (vtll::has_all_types<DATA, WRITE>::value && vtll::has_all_types<WRITE, DATA>::value);
 
 		VlltStaticTableView(table_type& table ) : m_table{ table } {	
 			if constexpr (SYNC == VLLT_SYNC_EXTERNAL) return;
+
+			m_table.m_num_views.fetch_add(1);
+			if constexpr (SYNC == VLLT_SYNC_DEBUG) { assert( m_table.m_num_stacks.load() == 0 ); }
 
 			vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 				[&](auto i) {
@@ -581,7 +586,7 @@ namespace vllt {
 						if constexpr (SYNC == VLLT_SYNC_DEBUG) assert(m_table.m_access_mutex[i].try_shared_lock());
 						else m_table.m_access_mutex[i].shared_lock(); 
 					}
-					else if constexpr ( vtll::size<WRITE>::value >0 &&vtll::has_type<WRITE,vtll::Nth_type<DATA,i>>::value) { 
+					else if constexpr ( vtll::size<WRITE>::value >0 && vtll::has_type<WRITE,vtll::Nth_type<DATA,i>>::value) { 
 						if constexpr (SYNC == VLLT_SYNC_DEBUG) assert(m_table.m_access_mutex[i].try_lock());
 						else m_table.m_access_mutex[i].lock(); 
 					}
@@ -593,6 +598,7 @@ namespace vllt {
 	public:
 		~VlltStaticTableView() {
 			if constexpr (SYNC == VLLT_SYNC_EXTERNAL) return;
+			m_table.m_num_views.fetch_sub(1);
 
 			vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 				[&](auto i) {
@@ -611,8 +617,8 @@ namespace vllt {
 
 		template<typename... Cs>
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
-		inline auto push_back(push_callback_t callback, Cs&&... data) -> table_index_t requires OWNER { 
-			return m_table.push_back(callback, std::forward<Cs>(data)...); 
+		inline auto push_back(Cs&&... data) -> table_index_t requires OWNER { 
+			return m_table.push_back(std::forward<Cs>(data)...); 
 		};
 
 		inline auto get(table_index_t n) -> tuple_return_t {
@@ -708,25 +714,35 @@ namespace vllt {
 	//---------------------------------------------------------------------------------------------------
 
 
-	template<typename DATA, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR>
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR>
 	class VlltStaticStack {
 		using tuple_value_t = vtll::to_tuple<DATA>;	///< Tuple holding the entries as value
+		using table_type_t = VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>;
 
 	public:
-		VlltStaticStack(VlltStaticTable<DATA, VLLT_SYNC_EXTERNAL, N0, ROW, MINSLOTS, FAIR>& table ) : m_table{ table } {};
+		VlltStaticStack(table_type_t& table ) : m_table{ table } {
+			if constexpr (SYNC == VLLT_SYNC_EXTERNAL) return;
+			m_table.m_num_stacks.fetch_add(1);
+			if constexpr (SYNC == VLLT_SYNC_DEBUG) { assert( m_table.m_num_views.load() == 0 ); }
+		};
+
+		~VlltStaticStack() : m_table{ table } {
+			if constexpr (SYNC == VLLT_SYNC_EXTERNAL) return;
+			m_table.m_num_stacks.fetch_sub(1);
+		};
 
 		inline auto size() noexcept -> size_t { return m_table.size(); }
 
 		template<typename... Cs>
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
-		inline auto push_back(push_callback_t callback, Cs&&... data) -> table_index_t { 
+		inline auto push_back(Cs&&... data) -> table_index_t { 
 			return m_table.push_back(callback, std::forward<Cs>(data)...); 
 		};
 
 		inline auto pop_back() noexcept -> std::optional< tuple_value_t > { return m_table.pop_back(); }; 
 
 	private:
-		VlltStaticTable<DATA, VLLT_SYNC_EXTERNAL, N0, ROW, MINSLOTS, FAIR>& m_table;
+		table_type_t& m_table;
 	};
 
 

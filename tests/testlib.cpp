@@ -18,7 +18,7 @@ void functional_test() {
 	vllt::VlltStaticTable<types, vllt::VLLT_SYNC_DEBUG> table;
 
 	for( int i = 0; i < 100000; i++ ) {
-		table.push_back(std::nullopt, (double)i, (float)i, i, 'a', std::string("Hello"));
+		table.push_back((double)i, (float)i, i, 'a', std::string("Hello"));
 	}
 
 	{
