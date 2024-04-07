@@ -55,7 +55,7 @@ void functional_test() {
 
 	{
 		auto view = table.view< vllt::VlltWrite, double,float, int, char, std::string>();
-		auto last = view.pop_back().value();
+		auto last = view.pop_back();
 		view.clear();
 		std::cout << "Size: " << view.size() << std::endl;
 	}

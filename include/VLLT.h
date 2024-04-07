@@ -198,10 +198,11 @@ namespace vllt {
 		//-------------------------------------------------------------------------------------------
 		//erase data
 
-		inline auto pop_back() noexcept -> std::optional< tuple_value_t >; ///< Remove the last row, call destructor on components
+		inline auto pop_back(table_index_t* idx = nullptr) noexcept -> tuple_value_t; ///< Remove the last row, call destructor on components
 		inline auto clear() noexcept -> size_t; ///< Set the number if rows to zero - effectively clear the table, call destructors
-		inline auto swap(table_index_t n1, table_index_t n2) noexcept -> void;	///< Swap contents of two rows
-		inline auto erase(table_index_t n1) -> std::optional< tuple_value_t >; ///< Remove a row, call destructor on components
+		inline auto swap(table_index_t isrc, table_index_t idst) noexcept -> void;	///< Swap contents of two rows
+		inline auto swap(auto src, auto dst) noexcept -> void;	///< Swap contents of two rows
+		inline auto erase(table_index_t n1) -> tuple_value_t; ///< Remove a row, call destructor on components
 
 		//-------------------------------------------------------------------------------------------
 		//manage data
@@ -446,8 +447,10 @@ namespace vllt {
 	// \returns true if a row was popped.
 	///
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
-	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::pop_back() noexcept -> std::optional< tuple_value_t > {
+	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::pop_back(table_index_t* idx_ptr) noexcept -> tuple_value_t {
 	vtll::to_tuple<vtll::remove_atomic<DATA>> ret{};
+		table_index_t idx{};
+		if(idx_ptr) *idx_ptr = idx; ///< Initialize the index to an invalid value
 
 		if constexpr (FAIR) {
 			if( m_starving.load()==1 ) m_starving.wait(1); //wait until pulls are done and pushes have a chance to catch up
@@ -455,18 +458,19 @@ namespace vllt {
 		}
 
 		slot_size_t size = m_size_cnt.load();
-		if (table_size(size) + table_diff(size) == 0) return std::nullopt;	///< Is there a row to pop off?
+		if (table_size(size) + table_diff(size) == 0) return {};	///< Is there a row to pop off?
 
 		/// Make sure that no other thread is currently pushing a new row
 		while (table_diff(size) > 0 || !m_size_cnt.compare_exchange_weak(size, slot_size_t{ table_size(size), table_diff(size) - 1, NUMBITS1 })) {
 			if (table_diff(size) > 0) { size = m_size_cnt.load(); }
-			if (table_size(size) + table_diff(size) == 0) return std::nullopt;	///< Is there a row to pop off?
-
+			if (table_size(size) + table_diff(size) == 0) return {};	///< Is there a row to pop off?
 		};
 
 		auto map_ptr{ m_block_map.load() };						///< Access the block map
 
-		auto idx = table_size(size) + table_diff(size) - 1;
+		idx = table_size(size) + table_diff(size) - 1; 		///< Get the index of the row to pop
+		if(idx_ptr) *idx_ptr = idx; ///< Initialize the index to an invalid value
+
 		vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 			[&](auto i) {
 				using type = vtll::Nth_type<DATA, i>;
@@ -501,7 +505,9 @@ namespace vllt {
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::clear() noexcept -> size_t {
 		size_t num = size();
-		while(pop_back().has_value()) {}
+		table_index_t idx;
+		pop_back(&idx);
+		while( idx.has_value()) { pop_back(&idx); }
 		return num;
 	}
 
@@ -513,10 +519,8 @@ namespace vllt {
 	// \returns true if the operation was successful.
 	///
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
-	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::swap(table_index_t idst, table_index_t isrc) noexcept -> void {
+	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::swap( auto src, auto dst ) noexcept -> void {
 		assert(idst < size() && isrc < size());
-		auto src = get_ref_tuple<DATA>(isrc);
-		auto dst = get_ref_tuple<DATA>(idst);
 		vtll::static_for<size_t, 0, vtll::size<DATA>::value >([&](auto i) {
 			using type = vtll::Nth_type<DATA, i>;
 			if constexpr (std::is_move_assignable_v<type> && std::is_move_constructible_v<type>) {
@@ -538,12 +542,18 @@ namespace vllt {
 
 
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
-	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::erase(table_index_t n1) -> std::optional< tuple_value_t > {
-		if(n1 >= size()) return std::nullopt;
-		auto n2 = size() - 1;
-		if (n1 == n2) return pop_back();
-		swap(n1, table_index_t{ n2 });
-		return pop_back();
+	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::swap(table_index_t isrc, table_index_t idst) noexcept -> void {
+		swap( get_ref_tuple<DATA>(isrc), get_ref_tuple<DATA>(idst) );
+	}
+
+
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
+	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::erase(table_index_t n1) -> tuple_value_t {
+		table_index_t n2;
+		auto ret = pop_back( &n2 );
+		if (n1 == n2) return ret;
+		swap( ret, get_ref_tuple<DATA>(n1)); //MUST PROHIBIT PUSH_BACK HERE!!!
+		return ret;
 	}
 
 
@@ -620,7 +630,7 @@ namespace vllt {
 		inline auto clear() noexcept -> size_t requires OWNER { return m_table.clear(); };
 		inline auto swap(table_index_t other) noexcept -> void requires OWNER { m_table.swap(m_n, other); };	
 		
-		inline auto erase(table_index_t n) -> std::optional< tuple_value_t > requires OWNER { return m_table.erase(n); }
+		inline auto erase(table_index_t n) -> tuple_value_t requires OWNER { return m_table.erase(n); }
 
     	friend bool operator==(const VlltStaticTableView& lhs, const VlltStaticTableView& rhs) {
         	return lhs.m_table == rhs.m_table;
