@@ -200,8 +200,8 @@ namespace vllt {
 
 		inline auto pop_back(table_index_t* idx = nullptr) noexcept -> tuple_value_t; ///< Remove the last row, call destructor on components
 		inline auto clear() noexcept -> size_t; ///< Set the number if rows to zero - effectively clear the table, call destructors
-		inline auto swap(table_index_t isrc, table_index_t idst) noexcept -> void;	///< Swap contents of two rows
 		inline auto swap(auto src, auto dst) noexcept -> void;	///< Swap contents of two rows
+		inline auto swap(table_index_t isrc, table_index_t idst) noexcept -> void {swap( get_ref_tuple<DATA>(isrc), get_ref_tuple<DATA>(idst) );}	///< Swap contents of two rows
 		inline auto erase(table_index_t n1) -> tuple_value_t; ///< Remove a row, call destructor on components
 
 		//-------------------------------------------------------------------------------------------
@@ -542,17 +542,11 @@ namespace vllt {
 
 
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
-	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::swap(table_index_t isrc, table_index_t idst) noexcept -> void {
-		swap( get_ref_tuple<DATA>(isrc), get_ref_tuple<DATA>(idst) );
-	}
-
-
-	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::erase(table_index_t n1) -> tuple_value_t {
 		table_index_t n2;
 		auto ret = pop_back( &n2 );
 		if (n1 == n2) return ret;
-		swap( ret, get_ref_tuple<DATA>(n1)); //MUST PROHIBIT PUSH_BACK HERE!!!
+		swap( ret, get_ref_tuple<DATA>(n1)); 
 		return ret;
 	}
 
