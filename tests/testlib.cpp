@@ -24,7 +24,7 @@ void functional_test() {
 	{
 		auto view1  = table.view<double, float, int, char, std::string>();
 		auto view2  = table.view<double, float, int, char, std::string>();
-		auto view3  = table.view<double, float, int, char, std::string>();
+		auto view3  = table.view();
 
 		for( int i = 0; i < table.size(); i++ ) {	
 			auto data = view1.get( vllt::table_index_t{i} );

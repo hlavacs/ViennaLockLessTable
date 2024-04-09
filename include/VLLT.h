@@ -172,6 +172,9 @@ namespace vllt {
 		template<typename... Ts >
 		inline auto view() noexcept;
 
+		template<>
+		inline auto view<void>() noexcept { return VlltStaticTableView<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, vtll::tl<>, DATA>(*this);};
+
 		template<typename READ, typename WRITE>
 		inline auto stack() noexcept { return VlltStaticStack<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>(this); };
 
@@ -257,16 +260,17 @@ namespace vllt {
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
 	template<typename... Ts >
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>:: view() noexcept {
-		using parameters = vtll::tl<Ts...>;
-		static const size_t write = vtll::index_of<parameters, VlltWrite>::value;
-		static const bool write_valid = (write != std::numeric_limits<size_t>::max());
+		using parameters = vtll::tl<Ts...>;		///< List of types in the view	
+		static const size_t write = vtll::index_of<parameters, VlltWrite>::value; 		///< Index of VlltWrite in the view
+		static const bool write_valid = (write != std::numeric_limits<size_t>::max()); 	///< Is VlltWrite in the view?
 
 		using read_list1 = typename std::conditional< sizeof...(Ts) == 0 || (write_valid && write == 0), vtll::tl<>, vtll::sublist<parameters, 0, write> >::type;
 		using read_list = vtll::remove_types< read_list1, vtll::tl<VlltWrite> >; //cannot use write - 1 if write == 0!
 
-		using write_list = typename std::conditional< sizeof...(Ts) == 0 || !write_valid, vtll::tl<>, vtll::sublist<parameters, write + 1, sizeof...(Ts) - 1> >::type;
+		using write_list = typename std::conditional< sizeof...(Ts) == 0 	//if no types are given
+			|| !write_valid, vtll::tl<>, vtll::sublist<parameters, write + 1, sizeof...(Ts) - 1> >::type; //list of types with write access
 
-		return VlltStaticTableView<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, read_list, write_list>(*this); 
+		return VlltStaticTableView<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, read_list, write_list>(*this); ///< Create a view
 	}
 
 
