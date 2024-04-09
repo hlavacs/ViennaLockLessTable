@@ -535,13 +535,13 @@ namespace vllt {
 			}
 			else if constexpr (std::is_copy_assignable_v<type> && std::is_copy_constructible_v<type>) {
 				auto& tmp{ std::get<i>(src) };
-				std::get<i>(src.value()) = std::get<i>(dst);
-				std::get<i>(dst.value()) = tmp;
+				std::get<i>(src) = std::get<i>(dst);
+				std::get<i>(dst) = tmp;
 			}
 			else if constexpr (vtll::is_atomic<type>::value) {
 				type tmp{ std::get<i>(src).load() };
-				std::get<i>(src.value()).store(std::get<i>(dst).load());
-				std::get<i>(dst.value()).store(tmp.load());
+				std::get<i>(src).store(std::get<i>(dst).load());
+				std::get<i>(dst).store(tmp.load());
 			}
 		});
 		return;
