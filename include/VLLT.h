@@ -621,7 +621,7 @@ namespace vllt {
 
 		template<typename... Cs>
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
-		inline auto push_back(Cs&&... data) -> table_index_t requires OWNER { 
+		inline auto push_back(Cs&&... data) -> table_index_t { 
 			return m_table.push_back(std::forward<Cs>(data)...); 
 		};
 
