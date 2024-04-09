@@ -173,7 +173,7 @@ namespace vllt {
 		inline auto view() noexcept;
 
 		template<>
-		inline auto view<void>() noexcept { return VlltStaticTableView<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, vtll::tl<>, DATA>(*this);};
+		inline auto view<>() noexcept { return VlltStaticTableView<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, vtll::tl<>, DATA>(*this); };
 
 		template<typename READ, typename WRITE>
 		inline auto stack() noexcept { return VlltStaticStack<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>(this); };
@@ -527,7 +527,7 @@ namespace vllt {
 	///
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::swap( auto src, auto dst ) noexcept -> void {
-		assert(idst < size() && isrc < size());
+		if constexpr (std::is_same_v< decltype(src), table_index_t  >) assert(dst < size() && src < size());
 		vtll::static_for<size_t, 0, vtll::size<DATA>::value >([&](auto i) {
 			using type = vtll::Nth_type<DATA, i>;
 			if constexpr (std::is_move_assignable_v<type> && std::is_move_constructible_v<type>) {
@@ -625,8 +625,10 @@ namespace vllt {
 			return m_table.push_back(std::forward<Cs>(data)...); 
 		};
 
-		inline auto get(table_index_t n) -> tuple_return_t {
-			return std::tuple_cat( m_table.template get_const_ref_tuple<READ>(n), m_table.template get_ref_tuple<WRITE>(n) ); 
+		inline decltype(auto) get(table_index_t n) {
+			if constexpr (vtll::size<READ>::value == 0) return m_table.template get_ref_tuple<WRITE>(n);
+			else if constexpr (vtll::size<WRITE>::value == 0) return m_table.template get_const_ref_tuple<READ>(n);
+			else return std::tuple_cat( m_table.template get_const_ref_tuple<READ>(n), m_table.template get_ref_tuple<WRITE>(n) ); 
 		};
 
 		inline auto pop_back() noexcept requires OWNER { return m_table.pop_back(); }; 
