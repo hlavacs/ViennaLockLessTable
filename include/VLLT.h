@@ -85,28 +85,34 @@ namespace vllt {
 
 	//---------------------------------------------------------------------------------------------------
 
-	enum sync_t {
-		VLLT_SYNC_EXTERNAL = 0,
-		VLLT_SYNC_INTERNAL = 1,
-		VLLT_SYNC_DEBUG = 2
+	enum class sync_t {
+		VLLT_SYNC_EXTERNAL = 0,			//sync is done externally
+		VLLT_SYNC_INTERNAL = 1,			//full internal sync
+		VLLT_SYNC_INTERNAL_RELAXED = 2,	//relaxed internal sync, can add rows in parallel
+		VLLT_SYNC_DEBUG = 3,			//debugging full internal sync - error if violation
+		VLLT_SYNC_DEBUG_RELAXED = 4		//debugging relaxed internal sync - error if violation
 	};
 
 	struct VlltWrite {};
 
-	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR>
+	template<typename DATA>
 	concept VlltStaticTableConcept = vtll::unique<DATA>::value;
 
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR>
-		requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
+		requires VlltStaticTableConcept<DATA>
 	class VlltStaticTable;
 
-	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
+	template<typename DATA, typename READ, typename WRITE>
 	concept VlltStaticTableViewConcept = (
-		VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR> 
+		VlltStaticTableConcept<DATA> 
 		&& (vtll::size< vtll::intersection< vtll::tl<READ, WRITE>> >::value == 0) 
 		&& (vtll::has_all_types<DATA, READ>::value) 
 		&& (vtll::has_all_types<DATA, WRITE>::value)
 	);
+
+	template<sync_t SYNC>
+	concept VlltStaticTableAllowPushback = 
+		(SYNC == sync_t::VLLT_SYNC_EXTERNAL || SYNC == sync_t::VLLT_SYNC_INTERNAL_RELAXED || SYNC == sync_t::VLLT_SYNC_DEBUG_RELAXED);
 
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
 	class VlltStaticTableView;
@@ -127,8 +133,8 @@ namespace vllt {
 	/// <typeparam name="ROW">If true, then data is stored rowwise, else columnwise.</typeparam>
 	/// <typeparam name="MINSLOTS">Miniumum number of available slots in the block map.</typeparam>
 	/// <typeparam name="FAIR">Balance adding and popping to prevent starving.</typeparam>
-	template<typename DATA, sync_t SYNC = VLLT_SYNC_EXTERNAL, size_t N0 = 1 << 5, bool ROW = true, size_t MINSLOTS = 16, bool FAIR = false>
-		requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
+	template<typename DATA, sync_t SYNC = sync_t::VLLT_SYNC_EXTERNAL, size_t N0 = 1 << 5, bool ROW = true, size_t MINSLOTS = 16, bool FAIR = false>
+		requires VlltStaticTableConcept<DATA>
 	class VlltStaticTable {
 
 	public:
@@ -179,18 +185,27 @@ namespace vllt {
 		template<typename READ, typename WRITE>
 		inline auto stack() noexcept { return VlltStaticStack<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>(this); };
 
-		template<typename... Cs>
-			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
-		inline auto push_back(push_callback_t, Cs&&... data) noexcept -> table_index_t;
+		//-------------------------------------------------------------------------------------------
+		//add data
 
 		template<typename... Cs>
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
-		inline auto push_back(Cs&&... data) noexcept -> table_index_t { return push_back(std::nullopt, std::forward<Cs>(data)...); }
+		inline auto push_back(Cs&&... data) noexcept -> table_index_t requires VlltStaticTableAllowPushback<SYNC> { 
+			return push_back_p(std::forward<Cs>(data)...); 
+		}
  
 		friend bool operator==(const VlltStaticTable& lhs, const VlltStaticTable& rhs) noexcept { return &lhs == &rhs; }
 
 	protected:
 
+		template<typename... Cs>
+			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
+		inline auto push_back_p( push_callback_t, Cs&&... data ) noexcept -> table_index_t;
+
+		template<typename... Cs>
+			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
+		inline auto push_back_p(Cs&&... data) noexcept -> table_index_t { return push_back_p(std::nullopt, std::forward<Cs>(data)...); }
+ 
 		//-------------------------------------------------------------------------------------------
 		//read data
 
@@ -240,7 +255,7 @@ namespace vllt {
 	// \brief Return number of rows when growing including new rows not yet established.
 	// \returns number of rows when growing including new rows not yet established.
 	///
-	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
 
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::max_size() noexcept -> size_t {
 		auto size = m_size_cnt.load();
@@ -251,14 +266,14 @@ namespace vllt {
 	// \brief Return number of valid rows.
 	// \returns number of valid rows.
 	///
-	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::size() noexcept -> size_t {
 		auto size = m_size_cnt.load();
 		return std::min(static_cast<decltype(table_size(size))>(table_size(size) + table_diff(size)), table_size(size));
 	};
 
 
-	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
 	template<typename... Ts >
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>:: view() noexcept {
 		using parameters = vtll::tl<Ts...>;		///< List of types in the view	
@@ -283,7 +298,7 @@ namespace vllt {
 	/// <param name="n">Slot number in the table.</param>
 	/// <param name="map_ptr">Pointer to the table block holding the row.</param>
 	/// <returns>Pointer to the component.</returns>
-	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
 	template<size_t I, typename C>
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::get_component_ptr(table_index_t n) noexcept -> C* { ///< \returns a pointer to a component
 		auto idx = block_idx(n);
@@ -298,7 +313,7 @@ namespace vllt {
 	// \param[in] n Index to the entry.
 	// \returns a tuple with pointers to all components of entry n.
 	///
-	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
 	template<typename Ts>
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::get_ref_tuple(table_index_t n) noexcept -> vtll::to_ref_tuple<Ts> {
 		return { [&] <size_t... Is>(std::index_sequence<Is...>) { 
@@ -315,10 +330,10 @@ namespace vllt {
 	/// <param name="first_seg">Index of first block that currently holds information.</param>
 	/// <param name="last_seg">Index of the last block that currently holds informaton.</param>
 	/// <param name="data">The data for the new row.</param>
-	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
 	template<typename... Cs>
 		requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
-	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::push_back(push_callback_t callback, Cs&&... data) noexcept -> table_index_t {
+	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::push_back_p(push_callback_t callback, Cs&&... data) noexcept -> table_index_t {
 
 		if constexpr (FAIR) {
 			if( m_starving.load()==-1 ) m_starving.wait(-1); //wait until pushes are done and pulls have a chance to catch up
@@ -368,7 +383,7 @@ namespace vllt {
 	/// </summary>
 	/// <param name="slot">Slot number in the table.</param>
 	/// <returns>Pointer to the block map.</returns>
-	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::resize(table_index_t slot) -> std::shared_ptr<block_map_t> {
 
 		//Get a pointer to the block map. If there is none, then allocate a new one.
@@ -442,7 +457,7 @@ namespace vllt {
 	}
 
 	/// <summary>
-	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::shrink() -> void {
 		
 	}
@@ -454,7 +469,7 @@ namespace vllt {
 	// \param[in] del If true, then call desctructor on the removed slot.
 	// \returns true if a row was popped.
 	///
-	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::pop_back(table_index_t* idx_ptr) noexcept -> tuple_value_t {
 	vtll::to_tuple<vtll::remove_atomic<DATA>> ret{};
 		table_index_t idx{};
@@ -510,7 +525,7 @@ namespace vllt {
 	// \brief Pop all rows and call the destructors.
 	// \returns number of popped rows.
 	///
-	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::clear() noexcept -> size_t {
 		size_t num = size();
 		table_index_t idx;
@@ -526,7 +541,7 @@ namespace vllt {
 	// \param[in] n2 Index of second row.
 	// \returns true if the operation was successful.
 	///
-	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::swap( auto src, auto dst ) noexcept -> void {
 		if constexpr (std::is_same_v< decltype(src), table_index_t  >) assert(dst < size() && src < size());
 		vtll::static_for<size_t, 0, vtll::size<DATA>::value >([&](auto i) {
@@ -549,7 +564,7 @@ namespace vllt {
 	}
 
 
-	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::erase(table_index_t n1) -> tuple_value_t {
 		table_index_t n2;
 		auto ret = pop_back( &n2 );
@@ -580,19 +595,19 @@ namespace vllt {
 		static const bool OWNER = (vtll::has_all_types<DATA, WRITE>::value && vtll::has_all_types<WRITE, DATA>::value);
 
 		VlltStaticTableView(table_type& table ) : m_table{ table } {	
-			if constexpr (SYNC == VLLT_SYNC_EXTERNAL) return;
+			if constexpr (SYNC == sync_t::VLLT_SYNC_EXTERNAL) return;
 
 			m_table.m_num_views.fetch_add(1);
-			if constexpr (SYNC == VLLT_SYNC_DEBUG) { assert( m_table.m_num_stacks.load() == 0 ); }
+			if constexpr (SYNC == sync_t::VLLT_SYNC_DEBUG) { assert( m_table.m_num_stacks.load() == 0 ); }
 
 			vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 				[&](auto i) {
 					if constexpr ( vtll::size<READ>::value >0 && vtll::has_type<READ,vtll::Nth_type<DATA,i>>::value ) { 
-						if constexpr (SYNC == VLLT_SYNC_DEBUG) assert(m_table.m_access_mutex[i].try_shared_lock());
+						if constexpr (SYNC == sync_t::VLLT_SYNC_DEBUG) assert(m_table.m_access_mutex[i].try_shared_lock());
 						else m_table.m_access_mutex[i].shared_lock(); 
 					}
 					else if constexpr ( vtll::size<WRITE>::value >0 && vtll::has_type<WRITE,vtll::Nth_type<DATA,i>>::value) { 
-						if constexpr (SYNC == VLLT_SYNC_DEBUG) assert(m_table.m_access_mutex[i].try_lock());
+						if constexpr (SYNC == sync_t::VLLT_SYNC_DEBUG) assert(m_table.m_access_mutex[i].try_lock());
 						else m_table.m_access_mutex[i].lock(); 
 					}
 				}
@@ -602,7 +617,7 @@ namespace vllt {
 
 	public:
 		~VlltStaticTableView() {
-			if constexpr (SYNC == VLLT_SYNC_EXTERNAL) return;
+			if constexpr (SYNC == sync_t::VLLT_SYNC_EXTERNAL) return;
 			m_table.m_num_views.fetch_sub(1);
 
 			vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
@@ -623,7 +638,7 @@ namespace vllt {
 		template<typename... Cs>
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
 		inline auto push_back(Cs&&... data) -> table_index_t { 
-			return m_table.push_back(std::forward<Cs>(data)...); 
+			return m_table.push_back_p(std::forward<Cs>(data)...); 
 		};
 
 		inline decltype(auto) get(table_index_t n) {
@@ -730,7 +745,7 @@ namespace vllt {
 		VlltStaticStack(table_type_t& table ) : m_table{ table } {
 			if constexpr (SYNC == VLLT_SYNC_EXTERNAL) return;
 			m_table.m_num_stacks.fetch_add(1);
-			if constexpr (SYNC == VLLT_SYNC_DEBUG) { assert( m_table.m_num_views.load() == 0 ); }
+			if constexpr (SYNC == VLLT_SYNC_DEBUG || SYNC == VLLT_SYNC_DEBUG_RELAXE) { assert( m_table.m_num_views.load() == 0 ); }
 		};
 
 		~VlltStaticStack() {

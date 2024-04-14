@@ -15,7 +15,7 @@ auto wait_for(double us) {
 
 void functional_test() {
 	using types = vtll::tl<double, float, int, char, std::string>;
-	vllt::VlltStaticTable<types, vllt::VLLT_SYNC_DEBUG> table;
+	vllt::VlltStaticTable<types, vllt::sync_t::VLLT_SYNC_DEBUG_RELAXED> table;
 
 	for( int i = 0; i < 100000; i++ ) {
 		table.push_back((double)i, (float)i, i, 'a', std::string("Hello"));
