@@ -745,7 +745,7 @@ namespace vllt {
 		VlltStaticStack(table_type_t& table ) : m_table{ table } {
 			if constexpr (SYNC == VLLT_SYNC_EXTERNAL) return;
 			m_table.m_num_stacks.fetch_add(1);
-			if constexpr (SYNC == VLLT_SYNC_DEBUG || SYNC == VLLT_SYNC_DEBUG_RELAXE) { assert( m_table.m_num_views.load() == 0 ); }
+			if constexpr (SYNC == VLLT_SYNC_DEBUG || SYNC == VLLT_SYNC_DEBUG_RELAXED) { assert( m_table.m_num_views.load() == 0 ); }
 		};
 
 		~VlltStaticStack() {
