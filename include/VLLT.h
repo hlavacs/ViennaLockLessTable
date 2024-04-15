@@ -35,8 +35,16 @@
 
 namespace vllt {
 
+	/// @brief Spinlock used to prevent multiple memory allocations, or if internal syncing is used, to enforce mutual exclusion
+	/// of reades and writers.
+	/// Using the lock as write lock means that the block is being written to, and no other thread can read from or write to it.
+	/// This is enforced by storing -1 in the flag.
+	/// Using the lock as read lock means that the block is being read from, and no other thread can write to it, but  any
+	/// other threads still can also read. This is enforced by storing the number of readers in the flag.
 	class VlltSpinlock {
 	public:
+
+		/// @brief Blocking lock the spinlock for writing.
 		void lock() { 
 			int flag = m_flag.load(std::memory_order_relaxed);
 			for( int i=0; flag!=0 || m_flag.compare_exchange_weak(flag, -1); ++i ) { 
@@ -44,13 +52,17 @@ namespace vllt {
 			}
 		} 
 
+		/// @brief Unlock the spinlock for writing.
 		void unlock() { m_flag.store(0, std::memory_order_release); } 
 
+		/// @brief Unblocking lock the spinlock for writing.
+		/// @return False, if the lock is already taken, true otherwise.
 		bool try_lock() { 
 			int flag = 0;
 			return m_flag.compare_exchange_strong(flag, -1);
 		}
 
+		/// @brief Blocking lock the spinlock for reading.
 		void shared_lock() { 
 			int flag = m_flag.load(std::memory_order_relaxed);
 			for( int i=0; flag<0 || m_flag.compare_exchange_weak(flag, flag+1); ++i ) { 
@@ -58,6 +70,7 @@ namespace vllt {
 			}
 		} 
 
+		/// @brief Unlock the spinlock for reading.
 		void shared_unlock() {
 			--m_flag;
 		}
@@ -71,7 +84,7 @@ namespace vllt {
 		}
 
 	private:
-		std::atomic<int> m_flag{0};
+		std::atomic<int> m_flag{0}; ///< Flag to indicate if the lock is taken, or how many readers are reading the block
 	};
 
 
@@ -85,10 +98,11 @@ namespace vllt {
 
 	//---------------------------------------------------------------------------------------------------
 
+	/// @brief Syncronization type for the table
 	enum class sync_t {
 		VLLT_SYNC_EXTERNAL = 0,			//sync is done externally
 		VLLT_SYNC_INTERNAL = 1,			//full internal sync
-		VLLT_SYNC_INTERNAL_RELAXED = 2,	//relaxed internal sync, can add rows in parallel
+		VLLT_SYNC_INTERNAL_RELAXED = 2,	//relaxed internal sync, can add rows in parallel through the table
 		VLLT_SYNC_DEBUG = 3,			//debugging full internal sync - error if violation
 		VLLT_SYNC_DEBUG_RELAXED = 4		//debugging relaxed internal sync - error if violation
 	};
@@ -124,15 +138,13 @@ namespace vllt {
 	class VlltStaticStack;
 
 
-	/// <summary>
-	/// VlltTable is the base class for some classes, enabling management of tables that can be
-	// appended in parallel.
-	/// </summary>
-	/// <typeparam name="DATA">List of component types. All types must be default constructible.</typeparam>
-	/// <typeparam name="N0">Number of slots per block. Is rounded to the next power of 2.</typeparam>
-	/// <typeparam name="ROW">If true, then data is stored rowwise, else columnwise.</typeparam>
-	/// <typeparam name="MINSLOTS">Miniumum number of available slots in the block map.</typeparam>
-	/// <typeparam name="FAIR">Balance adding and popping to prevent starving.</typeparam>
+	/// @brief VlltStaticTable is the base class for some classes, enabling management of tables that can be appended in parallel.
+	/// @tparam DATA  List of component types. All types must be default constructible.
+	/// @tparam N0 Number of slots per block. Is rounded to the next power of 2.
+	/// @tparam ROW If true, then data is stored rowwise, else columnwise.
+	/// @tparam MINSLOTS Miniumum number of available slots in the block map.
+	/// @tparam FAIR Balance adding and popping to prevent starving.
+	/// @tparam SYNC Synchronization type for the table.
 	template<typename DATA, sync_t SYNC = sync_t::VLLT_SYNC_EXTERNAL, size_t N0 = 1 << 5, bool ROW = true, size_t MINSLOTS = 16, bool FAIR = false>
 		requires VlltStaticTableConcept<DATA>
 	class VlltStaticTable {
@@ -736,6 +748,13 @@ namespace vllt {
 	//---------------------------------------------------------------------------------------------------
 
 
+	/// @brief VlltStaticStack is a simple stack on top of a VlltStaticTable.
+	/// @tparam DATA Type list of the components of the table.
+	/// @tparam N0 SIze of blocks in the table.
+	/// @tparam ROW Boolean if the table is row based or column based.
+	/// @tparam MINSLOTS Minimum number of slots in a block.
+	/// @tparam FAIR If true then the stack will try to balance the number of pushes and pops.
+	/// @tparam SYNC In deug checks whether the stack is used concurrently with other views (which is not allowed).
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR>
 	class VlltStaticStack {
 		using tuple_value_t = vtll::to_tuple<DATA>;	///< Tuple holding the entries as value

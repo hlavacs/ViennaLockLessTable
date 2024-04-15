@@ -76,5 +76,6 @@
         "xhash": "cpp"
     },
     "cmake.configureOnOpen": false,
-    "C_Cpp.errorSquiggles": "disabled"
+    "C_Cpp.errorSquiggles": "disabled",
+    "doxygen_runner.configuration_file_override": "${workspaceFolder}/Doxyfile"
 }

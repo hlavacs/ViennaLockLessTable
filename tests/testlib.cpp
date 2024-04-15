@@ -2,6 +2,9 @@
 
 using namespace std::chrono; 
 
+/// @brief 
+/// @param us 
+/// @return 
 auto wait_for(double us) {
 	auto T1 = high_resolution_clock::now();
 	double dt, res = 0.0;
@@ -12,7 +15,7 @@ auto wait_for(double us) {
 	return res;
 }
 
-
+/// @brief 
 void functional_test() {
 	using types = vtll::tl<double, float, int, char, std::string>;
 	vllt::VlltStaticTable<types, vllt::sync_t::VLLT_SYNC_DEBUG_RELAXED> table;
