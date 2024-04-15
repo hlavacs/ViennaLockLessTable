@@ -219,6 +219,7 @@ namespace vllt {
 		//-------------------------------------------------------------------------------------------
 		//add data
 
+		/// @brief Add a new row to the table.
 		template<typename... Cs>
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
 		inline auto push_back(Cs&&... data) noexcept -> table_index_t requires VlltStaticTableAllowPushback<SYNC> { 
@@ -229,10 +230,17 @@ namespace vllt {
 
 	protected:
 
+		/// @brief Add a new row to the table.
+		/// @param callback Callback function that is called when a new row is pushed.
+		/// @param data Data for the new row.
+		/// @return Index of the new row.
 		template<typename... Cs>
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
 		inline auto push_back_p( push_callback_t, Cs&&... data ) noexcept -> table_index_t;
 
+		/// @brief Add a new row to the table.
+		/// @param data Data for the new row.
+		/// @return Index of the new row.
 		template<typename... Cs>
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
 		inline auto push_back_p(Cs&&... data) noexcept -> table_index_t { return push_back_p(std::nullopt, std::forward<Cs>(data)...); }
@@ -241,7 +249,7 @@ namespace vllt {
 		//read data
 
 		template<size_t I, typename C = vtll::Nth_type<DATA, I>>
-		inline auto get_component_ptr(table_index_t n) noexcept -> C*;
+		inline auto get_component_ptr(table_index_t n) noexcept -> C*; ///< \returns a pointer to a component
 
 		template<typename Ts>
 		inline auto get_ref_tuple(table_index_t n) noexcept -> vtll::to_ref_tuple<Ts>;	///< \returns a tuple with refs to all components
@@ -298,9 +306,11 @@ namespace vllt {
 	};
 
 
+	/// @brief Create a view to the table.
+	/// @return a view to the table.
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
 	template<typename... Ts >
-	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>:: view() noexcept {
+	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::view() noexcept {
 		using parameters = vtll::tl<Ts...>;		///< List of types in the view	
 		static const size_t write = vtll::index_of<parameters, VlltWrite>::value; 		///< Index of VlltWrite in the view
 		static const bool write_valid = (write != std::numeric_limits<size_t>::max()); 	///< Is VlltWrite in the view?
@@ -398,7 +408,6 @@ namespace vllt {
 		
 		return table_index_t{ table_size(size) + table_diff(size) };	///< Return index of new entry
 	}
-
 
 
 	/// <summary>
@@ -588,7 +597,9 @@ namespace vllt {
 		return;
 	}
 
-
+	/// @brief Remove a row from the table.
+	/// @param n1 Index of the row to remove.
+	/// @return Tuple holding the values of the removed row.
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::erase(table_index_t n1) -> tuple_value_t {
 		table_index_t n2;
@@ -615,17 +626,17 @@ namespace vllt {
 	class VlltStaticTableView {
 
 	public:
-		using table_type = VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>;
+		using table_type = VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>; ///< Type of the table
 
 		using tuple_value_t = table_type::tuple_value_t;	///< Tuple holding the entries as value
 		using tuple_ref_t = vtll::to_ref_tuple<WRITE>; ///< Tuple holding refs to the entries
 		using tuple_const_ref_t = vtll::to_const_ref_tuple<READ>; ///< Tuple holding refs to the entries
 		
-		using tuple_return_t = vtll::to_tuple< vtll::cat< vtll::to_const_ref<READ>, vtll::to_ref<WRITE> > >;
+		using tuple_return_t = vtll::to_tuple< vtll::cat< vtll::to_const_ref<READ>, vtll::to_ref<WRITE> > >; ///< Tuple holding refs to the entries
 
-		friend class VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>;
+		friend class VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>; ///< Allow the table to access the view
 
-		static const bool OWNER = (vtll::has_all_types<DATA, WRITE>::value && vtll::has_all_types<WRITE, DATA>::value);
+		static const bool OWNER = (vtll::has_all_types<DATA, WRITE>::value && vtll::has_all_types<WRITE, DATA>::value); ///< Is the view the owner of the table?
 
 		/// @brief Constructor of class VlltStaticTableView. This is private because only the table is allowed to create a view.
 		VlltStaticTableView(table_type& table ) : m_table{ table } {	
