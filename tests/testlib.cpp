@@ -2,25 +2,13 @@
 
 using namespace std::chrono; 
 
-/// @brief 
-/// @param us 
-/// @return 
-auto wait_for(double us) {
-	auto T1 = high_resolution_clock::now();
-	double dt, res = 0.0;
-	do {
-		dt = duration_cast<duration<double>>(high_resolution_clock::now() - T1).count();
-		res += dt;
-	} while ( 1'000'000.0*dt < us );
-	return res;
-}
 
 /// @brief 
 void functional_test() {
 	using types = vtll::tl<double, float, int, char, std::string>;
-	vllt::VlltStaticTable<types, vllt::sync_t::VLLT_SYNC_DEBUG_RELAXED> table;
+	vllt::VlltStaticTable<types, vllt::sync_t::VLLT_SYNC_DEBUG_RELAXED, 1 << 5> table;
 
-	for( int i = 0; i < 100000; i++ ) {
+	for( int i = 0; i < 10000; i++ ) {
 		table.push_back((double)i, (float)i, i, 'a', std::string("Hello"));
 	}
 
@@ -37,9 +25,13 @@ void functional_test() {
 
 	{
 		auto view  = table.view();
-		auto data = view.get( vllt::table_index_t{0} );
-		std::cout << "Data: " << std::get<0>(data) << " " << std::get<1>(data) << " " << std::get<2>(data) << " " << std::get<3>(data) << " " << std::get<4>(data) << std::endl;
-		view.erase( vllt::table_index_t{0} );
+		for( int i = 0; i < 10; i++ ) {	
+			auto data = view.get( vllt::table_index_t{0} );
+			std::cout << "Data: " << view.size() << " " << std::get<0>(data) << " " << std::get<1>(data) << " " << std::get<2>(data) << " " << std::get<3>(data) << " " << std::get<4>(data) << std::endl;
+			view.erase( vllt::table_index_t{0} );
+		}
+
+		//auto view2  = table.view(); //assert fails for DEBUG or DEBUG_RELAXED
 	}
 
 	{
@@ -47,7 +39,7 @@ void functional_test() {
 		for( decltype(auto) el : view ) {
 			auto d = std::get<const double&>(el);
 			std::get<float&>(el) = 0.0f;
-			std::get<int&>(el) = 0;
+			std::get<int&>(el) = 1;
 			std::get<char&>(el) = 'b';
 			std::get<std::string&>(el) = "0.0f";
 		}
@@ -56,15 +48,19 @@ void functional_test() {
 	{
 		auto view = table.view< vllt::VlltWrite, double, float, int, char, std::string>();
 		auto it = view.begin();
-		for( int64_t i=0; i< view.size(); ++i) {
-			std::get<double&>( it[ vllt::table_diff_t{i} ] ) = 0.0;
+		for( int64_t i=0; i<view.size(); ++i) {
+			std::get<double&>( it[ vllt::table_diff_t{i} ] ) = i;
+			std::cout << "Data2: " << view.size() << " " << std::get<double&>( it[ vllt::table_diff_t{i} ] ) << std::endl;
 		}
 
 	}
 
 	{
 		auto view = table.view< vllt::VlltWrite, double,float, int, char, std::string>();
-		auto last = view.pop_back();
+		for( int i=0; i<10; ++i) {
+			auto last = view.pop_back();
+			std::cout << "Pop: " << std::get<double>(last) << std::endl;
+		}
 		view.clear();
 		std::cout << "Size: " << view.size() << std::endl;
 	}
