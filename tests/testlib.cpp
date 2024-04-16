@@ -65,6 +65,10 @@ void functional_test() {
 		std::cout << "Size: " << view.size() << std::endl;
 	}
 
+	{
+		auto stack = table.stack();
+	}
+
 }
 
 

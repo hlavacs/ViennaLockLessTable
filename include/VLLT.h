@@ -163,6 +163,9 @@ namespace vllt {
 		template<typename U1, sync_t U2, size_t U3, bool U4, size_t U5, bool U6, typename U7, typename U8>
 		friend class VlltStaticTableView;
 
+		template<typename U1, sync_t U2, size_t U3, bool U4, size_t U5, bool U6>
+		friend class VlltStaticStack;
+
 		template<typename U1, sync_t U2, size_t U3, bool U4, size_t U5, bool U6, typename U7, typename U8>
 		friend class VlltStaticIterator;
 
@@ -200,7 +203,10 @@ namespace vllt {
 
 		/// Return the number of rows in the table.
 		/// @return The number of rows in the table.
-		inline auto size() noexcept -> size_t; 
+		inline auto size() noexcept -> size_t {
+			auto size = m_size_cnt.load();
+			return std::min(static_cast<decltype(table_size(size))>(table_size(size) + table_diff(size)), table_size(size));
+		}
 
 		/// Return a view to the table.
 		/// @tparam ...Ts Types of the table the view accesses.
@@ -213,8 +219,7 @@ namespace vllt {
 		inline auto view<>() noexcept { return VlltStaticTableView<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, vtll::tl<>, DATA>(*this); };
 
 		/// Return a stack to the table.
-		template<typename READ, typename WRITE>
-		inline auto stack() noexcept { return VlltStaticStack<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>(this); };
+		inline auto stack() noexcept { return VlltStaticStack<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>(*this); };
 
 		//-------------------------------------------------------------------------------------------
 		//add data
@@ -269,7 +274,11 @@ namespace vllt {
 		//-------------------------------------------------------------------------------------------
 		//manage data
 
-		inline auto max_size() noexcept -> size_t;
+		inline auto max_size() noexcept -> size_t {
+			auto size = m_size_cnt.load();
+			return std::max(static_cast<decltype(table_size(size))>(table_size(size) + table_diff(size)), table_size(size));
+		}
+
 		static inline auto block_idx(table_index_t n) -> block_idx_t { return block_idx_t{ (n >> L) }; }
 		inline auto resize(table_index_t slot) -> std::shared_ptr<block_map_t>;
 		inline auto shrink() -> void;
@@ -286,23 +295,6 @@ namespace vllt {
 		alignas(64) std::atomic<uint64_t> m_starving{0}; ///< prevent one operation to starve the other: -1...pulls are starving 1...pushes are starving
 		alignas(64) std::atomic<size_t> m_num_views{0}; ///< number of views on the table
 		alignas(64) std::atomic<size_t> m_num_stacks{0}; ///< number of stacks on the table
-	};
-
-
-	/// @brief Return number of rows when growing including new rows not yet established.
-	/// @returns number of rows when growing including new rows not yet established.
-	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
-	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::max_size() noexcept -> size_t {
-		auto size = m_size_cnt.load();
-		return std::max(static_cast<decltype(table_size(size))>(table_size(size) + table_diff(size)), table_size(size));
-	};
-
-	/// @brief Return number of valid rows.
-	/// @returns number of valid rows.
-	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
-	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::size() noexcept -> size_t {
-		auto size = m_size_cnt.load();
-		return std::min(static_cast<decltype(table_size(size))>(table_size(size) + table_diff(size)), table_size(size));
 	};
 
 
@@ -815,14 +807,14 @@ namespace vllt {
 		/// @brief Constructor of class VlltStaticStack
 		/// @param table Reference to the table
 		VlltStaticStack(table_type_t& table ) : m_table{ table } {
-			if constexpr (SYNC == VLLT_SYNC_EXTERNAL) return;
+			if constexpr (SYNC == sync_t::VLLT_SYNC_EXTERNAL) return;
 			m_table.m_num_stacks.fetch_add(1);
-			if constexpr (SYNC == VLLT_SYNC_DEBUG || SYNC == VLLT_SYNC_DEBUG_RELAXED) { assert( m_table.m_num_views.load() == 0 ); }
+			if constexpr (SYNC == sync_t::VLLT_SYNC_DEBUG || SYNC == sync_t::VLLT_SYNC_DEBUG_RELAXED) { assert( m_table.m_num_views.load() == 0 ); }
 		};
 
 		/// @brief Destructor of class VlltStaticStack
 		~VlltStaticStack() {
-			if constexpr (SYNC == VLLT_SYNC_EXTERNAL) return;
+			if constexpr (SYNC == sync_t::VLLT_SYNC_EXTERNAL) return;
 			m_table.m_num_stacks.fetch_sub(1);
 		};
 
