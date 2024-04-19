@@ -29,7 +29,18 @@
             ]
         },
         {
-            "name": "(Windows) Test",
+            "name": "(Windows MSVC) Test",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/tests/Debug/testlib.exe",  
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false
+        },
+        {
+            "name": "(Windows Clang) Test",
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/tests/testlib.exe",  

@@ -8,16 +8,19 @@ void functional_test() {
 	using types = vtll::tl<double, float, int, char, std::string>;
 	vllt::VlltStaticTable<types, vllt::sync_t::VLLT_SYNC_DEBUG_RELAXED, 1 << 5> table;
 
-	for( int i = 0; i < 10000; i++ ) {
-		table.push_back((double)i, (float)i, i, 'a', std::string("Hello"));
+	{
+		auto view = table.view<double, float, int, char, std::string>();
+		for( int i = 0; i < 100; i++ ) {
+			view.push_back((double)i, (float)i, i, 'a', std::string("Hello"));
+		}
 	}
 
 	{
 		auto view1  = table.view<double, float, int, char, std::string>();
 		auto view2  = table.view<double, float, int, char, std::string>();
 
-		for( int i = 0; i < table.size(); i++ ) {	
-			auto data = view1.get( vllt::table_index_t{i} );
+		for( uint64_t i = 0; i < table.size(); i++ ) {	
+			auto data = view1.get( vllt::table_index_t{(uint64_t)i} );
 			assert( std::get<0>(data) == (double)i && std::get<1>(data) == (float)i ); 
 			assert( std::get<2>(data) == i && std::get<3>(data) == 'a' && std::get<4>(data) == "Hello" );
 		}
@@ -48,8 +51,8 @@ void functional_test() {
 	{
 		auto view = table.view< vllt::VlltWrite, double, float, int, char, std::string>();
 		auto it = view.begin();
-		for( int64_t i=0; i<view.size(); ++i) {
-			std::get<double&>( it[ vllt::table_diff_t{i} ] ) = i;
+		for( int64_t i=0; (uint64_t)i < view.size(); ++i) {
+			std::get<double&>( it[ vllt::table_diff_t{i} ] ) = (double)i;
 			std::cout << "Data2: " << view.size() << " " << std::get<double&>( it[ vllt::table_diff_t{i} ] ) << std::endl;
 		}
 
@@ -67,10 +70,19 @@ void functional_test() {
 
 	{
 		auto stack = table.stack();
+		
+		for( int i = 0; i < 10; i++ ) {
+			stack.push_back((double)i, (float)i, i, 'a', std::string("Hello"));
+		}
+
+		auto ret = stack.pop_back();
+		while( ret.has_value() ) {
+			std::cout << "Stack Size: " << stack.size() << std::endl;
+			ret = stack.pop_back();
+		}
 	}
 
 }
-
 
 
 int main() {
