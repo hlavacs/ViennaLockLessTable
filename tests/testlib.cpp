@@ -9,9 +9,8 @@ void functional_test() {
 	vllt::VlltStaticTable<types, vllt::sync_t::VLLT_SYNC_DEBUG_RELAXED, 1 << 5> table;
 
 	{
-		auto view = table.view<char, std::string, double, int, float >(); //swap types to test
 		for( int i = 0; i < 100; i++ ) {
-			view.push_back((double)i, (float)i, i, 'a', std::string("Hello")); //inserting new rows always in order of the table types!
+			table.push_back((double)i, (float)i, i, 'a', std::string("Hello")); //inserting new rows always in order of the table types!
 		}
 	}
 
@@ -112,7 +111,7 @@ void functional_test() {
 	}
 
 	{
-		auto stack = table.stack();
+		vllt::VlltStaticStack<types, vllt::sync_t::VLLT_SYNC_DEBUG_RELAXED, 1 << 5> stack;
 		
 		for( int i = 0; i < 10; i++ ) {
 			stack.push_back((double)i, (float)i, i, 'a', std::string("Hello"));

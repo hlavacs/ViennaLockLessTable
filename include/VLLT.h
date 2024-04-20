@@ -146,6 +146,7 @@ namespace vllt {
 
 	/// Stack forwared declaration
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR>
+			requires VlltStaticTableConcept<DATA>
 	class VlltStaticStack;
 
 	/// VlltStaticTable is the base class for some classes, enabling management of tables that can be appended in parallel.
@@ -162,9 +163,6 @@ namespace vllt {
 	public:
 		template<typename U1, sync_t U2, size_t U3, bool U4, size_t U5, bool U6, typename U7, typename U8>
 		friend class VlltStaticTableView;
-
-		template<typename U1, sync_t U2, size_t U3, bool U4, size_t U5, bool U6>
-		friend class VlltStaticStack;
 
 		template<typename U1, sync_t U2, size_t U3, bool U4, size_t U5, bool U6, typename U7, typename U8>
 		friend class VlltStaticIterator;
@@ -220,8 +218,11 @@ namespace vllt {
 		template<>
 		inline auto view<>() noexcept { return VlltStaticTableView<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, vtll::tl<>, DATA>(*this); };
 
-		/// Return a stack to the table.
-		inline auto stack() noexcept { return VlltStaticStack<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>(*this); };
+		template<typename... Cs>
+			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
+		inline auto push_back(Cs&&... data) -> table_index_t requires VlltStaticTableAllowPushback<SYNC> { 
+			return push_back_p(std::forward<Cs>(data)...); 
+		};
 
 		friend bool operator==(const VlltStaticTable& lhs, const VlltStaticTable& rhs) noexcept { return &lhs == &rhs; }
 
@@ -285,8 +286,6 @@ namespace vllt {
 		table_diff_t  table_diff(slot_size_t size) { return table_diff_t{ (int64_t)size.get_bits_signed(NUMBITS1) }; }
 		alignas(64) std::atomic<slot_size_t> m_size_cnt{ slot_size_t{ table_index_t{ 0 }, table_diff_t{0}, NUMBITS1 } };	///< Next slot and size as atomic
 		alignas(64) std::atomic<uint64_t> m_starving{0}; ///< prevent one operation to starve the other: -1...pulls are starving 1...pushes are starving
-		alignas(64) std::atomic<size_t> m_num_views{0}; ///< number of views on the table
-		alignas(64) std::atomic<size_t> m_num_stacks{0}; ///< number of stacks on the table
 	};
 
 
@@ -627,7 +626,6 @@ namespace vllt {
 		VlltStaticTableView(table_type& table ) : m_table{ table } {	
 			if constexpr (SYNC == sync_t::VLLT_SYNC_EXTERNAL) return;
 
-			m_table.m_num_views.fetch_add(1);
 			if constexpr (SYNC == sync_t::VLLT_SYNC_DEBUG) { assert( m_table.m_num_stacks.load() == 0 ); }
 
 			vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
@@ -649,7 +647,6 @@ namespace vllt {
 		/// @brief Destructor of class VlltStaticTableView
 		~VlltStaticTableView() {
 			if constexpr (SYNC == sync_t::VLLT_SYNC_EXTERNAL) return;
-			m_table.m_num_views.fetch_sub(1);
 
 			vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 				[&](auto i) {
@@ -791,7 +788,8 @@ namespace vllt {
 	/// @tparam MINSLOTS Minimum number of slots in a block.
 	/// @tparam FAIR If true then the stack will try to balance the number of pushes and pops.
 	/// @tparam SYNC In deug checks whether the stack is used concurrently with other views (which is not allowed).
-	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR>
+	template<typename DATA, sync_t SYNC = sync_t::VLLT_SYNC_EXTERNAL, size_t N0 = 1 << 5, bool ROW = false, size_t MINSLOTS = 16, bool FAIR = false>
+		requires VlltStaticTableConcept<DATA>
 	class VlltStaticStack {
 		using tuple_value_t = vtll::to_tuple<DATA>;	///< Tuple holding the entries as value
 		using table_type_t = VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>;
@@ -799,17 +797,7 @@ namespace vllt {
 	public:
 		/// @brief Constructor of class VlltStaticStack
 		/// @param table Reference to the table
-		VlltStaticStack(table_type_t& table ) : m_table{ table } {
-			if constexpr (SYNC == sync_t::VLLT_SYNC_EXTERNAL) return;
-			m_table.m_num_stacks.fetch_add(1);
-			if constexpr (SYNC == sync_t::VLLT_SYNC_DEBUG || SYNC == sync_t::VLLT_SYNC_DEBUG_RELAXED) { assert( m_table.m_num_views.load() == 0 ); }
-		};
-
-		/// @brief Destructor of class VlltStaticStack
-		~VlltStaticStack() {
-			if constexpr (SYNC == sync_t::VLLT_SYNC_EXTERNAL) return;
-			m_table.m_num_stacks.fetch_sub(1);
-		};
+		VlltStaticStack(std::pmr::memory_resource* pmr = std::pmr::new_delete_resource() ) : m_table{ pmr } {};
 
 		inline auto size() noexcept { return m_table.size(); } ///< Return the number of rows in the table.
 
@@ -820,20 +808,19 @@ namespace vllt {
 		template<typename... Cs>
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
 		inline auto push_back(Cs&&... data) -> table_index_t { 
-			return m_table.push_back_p(std::forward<Cs>(data)...); 
+			return m_view.push_back(std::forward<Cs>(data)...); 
 		};
 
 		/// Pop last row from the table.
 		/// @returns Tuple with the data of the last row.
 		inline auto pop_back() noexcept -> std::optional< tuple_value_t > { 
-			table_index_t idx;
-			auto ret = m_table.pop_back(&idx);
-			if( idx.has_value() ) return ret;
+			if( size() > 0 ) { return { m_view.pop_back() }; }
 			return std::nullopt; 
 		};  
 
 	private:
-		table_type_t& m_table; ///< Reference to the table
+		table_type_t m_table; ///< the table used by the stack
+		VlltStaticTableView<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, vtll::tl<>, DATA> m_view = m_table.view(); ///< view to the table
 	};
 
 

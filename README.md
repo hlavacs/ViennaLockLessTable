@@ -52,7 +52,7 @@ VlltStaticTable offers a slim API only:
 ```
 size(): return the number of rows in the table.
 view(): create a view to the table.
-stack(): create a stack from the table.
+push_bak(): insert a new row to the end of the table.
 ```
 
 ## VlltStaticTableView
@@ -63,16 +63,16 @@ Table views are he main way to interact with a table, following a data access ob
 In this mode there are no restrictions. Synchronization is done externally, you can create views with full access capabilities any time. In game engines, external synchronizaiton can be enforced, e.g., by a directed acyclic graph that manages access from different game systems.
 
 ### VLLT_SYNC_INTERNAL
-When creating a view, all columns are locked using read and write locks. Reading columns can be done by arbitrary readers, but if a view wants to write to a column, then there can be no other readers or writers to this column. In conflict, the construction of views is blocked by spin locks until the conflict is removed. Also, the view can insert new rows only if it is the current owner, i.e. it is allowed to write to all columns. This mode can be used if there is no external synchronization method, and the tables are rarely written to, but mostly read from. It also allows to add new rows only if the new information depends on the existing information (e.g., avoid duplicates), and the inserting thread can make sure of this before hand.
+When creating a view, all columns are locked using read and write locks. Reading columns can be done by arbitrary readers, but if a view wants to write to a column, then there can be no other readers or writers to this column. In conflict, the construction of views is blocked by spin locks until the conflict is removed. Also, the view can insert new rows only if it is the current owner, i.e. it is allowed to write to all columns. This mode can be used if there is no external synchronization method, and the tables are rarely written to, but mostly read from. It also allows to add new rows only if the new information depends on the existing information (e.g., avoid duplicates), and the inserting thread can make sure of this before hand using locks. Also, in this mode, the *push_back()* method is *not* available to the table itself. Only an owning view can insert a new row.
 
 ### VLLT_SYNC_INTERNAL_RELAXED
-Like VLLT_SYNC_INTERNAL, but irrespective of ownership, any view can insert a new row any time. This does not influence other readers and writers, but since threads can do this in parallel, this might cause inconsistent rows, e.g., duplicates.
+Like VLLT_SYNC_INTERNAL, but irrespective of ownership, any view (and the table itself) can insert a new row any time. This does not influence other readers and writers, but since threads can do this in parallel, this might cause inconsistent rows, e.g., duplicates.
 
 ### VLLT_SYNC_DEBUG
 Like VLLT_SYNC_INTERNAL, but instead of blocked wait the construction of a view results in a failed assertion. Use this mode for debugging if the intended finaly use is VLLT_SYNC_EXTERNAL and you want to make sure that forbidden concurrent operations never happen. This is meant to catch all violations during debugging, but afterwards switch it of at shipping. 
 
 ### VLLT_SYNC_DEBUG_RELAXED
-Like VLLT_SYNC_INTERNAL_RELAXED, but allows creation of new rows any time, i.e., inserting new rows even wihtout ownership will not result in a failed assertion.
+Like VLLT_SYNC_INTERNAL_RELAXED, but allows creation of new rows any time, i.e., inserting new rows even without ownership will not result in a failed assertion. 
 
 It must be noted that irrespective of the sync mode, adding new rows at the end of the table will never interfere with normal table operations, be it reading, writing, erasing etc. A view can add new rows in the following situations:
 * Its table uses sync modes VLLT_SYNC_EXTERNAL, VLLT_SYNC_INTERNAL_RELAXED, VLLT_SYNC_DEBUG_RELAXED
