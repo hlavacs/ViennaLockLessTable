@@ -145,8 +145,7 @@ namespace vllt {
 	class VtllStaticIterator;
 
 	/// Stack forwared declaration
-	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR>
-			requires VlltStaticTableConcept<DATA>
+	template<typename T, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR>
 	class VlltStaticStack;
 
 	/// VlltStaticTable is the base class for some classes, enabling management of tables that can be appended in parallel.
@@ -782,17 +781,17 @@ namespace vllt {
 
 
 	/// @brief VlltStaticStack is a simple stack on top of a VlltStaticTable.
-	/// @tparam DATA Type list of the components of the table.
+	/// @tparam T Type being stored in the stack.
 	/// @tparam N0 SIze of blocks in the table.
 	/// @tparam ROW Boolean if the table is row based or column based.
 	/// @tparam MINSLOTS Minimum number of slots in a block.
 	/// @tparam FAIR If true then the stack will try to balance the number of pushes and pops.
 	/// @tparam SYNC In deug checks whether the stack is used concurrently with other views (which is not allowed).
-	template<typename DATA, sync_t SYNC = sync_t::VLLT_SYNC_EXTERNAL, size_t N0 = 1 << 5, bool ROW = false, size_t MINSLOTS = 16, bool FAIR = false>
-		requires VlltStaticTableConcept<DATA>
+	template<typename T, size_t N0 = 1 << 5, bool ROW = false, size_t MINSLOTS = 16, bool FAIR = false>
 	class VlltStaticStack {
-		using tuple_value_t = vtll::to_tuple<DATA>;	///< Tuple holding the entries as value
-		using table_type_t = VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>;
+		using tuple_value_t = vtll::to_tuple<vtll::tl<T>>;	///< Tuple holding the entries as value
+		using table_type_t = VlltStaticTable<vtll::tl<T>, sync_t::VLLT_SYNC_EXTERNAL, N0, ROW, MINSLOTS, FAIR>;
+		using view_type_t = VlltStaticTableView<vtll::tl<T>, sync_t::VLLT_SYNC_EXTERNAL, N0, ROW, MINSLOTS, FAIR, vtll::tl<>, vtll::tl<T>>;
 
 	public:
 		/// @brief Constructor of class VlltStaticStack
@@ -805,10 +804,8 @@ namespace vllt {
 		/// @tparam ...Cs Types of the data to add.
 		/// @param ...data Data to add.
 		/// @return Index of the new row.
-		template<typename... Cs>
-			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
-		inline auto push_back(Cs&&... data) -> table_index_t { 
-			return m_view.push_back(std::forward<Cs>(data)...); 
+		inline auto push_back(T&& data) -> table_index_t { 
+			return m_view.push_back(std::forward<T>(data)); 
 		};
 
 		/// Pop last row from the table.
@@ -820,7 +817,7 @@ namespace vllt {
 
 	private:
 		table_type_t m_table; ///< the table used by the stack
-		VlltStaticTableView<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, vtll::tl<>, DATA> m_view = m_table.view(); ///< view to the table
+		view_type_t m_view = m_table.view(); ///< view to the table
 	};
 
 

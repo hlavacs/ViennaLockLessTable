@@ -111,10 +111,10 @@ void functional_test() {
 	}
 
 	{
-		vllt::VlltStaticStack<types, vllt::sync_t::VLLT_SYNC_DEBUG_RELAXED, 1 << 5> stack;
+		vllt::VlltStaticStack<double, 1 << 5> stack;
 		
 		for( int i = 0; i < 10; i++ ) {
-			stack.push_back((double)i, (float)i, i, 'a', std::string("Hello"));
+			stack.push_back((double)i);
 		}
 
 		auto ret = stack.pop_back();
@@ -128,7 +128,7 @@ void functional_test() {
 
 
 int main() {
-	std::cout << std::thread::hardware_concurrency() << " Threads\n";
+	std::cout << std::thread::hardware_concurrency() << " Threads" << std::endl;
 	functional_test();
 	return 0;
 }
