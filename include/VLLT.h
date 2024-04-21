@@ -93,8 +93,6 @@ namespace vllt {
 	using table_diff_t  = vsty::strong_type_t<int64_t, vsty::counter<>, std::integral_constant<int64_t, std::numeric_limits<int64_t>::max()>>;
 	auto operator+(table_index_t lhs, table_diff_t rhs) { return table_index_t{ lhs.value() + rhs.value() }; }
 
-	using push_callback_t = std::optional<std::function<void(const table_index_t)>>; ///< Callback function that is called when a new row is pushed
-
 	//---------------------------------------------------------------------------------------------------
 
 	/// Syncronization type for the table 
@@ -225,19 +223,11 @@ namespace vllt {
 	protected:
 
 		/// @brief Add a new row to the table.
-		/// @param callback Callback function that is called when a new row is pushed.
 		/// @param data Data for the new row.
 		/// @return Index of the new row.
 		template<typename... Cs>
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
-		inline auto push_back_p( push_callback_t, Cs&&... data ) noexcept -> table_index_t;
-
-		/// @brief Add a new row to the table.
-		/// @param data Data for the new row.
-		/// @return Index of the new row.
-		template<typename... Cs>
-			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
-		inline auto push_back_p(Cs&&... data) noexcept -> table_index_t { return push_back_p(std::nullopt, std::forward<Cs>(data)...); }
+		inline auto push_back_p( Cs&&... data ) noexcept -> table_index_t;
  
 		//-------------------------------------------------------------------------------------------
 		//read data
@@ -331,18 +321,12 @@ namespace vllt {
 	};
 
 
-	/// <summary>
 	/// Insert a new row at the end of the table. Make sure that there are enough blocks to store the new data.
 	/// If not allocate a new map to hold the segements, and allocate new blocks.
-	/// </summary>
-	/// <param name="n">Row number in the table.</param>
-	/// <param name="first_seg">Index of first block that currently holds information.</param>
-	/// <param name="last_seg">Index of the last block that currently holds informaton.</param>
-	/// <param name="data">The data for the new row.</param>
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
 	template<typename... Cs>
 		requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
-	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::push_back_p(push_callback_t callback, Cs&&... data) noexcept -> table_index_t {
+	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::push_back_p(Cs&&... data) noexcept -> table_index_t {
 
 		if constexpr (FAIR) {
 			if( m_starving.load()==-1 ) m_starving.wait(-1); //wait until pushes are done and pulls have a chance to catch up
@@ -367,8 +351,6 @@ namespace vllt {
 			if constexpr (sizeof...(dats) > 0) { fun.template operator() < I + 1 > (fun, std::forward<Ts>(dats)...); } //recurse
 		};
 		f.template operator() < 0 > (f, std::forward<Cs>(data)...);
-
-		if(callback.has_value()) callback.value()( table_index_t{ table_size(size) + table_diff(size) } ); ///< Call callback function
 
 		slot_size_t new_size = slot_size_t{ table_size(size), table_diff(size) + 1, NUMBITS1 };	///< Increase size to validate the new row
 		while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ table_size(new_size) + 1, table_diff(new_size) - 1, NUMBITS1 } ));
