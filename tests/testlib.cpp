@@ -111,16 +111,14 @@ void functional_test() {
 	}
 
 	{
-		vllt::VlltStaticStack<double, 1 << 5> stack;
+		vllt::VlltStack<double, 1 << 5> stack;
 		
 		for( int i = 0; i < 10; i++ ) {
 			stack.push_back((double)i);
 		}
 
-		auto ret = stack.pop_back();
-		while( ret.has_value() ) {
-			std::cout << "Stack Size: " << stack.size() << std::endl;
-			ret = stack.pop_back();
+		for( auto ret = stack.pop_back(); ret.has_value(); ret = stack.pop_back() ) {
+			std::cout << "Stack Size: " << stack.size() << std::endl;			
 		}
 	}
 

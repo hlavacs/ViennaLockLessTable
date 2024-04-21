@@ -151,28 +151,30 @@ You can use iterators and range based for loops. Care must be taken to use declt
 
 
 
-## VlltStaticStack
+## VlltStack
 
-VlltStack is a growable stack that offers the following API:
+VlltStack is a growable stack which internally uses static tables. It offers the following API:
 * push_back: add a new row to the stack. Internally synchronized.
-* pop_back: remove the last row from the stack and copy/move values to a tuple. Internally synchronized.
+* pop_back: remove the last row from the stack and copy/move values to an std::optional<T>. Internally synchronized.
+Both operations are lockless. A lock is used though if the block mal has to be increased, in order to prevent unnecessary  memory allocations.
 
-
-An example for setting up a stack is
+A stack has the following declaration:
+```c
+template<typename T, size_t N0 = 1 << 5, bool ROW = false, size_t MINSLOTS = 16, bool FAIR = false>
+class VlltStack;
+```
+Here *T* is the type of the data the stack can store, the other parameters are equivalent to a static table. An example for setting up a stack is
 
 ```c
-using types = vtll::tl<double, float, int, char, std::string>;
-vllt::VlltStaticTable<types, vllt::sync_t::VLLT_SYNC_DEBUG_RELAXED, 1 << 5> table;
+vllt::VlltStack<double, 1 << 5> stack;
 
-auto stack = table.stack();
-
-for( int i = 0; i < 10000; i++ ) {
-	stack.push_back((double)i, (float)i, i, 'a', std::string("Hello"));
+for( int i = 0; i < 10; i++ ) {
+	stack.push_back((double)i);
 }
 
-
-
-
+for( auto ret = stack.pop_back(); ret.has_value(); ret = stack.pop_back() ) {
+	std::cout << "Stack Size: " << stack.size() << std::endl;			
+}
 ```
 
 

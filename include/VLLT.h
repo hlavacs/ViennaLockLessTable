@@ -28,11 +28,8 @@
 #include "VTLL.h"
 #include "VSTY.h"
 
-//todo: partition table indices into state/counter, turn spinlock into lockless with state/counter, 
-//align atomics, block allocation on demand not all alloc when constructing, also pay constr/destr costs,
-//read-write locking blocks: push - dont have to do anything (even if other are read/writing last block), 
-//pop - write lock the last block
 
+/// @brief 
 namespace vllt {
 
 	/// @brief Spinlock used to prevent multiple memory allocations, or if internal syncing is used, to enforce mutual exclusion
@@ -131,7 +128,7 @@ namespace vllt {
 		&& (vtll::has_all_types<DATA, WRITE>::value)
 	);
 
-	/// Relaxed sync measn that the table can be appended in parallel via push_back
+	// Relaxed sync means that the table can be appended in parallel via push_back
 	template<sync_t SYNC>
 	concept VlltStaticTableAllowPushback = 
 		(SYNC == sync_t::VLLT_SYNC_EXTERNAL || SYNC == sync_t::VLLT_SYNC_INTERNAL_RELAXED || SYNC == sync_t::VLLT_SYNC_DEBUG_RELAXED);
@@ -140,13 +137,13 @@ namespace vllt {
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
 	class VlltStaticTableView;
 
-	/// Iterator forwared declaration
+	/// Iterator forward declaration
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
 	class VtllStaticIterator;
 
-	/// Stack forwared declaration
+	/// Stack forward declaration
 	template<typename T, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR>
-	class VlltStaticStack;
+	class VlltStack;
 
 	/// VlltStaticTable is the base class for some classes, enabling management of tables that can be appended in parallel.
 	/// @tparam DATA Types of the table.
@@ -273,7 +270,6 @@ namespace vllt {
 
 		static inline auto block_idx(table_index_t n) -> block_idx_t { return block_idx_t{ (n.value() >> L) }; }
 		inline auto resize(table_index_t slot) -> std::shared_ptr<block_map_t>;
-		inline auto shrink() -> void;
 
 		std::array<VlltSpinlock, vtll::size<DATA>::value> m_access_mutex;
 
@@ -307,9 +303,7 @@ namespace vllt {
 	}
 
 
-	/// <summary>
 	/// Return a pointer to a component.
-	/// </summary>
 	/// <typeparam name="C">Type of component.</typeparam>
 	/// <typeparam name="I">Index in the component list.</typeparam>
 	/// <param name="n">Slot number in the table.</param>
@@ -325,11 +319,9 @@ namespace vllt {
 	}
 
 
-	/////
-	// \brief Get a tuple with pointers to all components of an entry.
-	// \param[in] n Index to the entry.
-	// \returns a tuple with pointers to all components of entry n.
-	///
+	/// \brief Get a tuple with pointers to all components of an entry.
+	/// \param[in] n Index to the entry.
+	/// \returns a tuple with pointers to all components of entry n.
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
 	template<typename Ts>
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::get_ref_tuple(table_index_t n) noexcept -> vtll::to_ref_tuple<Ts> {
@@ -392,13 +384,11 @@ namespace vllt {
 	}
 
 
-	/// <summary>
-	/// If the map of blocks is too small, allocate a larger one and copy the previous block pointers into it.
+	/// @brief If the map of blocks is too small, allocate a larger one and copy the previous block pointers into it.
 	/// Then make one CAS attempt. If the attempt succeeds, then remember the new block map.
 	/// If the CAS fails because another thread beat us, then CAS will copy the new pointer so we can use it.
-	/// </summary>
-	/// <param name="slot">Slot number in the table.</param>
-	/// <returns>Pointer to the block map.</returns>
+	/// @param[in] slot Slot number in the table.
+	/// @returns Pointer to the block map.
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::resize(table_index_t slot) -> std::shared_ptr<block_map_t> {
 
@@ -473,19 +463,11 @@ namespace vllt {
 	}
 
 
-	/// <summary>
-	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
-	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::shrink() -> void {
-		
-	}
 
-
-	/////
-	// \brief Pop the last row if there is one.
-	// \param[in] tup Pointer to tuple to move the row data into.
-	// \param[in] del If true, then call desctructor on the removed slot.
-	// \returns values of the popped row.
-	///
+	/// @brief Pop the last row if there is one.
+	/// @param[in] tup Pointer to tuple to move the row data into.
+	/// @param[in] del If true, then call desctructor on the removed slot.
+	/// @returns values of the popped row.
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::pop_back(table_index_t* idx_ptr) noexcept -> tuple_value_t {
 	vtll::to_tuple<vtll::remove_atomic<DATA>> ret{};
@@ -522,7 +504,11 @@ namespace vllt {
 			}
 		);
 
-		shrink(); ///< Shrink the block map if necessary
+		//shrink the table
+		auto bidx = block_idx(table_size(size));
+		if( bidx + 2 < map_ptr->m_blocks.size() ) {
+			map_ptr->m_blocks[(size_t)bidx + 2].store(nullptr);
+		}	
 
 		slot_size_t new_size = slot_size_t{ table_size(size), table_diff(size) - 1, NUMBITS1 };	///< Commit the popping of the row
 		while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ table_size(new_size) - 1, table_diff(new_size) + 1, NUMBITS1 }));
@@ -538,10 +524,8 @@ namespace vllt {
 	}
 
 
-	/////
-	// \brief Pop all rows and call the destructors.
-	// \returns number of popped rows.
-	///
+	/// @brief Pop all rows and call the destructors.
+	/// @returns number of popped rows.
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::clear() noexcept {
 		auto num = size();
@@ -552,12 +536,10 @@ namespace vllt {
 	}
 
 
-	/////
-	// \brief Swap the values of two rows.
-	// \param[in] n1 Index of first row.
-	// \param[in] n2 Index of second row.
-	// \returns true if the operation was successful.
-	///
+	/// @brief Swap the values of two rows.
+	/// @param[in] n1 Index of first row.
+	/// @param[in] n2 Index of second row.
+	/// @returns true if the operation was successful.
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::swap( auto src, auto dst ) noexcept -> void {
 		if constexpr (std::is_same_v< decltype(src), table_index_t  >) assert(dst < size() && src < size());
@@ -596,7 +578,7 @@ namespace vllt {
 	//---------------------------------------------------------------------------------------------------
 	//table view
 
-	/// VlltStaticTableView is a view to a VlltStaticTable. It allows to read and write to the table.
+	/// @brief VlltStaticTableView is a view to a VlltStaticTable. It allows to read and write to the table.
 	/// @tparam DATA Types of the table.
 	/// @tparam SYNC Synchronization type for the table.
 	/// @tparam N0 Number of rows in a block.
@@ -780,7 +762,7 @@ namespace vllt {
 	//---------------------------------------------------------------------------------------------------
 
 
-	/// @brief VlltStaticStack is a simple stack on top of a VlltStaticTable.
+	/// @brief VlltStack is a simple stack on top of a VlltStaticTable.
 	/// @tparam T Type being stored in the stack.
 	/// @tparam N0 SIze of blocks in the table.
 	/// @tparam ROW Boolean if the table is row based or column based.
@@ -788,7 +770,7 @@ namespace vllt {
 	/// @tparam FAIR If true then the stack will try to balance the number of pushes and pops.
 	/// @tparam SYNC In deug checks whether the stack is used concurrently with other views (which is not allowed).
 	template<typename T, size_t N0 = 1 << 5, bool ROW = false, size_t MINSLOTS = 16, bool FAIR = false>
-	class VlltStaticStack {
+	class VlltStack {
 		using tuple_value_t = vtll::to_tuple<vtll::tl<T>>;	///< Tuple holding the entries as value
 		using table_type_t = VlltStaticTable<vtll::tl<T>, sync_t::VLLT_SYNC_EXTERNAL, N0, ROW, MINSLOTS, FAIR>;
 		using view_type_t = VlltStaticTableView<vtll::tl<T>, sync_t::VLLT_SYNC_EXTERNAL, N0, ROW, MINSLOTS, FAIR, vtll::tl<>, vtll::tl<T>>;
@@ -796,7 +778,7 @@ namespace vllt {
 	public:
 		/// @brief Constructor of class VlltStaticStack
 		/// @param table Reference to the table
-		VlltStaticStack(std::pmr::memory_resource* pmr = std::pmr::new_delete_resource() ) : m_table{ pmr } {};
+		VlltStack(std::pmr::memory_resource* pmr = std::pmr::new_delete_resource() ) : m_table{ pmr } {};
 
 		inline auto size() noexcept { return m_table.size(); } ///< Return the number of rows in the table.
 
