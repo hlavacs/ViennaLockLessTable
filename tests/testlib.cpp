@@ -125,9 +125,108 @@ void functional_test() {
 }
 
 
+
+void parallel_test1() {
+	using types = vtll::tl<double, float, int, char, std::string>;
+	vllt::VlltStaticTable<types, vllt::sync_t::VLLT_SYNC_EXTERNAL, 1 << 5> table;
+
+	auto write = [&](int id){
+		auto view = table.view();
+		std::cout << "Write: ID " << id << std::endl;
+		for( int i = 0; i < 100; i++ ) {
+			view.push_back((double)i, (float)i, i, 'a', std::string("Hello")); //inserting new rows always in order of the table types!
+		}
+	};
+
+	auto read = [&](int id){
+		auto view = table.view<double, float, int, char, std::string>();
+		for( int i = 0; i < 100; i++ ) {
+			//auto data = view.get( vllt::table_index_t{i} );
+			//std::cout << "Read: ID " << id << " " << std::get<0>(data) << " " << std::get<1>(data) << " " << std::get<2>(data) << " " << std::get<3>(data) << " " << std::get<4>(data) << std::endl;
+		}
+	};
+
+	{
+		std::vector<std::jthread> threads;
+		for( int i = 0; i < 30; i++ ) {
+			threads.emplace_back( write, i );
+		}
+	}
+
+	{
+		std::vector<std::jthread> threads;
+		for( int i = 0; i < 30; i++ ) {
+			//threads.emplace_back( read, i );
+		}
+	}
+}
+
+
+void parallel_test2() {
+	using types = vtll::tl<double, float, int, char, std::string>;
+	vllt::VlltStaticTable<types, vllt::sync_t::VLLT_SYNC_INTERNAL, 1 << 5> table;
+
+	auto write = [&](int id){
+		auto view = table.view();
+		std::cout << "Write: ID " << id << std::endl;
+		for( int i = 0; i < 100; i++ ) {
+			view.push_back((double)i, (float)i, i, 'a', std::string("Hello")); //inserting new rows always in order of the table types!
+		}
+	};
+
+	auto read = [&](int id){
+		auto view = table.view<double, float, int, char, std::string>();
+		for( int i = 0; i < 100; i++ ) {
+			auto data = view.get( vllt::table_index_t{i} );
+			//std::cout << "Data: ID " << id << " " << std::get<0>(data) << " " << std::get<1>(data) << " " << std::get<2>(data) << " " << std::get<3>(data) << " " << std::get<4>(data) << std::endl;
+		}
+	};
+
+	for( int i = 0; i < 200; i++ ) {
+		std::jthread t1( write, i );
+	}
+	for( int i = 0; i < 20; i++ ) {
+		std::jthread t2( read , i);
+	}
+}
+
+
+void parallel_test4() {
+	using types = vtll::tl<double, float, int, char, std::string>;
+	vllt::VlltStaticTable<types, vllt::sync_t::VLLT_SYNC_DEBUG, 1 << 5> table;
+
+	auto write = [&](int id){
+		auto view = table.view();
+		std::cout << "Write: ID " << id << std::endl;
+		for( int i = 0; i < 100; i++ ) {
+			view.push_back((double)i, (float)i, i, 'a', std::string("Hello")); //inserting new rows always in order of the table types!
+		}
+	};
+
+	auto read = [&](int id){
+		auto view = table.view<double, float, int, char, std::string>();
+		for( int i = 0; i < 100; i++ ) {
+			auto data = view.get( vllt::table_index_t{i} );
+			//std::cout << "Data: ID " << id << " " << std::get<0>(data) << " " << std::get<1>(data) << " " << std::get<2>(data) << " " << std::get<3>(data) << " " << std::get<4>(data) << std::endl;
+		}
+	};
+
+	for( int i = 0; i < 200; i++ ) {
+		std::jthread t1( write, i );
+	}
+	for( int i = 0; i < 20; i++ ) {
+		std::jthread t2( read , i);
+	}
+
+}
+
+
+
 int main() {
 	std::cout << std::thread::hardware_concurrency() << " Threads" << std::endl;
-	functional_test();
+	//functional_test();
+	parallel_test1();
+	//parallel_test2();
 	return 0;
 }
 

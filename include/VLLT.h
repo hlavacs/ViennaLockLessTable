@@ -23,6 +23,7 @@
 #include <iterator> // for std::random_access_iterator_tag
 #include <compare>
 #include <memory>
+#include <shared_mutex>
 
 
 #include "VTLL.h"
@@ -31,60 +32,6 @@
 
 /// @brief 
 namespace vllt {
-
-	/// @brief Spinlock used to prevent multiple memory allocations, or if internal syncing is used, to enforce mutual exclusion
-	/// of reades and writers.
-	/// Using the lock as write lock means that the block is being written to, and no other thread can read from or write to it.
-	/// This is enforced by storing -1 in the flag.
-	/// Using the lock as read lock means that the block is being read from, and no other thread can write to it, but  any
-	/// other threads still can also read. This is enforced by storing the number of readers in the flag.
-	class VlltSpinlock {
-	public:
-
-		/// @brief Blocking lock the spinlock for writing.
-		void lock() { 
-			int flag = m_flag.load(std::memory_order_relaxed);
-			for( int i=0; flag!=0 || m_flag.compare_exchange_weak(flag, -1); ++i ) { 
-				if (i == 8) { std::this_thread::sleep_for(std::chrono::nanoseconds(1)); i = 0; } 
-			}
-		} 
-
-		/// @brief Unlock the spinlock for writing.
-		void unlock() { m_flag.store(0, std::memory_order_release); } 
-
-		/// @brief Unblockingly lock the spinlock for writing.
-		/// @return False, if the lock is already taken, true otherwise.
-		bool try_lock() { 
-			int flag = 0;
-			return m_flag.compare_exchange_strong(flag, -1);
-		}
-
-		/// @brief Blocking lock the spinlock for reading.
-		void shared_lock() { 
-			int flag = m_flag.load(std::memory_order_relaxed);
-			for( int i=0; flag<0 || m_flag.compare_exchange_weak(flag, flag+1); ++i ) { 
-				if (i == 8) { std::this_thread::sleep_for(std::chrono::nanoseconds(1)); i = 0; } 
-			}
-		} 
-
-		/// @brief Blocking unlock the spinlock for reading.
-		void shared_unlock() {
-			--m_flag;
-		}
-
-		/// @brief Unblockingly lock the spinlock for reading.
-		/// @return False, if the lock is already taken by writer, true otherwise.
-		bool try_shared_lock() { 
-			int flag = m_flag.load(std::memory_order_relaxed);
-			for(int i=0; flag >= 0 && !m_flag.compare_exchange_strong(flag, flag+1); ++i) {
-				if (i == 8) { std::this_thread::sleep_for(std::chrono::nanoseconds(1)); i = 0; }
-			}
-			return flag >= 0;
-		}
-
-	private:
-		std::atomic<int> m_flag{0}; ///< Flag to indicate if the lock is taken, or how many readers are reading the block
-	};
 
 
 	//---------------------------------------------------------------------------------------------------
@@ -261,7 +208,7 @@ namespace vllt {
 		static inline auto block_idx(table_index_t n) -> block_idx_t { return block_idx_t{ (n.value() >> L) }; }
 		inline auto resize(table_index_t slot) -> std::shared_ptr<block_map_t>;
 
-		std::array<VlltSpinlock, vtll::size<DATA>::value> m_access_mutex;
+		std::array<std::shared_timed_mutex, vtll::size<DATA>::value> m_access_mutex;
 
 		std::pmr::memory_resource* m_pmr; ///< Memory resource for allocating blocks
 		alignas(64) std::atomic<std::shared_ptr<block_map_t>> m_block_map;///< Atomic shared ptr to the map of blocks
@@ -303,7 +250,9 @@ namespace vllt {
 	template<size_t I, typename C>
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::get_component_ptr(table_index_t n) noexcept -> C* { 
 		auto idx = block_idx(n);
+		assert(m_block_map != nullptr); ///< Make sure that the block map is there
 		auto block_ptr = m_block_map.load()->m_blocks[(size_t)idx].load(); ///< Access the block holding the slot
+		assert(block_ptr != nullptr); ///< Make sure that the block is there
 		if constexpr (ROW) { return &std::get<I>((*block_ptr)[n & BIT_MASK]); }
 		else { return &std::get<I>(*block_ptr)[n & BIT_MASK]; }
 	}
@@ -388,26 +337,27 @@ namespace vllt {
 		//Because other threads might also do this, we need to run in a loop until we are sure that the new slot is covered.
 		auto idx = block_idx(slot);
 
+		std::shared_timed_mutex m;
+
+		std::shared_lock lock(m);
 		while(1) {
-
-			static VlltSpinlock spinlock;
-
 			if ( idx < map_ptr->m_blocks.size() ) {	//test if the block is already there
 				auto ptr = map_ptr->m_blocks[(size_t)idx].load();
 				if( ptr ) return map_ptr;	  //yes -> return
 
-				spinlock.lock();
+				//std::shared_lock lock(m);
 				ptr = map_ptr->m_blocks[(size_t)idx].load();
-				if( ptr ) return map_ptr;	  //yes -> return
+				if( ptr ) {
+					return map_ptr;	  //yes -> return
+				}
 				map_ptr->m_blocks[(size_t)idx] = std::make_shared<block_t>(); //no -> get a new block
-				spinlock.unlock();
 				return map_ptr;
 			}
 
-			spinlock.lock(); //another thread might beat us here, so we need to check again after the lock
+			//std::shared_lock lock(m);
+
 			map_ptr =  m_block_map.load();
 			if( idx < map_ptr->m_blocks.size() ) {
-				spinlock.unlock();
 				continue;	//another thread increased the size of the map, but the block might not be there, so test again
 			}
 
@@ -428,7 +378,6 @@ namespace vllt {
 						if( map_ptr->m_blocks[idx].compare_exchange_strong( block_ptr, new_block ) ) { 
 							new_map_ptr->m_blocks[idx].store( new_block );
 						} else {
-							//m_block_cache.push(new_block); //another thread beat us, so we can use the new block
 							new_map_ptr->m_blocks[idx].store( block_ptr ); //use block frm other thread
 						}
 					}
@@ -438,10 +387,7 @@ namespace vllt {
 
 			map_ptr = new_map_ptr; ///<  remember for later	
 			m_block_map.store( map_ptr );
-			spinlock.unlock();
 		}
-		
-		return map_ptr;
 	}
 
 
@@ -589,13 +535,11 @@ namespace vllt {
 		VlltStaticTableView(table_type& table ) : m_table{ table } {	
 			if constexpr (SYNC == sync_t::VLLT_SYNC_EXTERNAL) return;
 
-			if constexpr (SYNC == sync_t::VLLT_SYNC_DEBUG) { assert( m_table.m_num_stacks.load() == 0 ); }
-
 			vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 				[&](auto i) {
 					if constexpr ( vtll::size<READ>::value >0 && vtll::has_type<READ,vtll::Nth_type<DATA,i>>::value ) { 
-						if constexpr (SYNC == sync_t::VLLT_SYNC_DEBUG || SYNC == sync_t::VLLT_SYNC_DEBUG_RELAXED) assert(m_table.m_access_mutex[i].try_shared_lock());
-						else m_table.m_access_mutex[i].shared_lock(); 
+						if constexpr (SYNC == sync_t::VLLT_SYNC_DEBUG || SYNC == sync_t::VLLT_SYNC_DEBUG_RELAXED) assert(m_table.m_access_mutex[i].try_lock_shared());
+						else m_table.m_access_mutex[i].lock_shared(); 
 					}
 					else if constexpr ( vtll::size<WRITE>::value >0 && vtll::has_type<WRITE,vtll::Nth_type<DATA,i>>::value) { 
 						if constexpr (SYNC == sync_t::VLLT_SYNC_DEBUG || SYNC == sync_t::VLLT_SYNC_DEBUG_RELAXED) assert(m_table.m_access_mutex[i].try_lock());
@@ -613,7 +557,7 @@ namespace vllt {
 
 			vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 				[&](auto i) {
-					if constexpr ( vtll::has_type<READ,vtll::Nth_type<DATA,i>>::value ) { m_table.m_access_mutex[i].shared_unlock(); }
+					if constexpr ( vtll::has_type<READ,vtll::Nth_type<DATA,i>>::value ) { m_table.m_access_mutex[i].unlock_shared(); }
 					else if constexpr ( vtll::has_type<WRITE,vtll::Nth_type<DATA,i>>::value) { m_table.m_access_mutex[i].unlock(); }
 				}
 			);
