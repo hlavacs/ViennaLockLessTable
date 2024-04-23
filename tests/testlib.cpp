@@ -170,7 +170,7 @@ void parallel_test(int num_threads = std::thread::hardware_concurrency() ) {
 	{
 		std::vector<std::jthread> threads;
 		for( int i = 0; i < num_threads; i++ ) {
-			//threads.emplace_back( read, i );
+			threads.emplace_back( read, i );
 		}
 	}
 
