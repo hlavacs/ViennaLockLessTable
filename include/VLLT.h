@@ -283,10 +283,11 @@ namespace vllt {
 		requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::push_back_p(Cs&&... data) noexcept -> table_index_t {
 
-		if constexpr (FAIR) {
-			if( m_starving.load()==-1 ) m_starving.wait(-1); //wait until pushes are done and pulls have a chance to catch up
-			if( table_diff(m_size_cnt.load()) < -4 ) m_starving.store(1); //if pops are starving the pushes, then prevent pulls 
-		}
+		//if constexpr (FAIR) {
+		//	if( m_starving.load()==-1 ) m_starving.wait(-1); //wait until pushes are done and pulls have a chance to catch up
+		//	if( table_diff(m_size_cnt.load()) < -4 ) m_starving.store(1); //if pops are starving the pushes, then prevent pulls 
+		//}
+		
 		//increase size.m_diff to announce your demand for a new slot -> slot is now reserved for you
 		slot_size_t size = m_size_cnt.load();	///< Make sure that no other thread is popping currently
 		while (table_diff(size) < 0 || !m_size_cnt.compare_exchange_weak(size, slot_size_t{ table_size(size), table_diff(size) + 1, NUMBITS1 } )) {
@@ -314,12 +315,12 @@ namespace vllt {
 		slot_size_t new_size = slot_size_t{ table_size(size), table_diff(size) + 1, NUMBITS1 };	///< Increase size to validate the new row
 		while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ table_size(new_size) + 1, table_diff(new_size) - 1, NUMBITS1 } ));
 		
-		if constexpr (FAIR) {
-			if(table_diff(new_size) - 1 == 0) { 
-				m_starving.store(0); //allow pushes again
-				m_starving.notify_all(); //notify all waiting threads
-			}
-		}
+		//if constexpr (FAIR) {
+		//	if(table_diff(new_size) - 1 == 0) { 
+		//		m_starving.store(0); //allow pushes again
+		//		m_starving.notify_all(); //notify all waiting threads
+		//	}
+		//}
 		
 		return table_index_t{ table_size(size) + table_diff(size) };	///< Return index of new entry
 	}
@@ -345,7 +346,6 @@ namespace vllt {
 				);
 				m_block_map.store( map_ptr );
 			}
-			for( decltype(auto) ptr : map_ptr->m_blocks ) ptr = nullptr ; //set all pointers to 0
 		}
 
 		assert(map_ptr != nullptr); ///< Make sure that the block map is there
@@ -355,6 +355,8 @@ namespace vllt {
 		auto idx = block_idx(slot);
 
 		while(1) {
+			map_ptr = m_block_map.load();
+
 			if ( idx < map_ptr->m_blocks.size() ) {	//test if the block is already there
 				auto ptr = map_ptr->m_blocks[(size_t)idx].load();
 				if( ptr ) return ptr;	  //yes -> return
@@ -384,7 +386,6 @@ namespace vllt {
 			auto new_map_ptr = std::make_shared<block_map_t>( //map has always as many slots as its capacity is -> size==capacity
 				block_map_t{ std::pmr::vector<std::atomic<block_ptr_t>>{new_size, m_pmr} } //increase existing one
 			);
-			for( decltype(auto) ptr : new_map_ptr->m_blocks ) ptr = nullptr ; //set all pointers to 0
 
 			//Copy the old block pointers into the new map. 
 			for( size_t i = 0; i < num_blocks; ++i ) {
@@ -392,7 +393,7 @@ namespace vllt {
 				if( ptr ) new_map_ptr->m_blocks[i].store( ptr );
 				else new_map_ptr->m_blocks[i].store( std::make_shared<block_t>() ); //get a new block
 			}
-			for( size_t i = num_blocks; i < new_size; ++i ) {
+			for( size_t i = num_blocks; i <= idx; ++i ) {
 				new_map_ptr->m_blocks[i].store( std::make_shared<block_t>() ); //get a new block
 			}
 
@@ -413,10 +414,10 @@ namespace vllt {
 		table_index_t idx{};
 		if(idx_ptr) *idx_ptr = idx; ///< Initialize the index to an invalid value
 
-		if constexpr (FAIR) {
-			if( m_starving.load()==1 ) m_starving.wait(1); //wait until pulls are done and pushes have a chance to catch up
-			if( table_diff(m_size_cnt.load()) > 4 ) m_starving.store(-1); //if pushes are starving the pulls, then prevent pushes
-		}
+		//if constexpr (FAIR) {
+		//	if( m_starving.load()==1 ) m_starving.wait(1); //wait until pulls are done and pushes have a chance to catch up
+		//	if( table_diff(m_size_cnt.load()) > 4 ) m_starving.store(-1); //if pushes are starving the pulls, then prevent pushes
+		//}
 
 		slot_size_t size = m_size_cnt.load();
 		if (table_size(size) + table_diff(size) == 0) return {};	///< Is there a row to pop off?
@@ -452,12 +453,12 @@ namespace vllt {
 		slot_size_t new_size = slot_size_t{ table_size(size), table_diff(size) - 1, NUMBITS1 };	///< Commit the popping of the row
 		while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ table_size(new_size) - 1, table_diff(new_size) + 1, NUMBITS1 }));
 
-		if constexpr (FAIR) {
-			if(table_diff(new_size) + 1 == 0) { 
-				m_starving.store(0); //allow pushes again
-				m_starving.notify_all(); //notify all waiting threads
-			}
-		}	
+		//if constexpr (FAIR) {
+		//	if(table_diff(new_size) + 1 == 0) { 
+		//		m_starving.store(0); //allow pushes again
+		//		m_starving.notify_all(); //notify all waiting threads
+		//	}
+		//}	
 		
 		return ret; //RVO?
 	}

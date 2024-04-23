@@ -1,4 +1,5 @@
 #include <latch>
+#include <set>	
 
 #include "VLLT.h"
 
@@ -128,27 +129,28 @@ void functional_test() {
 
 
 template<vllt::sync_t SYNC>
-void parallel_test() {
+void parallel_test(int num_threads = std::thread::hardware_concurrency() ) {
 	using types = vtll::tl<double, float, int, char, std::string>;
-	vllt::VlltStaticTable<types, SYNC, 1 << 5> table;
+	vllt::VlltStaticTable<types, SYNC, 1 << 15, false, 128> table;
 
-	std::latch start_work{std::thread::hardware_concurrency()};
-	std::latch start_read{std::thread::hardware_concurrency()};
+	std::latch start_work{num_threads};
+	std::latch start_read{num_threads};
+
+	auto num = 100;
 
 	auto write = [&](int id){
 		auto view = table.view();
 		//std::cout << "Write: ID " << id << std::endl;
 		start_work.arrive_and_wait();
-		for( int i = 0; i < 1000; i++ ) {
-			view.push_back((double)i, (float)i, i, 'a', std::string("Hello")); //inserting new rows always in order of the table types!
+		for( int i = 0; i < num; i++ ) {
+			view.push_back((double)i, (float)i, id, 'a', std::string("Hello")); //inserting new rows always in order of the table types!
 		}
 	};
 
 	auto read = [&](int id){
 		auto view = table.template view<double, float, int, char, std::string>();
-		auto num = 1000;
 		auto s = view.size();		
-		assert( s == num*std::thread::hardware_concurrency() );
+		assert( s == num*num_threads );
 		start_read.arrive_and_wait();
 		for( int i = 0; i < s; i++ ) {
 			auto data = view.get( vllt::table_index_t{i} );
@@ -158,7 +160,7 @@ void parallel_test() {
 
 	{
 		std::vector<std::jthread> threads;
-		for( int i = 0; i < std::thread::hardware_concurrency(); i++ ) {
+		for( int i = 0; i < num_threads; i++ ) {
 			threads.emplace_back( write, i );
 		}
 	}
@@ -167,9 +169,27 @@ void parallel_test() {
 
 	{
 		std::vector<std::jthread> threads;
-		for( int i = 0; i < std::thread::hardware_concurrency(); i++ ) {
+		for( int i = 0; i < num_threads; i++ ) {
 			threads.emplace_back( read, i );
 		}
+	}
+
+	std::vector<std::set<double>> sizes;
+	sizes.resize(num_threads);
+	auto view = table.view();
+
+	for( int i = 0; i < num_threads; i++ ) {
+		for( int j=0; j < view.size(); j++ ) {
+			auto data = view.get( vllt::table_index_t{j} );
+			if( std::get<int&>(data) == i ) {
+				std::cout << "DATA " << view.size() << " " << std::get<0>(data) << " " << std::get<1>(data) << " " << std::get<2>(data) << " " << std::get<3>(data) << " " << std::get<4>(data) << std::endl;
+				sizes[i].insert( std::get<0>(data) );
+			}
+		}
+	}
+
+	for( int i = 0; i < num_threads; i++ ) {		
+		std::cout << sizes[i].size() << std::endl;
 	}
 }
 
@@ -178,7 +198,7 @@ void parallel_test() {
 int main() {
 	std::cout << std::thread::hardware_concurrency() << " Threads" << std::endl;
 	//functional_test();
-	parallel_test<vllt::sync_t::VLLT_SYNC_EXTERNAL>();
+	parallel_test<vllt::sync_t::VLLT_SYNC_EXTERNAL>( 2 );
 	return 0;
 }
 
