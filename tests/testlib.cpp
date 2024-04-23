@@ -1,3 +1,5 @@
+#include <latch>
+
 #include "VLLT.h"
 
 using namespace std::chrono; 
@@ -125,99 +127,48 @@ void functional_test() {
 }
 
 
-
-void parallel_test1() {
+template<vllt::sync_t SYNC>
+void parallel_test() {
 	using types = vtll::tl<double, float, int, char, std::string>;
-	vllt::VlltStaticTable<types, vllt::sync_t::VLLT_SYNC_EXTERNAL, 1 << 5> table;
+	vllt::VlltStaticTable<types, SYNC, 1 << 5> table;
+
+	std::latch start_work{std::thread::hardware_concurrency()};
 
 	auto write = [&](int id){
 		auto view = table.view();
-		std::cout << "Write: ID " << id << std::endl;
-		for( int i = 0; i < 100; i++ ) {
+		//std::cout << "Write: ID " << id << std::endl;
+		start_work.arrive_and_wait();
+		for( int i = 0; i < 1000; i++ ) {
 			view.push_back((double)i, (float)i, i, 'a', std::string("Hello")); //inserting new rows always in order of the table types!
 		}
 	};
 
 	auto read = [&](int id){
-		auto view = table.view<double, float, int, char, std::string>();
-		for( int i = 0; i < 100; i++ ) {
-			//auto data = view.get( vllt::table_index_t{i} );
+		auto view = table.template view<double, float, int, char, std::string>();
+		auto num = 1000;
+		auto s = view.size();		
+		assert( s == num*std::thread::hardware_concurrency() );
+		for( int i = 0; i < s; i++ ) {
+			auto data = view.get( vllt::table_index_t{i} );
 			//std::cout << "Read: ID " << id << " " << std::get<0>(data) << " " << std::get<1>(data) << " " << std::get<2>(data) << " " << std::get<3>(data) << " " << std::get<4>(data) << std::endl;
 		}
 	};
 
 	{
 		std::vector<std::jthread> threads;
-		for( int i = 0; i < 30; i++ ) {
+		for( int i = 0; i < std::thread::hardware_concurrency(); i++ ) {
 			threads.emplace_back( write, i );
 		}
 	}
 
+	std::cout << "Table size: " << table.size() << std::endl;
+
 	{
 		std::vector<std::jthread> threads;
-		for( int i = 0; i < 30; i++ ) {
-			//threads.emplace_back( read, i );
+		for( int i = 0; i < std::thread::hardware_concurrency(); i++ ) {
+			threads.emplace_back( read, i );
 		}
 	}
-}
-
-
-void parallel_test2() {
-	using types = vtll::tl<double, float, int, char, std::string>;
-	vllt::VlltStaticTable<types, vllt::sync_t::VLLT_SYNC_INTERNAL, 1 << 5> table;
-
-	auto write = [&](int id){
-		auto view = table.view();
-		std::cout << "Write: ID " << id << std::endl;
-		for( int i = 0; i < 100; i++ ) {
-			view.push_back((double)i, (float)i, i, 'a', std::string("Hello")); //inserting new rows always in order of the table types!
-		}
-	};
-
-	auto read = [&](int id){
-		auto view = table.view<double, float, int, char, std::string>();
-		for( int i = 0; i < 100; i++ ) {
-			auto data = view.get( vllt::table_index_t{i} );
-			//std::cout << "Data: ID " << id << " " << std::get<0>(data) << " " << std::get<1>(data) << " " << std::get<2>(data) << " " << std::get<3>(data) << " " << std::get<4>(data) << std::endl;
-		}
-	};
-
-	for( int i = 0; i < 200; i++ ) {
-		std::jthread t1( write, i );
-	}
-	for( int i = 0; i < 20; i++ ) {
-		std::jthread t2( read , i);
-	}
-}
-
-
-void parallel_test4() {
-	using types = vtll::tl<double, float, int, char, std::string>;
-	vllt::VlltStaticTable<types, vllt::sync_t::VLLT_SYNC_DEBUG, 1 << 5> table;
-
-	auto write = [&](int id){
-		auto view = table.view();
-		std::cout << "Write: ID " << id << std::endl;
-		for( int i = 0; i < 100; i++ ) {
-			view.push_back((double)i, (float)i, i, 'a', std::string("Hello")); //inserting new rows always in order of the table types!
-		}
-	};
-
-	auto read = [&](int id){
-		auto view = table.view<double, float, int, char, std::string>();
-		for( int i = 0; i < 100; i++ ) {
-			auto data = view.get( vllt::table_index_t{i} );
-			//std::cout << "Data: ID " << id << " " << std::get<0>(data) << " " << std::get<1>(data) << " " << std::get<2>(data) << " " << std::get<3>(data) << " " << std::get<4>(data) << std::endl;
-		}
-	};
-
-	for( int i = 0; i < 200; i++ ) {
-		std::jthread t1( write, i );
-	}
-	for( int i = 0; i < 20; i++ ) {
-		std::jthread t2( read , i);
-	}
-
 }
 
 
@@ -225,8 +176,7 @@ void parallel_test4() {
 int main() {
 	std::cout << std::thread::hardware_concurrency() << " Threads" << std::endl;
 	//functional_test();
-	parallel_test1();
-	//parallel_test2();
+	parallel_test<vllt::sync_t::VLLT_SYNC_EXTERNAL>();
 	return 0;
 }
 

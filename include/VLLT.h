@@ -182,6 +182,12 @@ namespace vllt {
 		template<size_t I, typename C = vtll::Nth_type<DATA, I>>
 		inline auto get_component_ptr(table_index_t n) noexcept -> C*; ///< \returns a pointer to a component
 
+		template<size_t I, typename C = vtll::Nth_type<DATA, I>>
+		inline auto get_component_ptr(block_ptr_t block_ptr, table_index_t n) noexcept -> C* {
+			if constexpr (ROW) { return &std::get<I>((*block_ptr)[n & BIT_MASK]); }
+			else { return &std::get<I>(*block_ptr)[n & BIT_MASK]; }
+		}
+
 		template<typename Ts>
 		inline auto get_ref_tuple(table_index_t n) noexcept -> vtll::to_ref_tuple<Ts>;	///< \returns a tuple with refs to all components
 
@@ -206,7 +212,7 @@ namespace vllt {
 		}
 
 		static inline auto block_idx(table_index_t n) -> block_idx_t { return block_idx_t{ (n.value() >> L) }; }
-		inline auto resize(table_index_t slot) -> std::shared_ptr<block_map_t>;
+		inline auto resize(table_index_t slot) -> block_ptr_t; ///< If the map of blocks is too small, allocate a larger one and copy the previous block pointers into it.
 
 		std::array<std::shared_timed_mutex, vtll::size<DATA>::value> m_access_mutex;
 
@@ -250,11 +256,11 @@ namespace vllt {
 	template<size_t I, typename C>
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::get_component_ptr(table_index_t n) noexcept -> C* { 
 		auto idx = block_idx(n);
-		assert(m_block_map != nullptr); ///< Make sure that the block map is there
-		auto block_ptr = m_block_map.load()->m_blocks[(size_t)idx].load(); ///< Access the block holding the slot
+		auto block_map_ptr = m_block_map.load().get();
+		assert(block_map_ptr != nullptr); ///< Make sure that the block map is there
+		auto block_ptr = block_map_ptr->m_blocks[(size_t)idx].load(); ///< Access the block holding the slot
 		assert(block_ptr != nullptr); ///< Make sure that the block is there
-		if constexpr (ROW) { return &std::get<I>((*block_ptr)[n & BIT_MASK]); }
-		else { return &std::get<I>(*block_ptr)[n & BIT_MASK]; }
+		return get_component_ptr<I>(block_ptr, n); ///< Return a pointer to the component
 	}
 
 
@@ -291,12 +297,16 @@ namespace vllt {
 		};
 
 		auto n = (table_index_t{table_size(size) + table_diff(size)}); ///< Get the index of the new row
-		auto map_ptr = resize(n); //if need be, grow the map of blocks
+		auto block_ptr = resize(n); //if need be, grow the map of blocks
+		assert(block_ptr != nullptr); ///< Make sure that the pointer is valid
 
 		//copy or move the data to the new slot, using a recursive templated lambda
 		auto f = [&]<size_t I, typename T, typename... Ts>(auto && fun, T && dat, Ts&&... dats) {
-			if constexpr (vtll::is_atomic<T>::value) get_component_ptr<I>(n)->store(dat); //copy value for atomic
-			else *get_component_ptr<I>(n) = std::forward<T>(dat); //move or copy
+			auto ptr = get_component_ptr<I>(block_ptr, n);
+			assert(ptr != nullptr); ///< Make sure that the pointer is valid
+
+			if constexpr (vtll::is_atomic<T>::value) ptr->store(dat); //copy value for atomic
+			else *ptr = std::forward<T>(dat); //move or copy
 			if constexpr (sizeof...(dats) > 0) { fun.template operator() < I + 1 > (fun, std::forward<Ts>(dats)...); } //recurse
 		};
 		f.template operator() < 0 > (f, std::forward<Cs>(data)...);
@@ -321,40 +331,45 @@ namespace vllt {
 	/// @param[in] slot Slot number in the table.
 	/// @returns Pointer to the block map.
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
-	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::resize(table_index_t slot) -> std::shared_ptr<block_map_t> {
+	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::resize(table_index_t slot) -> block_ptr_t {
+		std::shared_timed_mutex m;
 
 		//Get a pointer to the block map. If there is none, then allocate a new one.
 		auto map_ptr{ m_block_map.load() };
 		if (!map_ptr) {
-			auto new_map_ptr = std::make_shared<block_map_t>( //map has always as many MINSLOTS as its capacity is -> size==capacity
-				block_map_t{ std::pmr::vector<std::atomic<block_ptr_t>>{MINSLOTS, m_pmr} } //create a new map
-			);
-			m_block_map.compare_exchange_strong(map_ptr, new_map_ptr); //try to exchange old block map with new
+			std::shared_lock lock(m);
 			map_ptr = m_block_map.load();
+			if( !map_ptr ) {
+				map_ptr = std::make_shared<block_map_t>( //map has always as many MINSLOTS as its capacity is -> size==capacity
+					block_map_t{ std::pmr::vector<std::atomic<block_ptr_t>>{MINSLOTS, m_pmr} } //create a new map
+				);
+				m_block_map.store( map_ptr );
+			}
+			for( decltype(auto) ptr : map_ptr->m_blocks ) ptr = nullptr ; //set all pointers to 0
 		}
+
+		assert(map_ptr != nullptr); ///< Make sure that the block map is there
 
 		//Make sure that there is enough space in the block map so that blocks are there to hold the new slot.
 		//Because other threads might also do this, we need to run in a loop until we are sure that the new slot is covered.
 		auto idx = block_idx(slot);
 
-		std::shared_timed_mutex m;
-
-		std::shared_lock lock(m);
 		while(1) {
 			if ( idx < map_ptr->m_blocks.size() ) {	//test if the block is already there
 				auto ptr = map_ptr->m_blocks[(size_t)idx].load();
-				if( ptr ) return map_ptr;	  //yes -> return
+				if( ptr ) return ptr;	  //yes -> return
 
-				//std::shared_lock lock(m);
+				std::shared_lock lock(m);
+				map_ptr = m_block_map.load();
 				ptr = map_ptr->m_blocks[(size_t)idx].load();
 				if( ptr ) {
-					return map_ptr;	  //yes -> return
+					return ptr;	  //yes -> return
 				}
-				map_ptr->m_blocks[(size_t)idx] = std::make_shared<block_t>(); //no -> get a new block
-				return map_ptr;
+				map_ptr->m_blocks[(size_t)idx].store( std::make_shared<block_t>() ); //no -> get a new block
+				return map_ptr->m_blocks[(size_t)idx].load();
 			}
 
-			//std::shared_lock lock(m);
+			std::shared_lock lock(m);
 
 			map_ptr =  m_block_map.load();
 			if( idx < map_ptr->m_blocks.size() ) {
@@ -363,27 +378,23 @@ namespace vllt {
 
 			//Allocate a new block map and populate it with empty semgement pointers.
 			auto num_blocks = map_ptr->m_blocks.size();
-			auto new_map_ptr = std::make_shared<block_map_t>( //map has always as many slots as its capacity is -> size==capacity
-				block_map_t{ std::pmr::vector<std::atomic<block_ptr_t>>{num_blocks << 2, m_pmr} } //increase existing one
-			);
+			auto new_size = num_blocks << 2; //double the size of the map
+			while( idx >= new_size ) new_size <<= 2; //make sure there are enough slots for the new block
 
-			//Copy the old block pointers into the new map. Create also empty blocks for the new slots (or get them from the cache).
-			size_t idx = 0;
-			std::ranges::for_each( map_ptr->m_blocks.begin(), map_ptr->m_blocks.end(), 
-				[&](auto& ptr) {
-					auto block_ptr = ptr.load();
-					if( block_ptr ) new_map_ptr->m_blocks[idx].store( block_ptr ); //copy
-					else {
-						auto new_block = std::make_shared<block_t>(); //no -> get a new block
-						if( map_ptr->m_blocks[idx].compare_exchange_strong( block_ptr, new_block ) ) { 
-							new_map_ptr->m_blocks[idx].store( new_block );
-						} else {
-							new_map_ptr->m_blocks[idx].store( block_ptr ); //use block frm other thread
-						}
-					}
-					++idx;
-				}
+			auto new_map_ptr = std::make_shared<block_map_t>( //map has always as many slots as its capacity is -> size==capacity
+				block_map_t{ std::pmr::vector<std::atomic<block_ptr_t>>{new_size, m_pmr} } //increase existing one
 			);
+			for( decltype(auto) ptr : new_map_ptr->m_blocks ) ptr = nullptr ; //set all pointers to 0
+
+			//Copy the old block pointers into the new map. 
+			for( size_t i = 0; i < num_blocks; ++i ) {
+				auto ptr = map_ptr->m_blocks[i].load();
+				if( ptr ) new_map_ptr->m_blocks[i].store( ptr );
+				else new_map_ptr->m_blocks[i].store( std::make_shared<block_t>() ); //get a new block
+			}
+			for( size_t i = num_blocks; i < new_size; ++i ) {
+				new_map_ptr->m_blocks[i].store( std::make_shared<block_t>() ); //get a new block
+			}
 
 			map_ptr = new_map_ptr; ///<  remember for later	
 			m_block_map.store( map_ptr );
