@@ -131,12 +131,12 @@ void functional_test() {
 template<vllt::sync_t SYNC>
 void parallel_test(int num_threads = std::thread::hardware_concurrency() ) {
 	using types = vtll::tl<double, float, int, char, std::string>;
-	vllt::VlltStaticTable<types, SYNC, 1 << 15, false, 128> table;
+	vllt::VlltStaticTable<types, SYNC, 1 << 15, false, 16> table;
 
 	std::latch start_work{num_threads};
 	std::latch start_read{num_threads};
 
-	auto num = 100;
+	auto num = 10000;
 
 	auto write = [&](int id){
 		auto view = table.view();
@@ -170,7 +170,7 @@ void parallel_test(int num_threads = std::thread::hardware_concurrency() ) {
 	{
 		std::vector<std::jthread> threads;
 		for( int i = 0; i < num_threads; i++ ) {
-			threads.emplace_back( read, i );
+			//threads.emplace_back( read, i );
 		}
 	}
 
@@ -182,7 +182,7 @@ void parallel_test(int num_threads = std::thread::hardware_concurrency() ) {
 		for( int j=0; j < view.size(); j++ ) {
 			auto data = view.get( vllt::table_index_t{j} );
 			if( std::get<int&>(data) == i ) {
-				std::cout << "DATA " << view.size() << " " << std::get<0>(data) << " " << std::get<1>(data) << " " << std::get<2>(data) << " " << std::get<3>(data) << " " << std::get<4>(data) << std::endl;
+				//std::cout << "DATA " << view.size() << " " << std::get<0>(data) << " " << std::get<1>(data) << " " << std::get<2>(data) << " " << std::get<3>(data) << " " << std::get<4>(data) << std::endl;
 				sizes[i].insert( std::get<0>(data) );
 			}
 		}
@@ -197,8 +197,8 @@ void parallel_test(int num_threads = std::thread::hardware_concurrency() ) {
 
 int main() {
 	std::cout << std::thread::hardware_concurrency() << " Threads" << std::endl;
-	//functional_test();
-	parallel_test<vllt::sync_t::VLLT_SYNC_EXTERNAL>( 2 );
+	functional_test();
+	parallel_test<vllt::sync_t::VLLT_SYNC_EXTERNAL>( );
 	return 0;
 }
 

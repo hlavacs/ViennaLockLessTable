@@ -179,10 +179,7 @@ namespace vllt {
 		//-------------------------------------------------------------------------------------------
 		//read data
 
-		template<size_t I, typename C = vtll::Nth_type<DATA, I>>
-		inline auto get_component_ptr(table_index_t n) noexcept -> C*; ///< \returns a pointer to a component
-
-		template<size_t I, typename C = vtll::Nth_type<DATA, I>>
+		template<size_t I, typename C = vtll::Nth_type<DATA, I>>  ///< Return a pointer to the component
 		inline auto get_component_ptr(block_ptr_t block_ptr, table_index_t n) noexcept -> C* {
 			if constexpr (ROW) { return &std::get<I>((*block_ptr)[n & BIT_MASK]); }
 			else { return &std::get<I>(*block_ptr)[n & BIT_MASK]; }
@@ -217,7 +214,7 @@ namespace vllt {
 		std::array<std::shared_timed_mutex, vtll::size<DATA>::value> m_access_mutex;
 
 		std::pmr::memory_resource* m_pmr; ///< Memory resource for allocating blocks
-		alignas(64) std::atomic<std::shared_ptr<block_map_t>> m_block_map;///< Atomic shared ptr to the map of blocks
+		alignas(64) std::atomic<std::shared_ptr<block_map_t>> m_block_map{nullptr};///< Atomic shared ptr to the map of blocks
 
 		using slot_size_t = vsty::strong_type_t<uint64_t, vsty::counter<>>;
 		table_index_t table_size(slot_size_t size) { return table_index_t{ size.get_bits(0, NUMBITS1) }; }	
@@ -246,32 +243,15 @@ namespace vllt {
 	}
 
 
-	/// Return a pointer to a component.
-	/// <typeparam name="C">Type of component.</typeparam>
-	/// <typeparam name="I">Index in the component list.</typeparam>
-	/// <param name="n">Slot number in the table.</param>
-	/// <param name="map_ptr">Pointer to the table block holding the row.</param>
-	/// <returns>Pointer to the component.</returns>
-	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
-	template<size_t I, typename C>
-	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::get_component_ptr(table_index_t n) noexcept -> C* { 
-		auto idx = block_idx(n);
-		auto block_map_ptr = m_block_map.load().get();
-		assert(block_map_ptr != nullptr); ///< Make sure that the block map is there
-		auto block_ptr = block_map_ptr->m_blocks[(size_t)idx].load(); ///< Access the block holding the slot
-		assert(block_ptr != nullptr); ///< Make sure that the block is there
-		return get_component_ptr<I>(block_ptr, n); ///< Return a pointer to the component
-	}
-
-
 	/// \brief Get a tuple with pointers to all components of an entry.
 	/// \param[in] n Index to the entry.
 	/// \returns a tuple with pointers to all components of entry n.
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
 	template<typename Ts>
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::get_ref_tuple(table_index_t n) noexcept -> vtll::to_ref_tuple<Ts> {
+		auto block_ptr = m_block_map.load()->m_blocks[(size_t)block_idx(n)].load();
 		return { [&] <size_t... Is>(std::index_sequence<Is...>) { 
-			return std::tie(*get_component_ptr< vtll::index_of<DATA, vtll::Nth_type<Ts,Is>>::value >(table_index_t{n})...); 
+			return std::tie(*get_component_ptr< vtll::index_of<DATA, vtll::Nth_type<Ts,Is>>::value >(block_ptr, table_index_t{n})...); 
 		} (std::make_index_sequence<vtll::size<Ts>::value>{}) };
 	};
 
@@ -282,11 +262,10 @@ namespace vllt {
 	template<typename... Cs>
 		requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::push_back_p(Cs&&... data) noexcept -> table_index_t {
-
-		//if constexpr (FAIR) {
-		//	if( m_starving.load()==-1 ) m_starving.wait(-1); //wait until pushes are done and pulls have a chance to catch up
-		//	if( table_diff(m_size_cnt.load()) < -4 ) m_starving.store(1); //if pops are starving the pushes, then prevent pulls 
-		//}
+		if constexpr (FAIR) {
+			if( m_starving.load()==-1 ) m_starving.wait(-1); //wait until pushes are done and pulls have a chance to catch up
+			if( table_diff(m_size_cnt.load()) < -4 ) m_starving.store(1); //if pops are starving the pushes, then prevent pulls 
+		}
 		
 		//increase size.m_diff to announce your demand for a new slot -> slot is now reserved for you
 		slot_size_t size = m_size_cnt.load();	///< Make sure that no other thread is popping currently
@@ -294,7 +273,7 @@ namespace vllt {
 			if ( table_diff(size)  < 0 ) { //here compare_exchange_weak was NOT called to copy manually
 				size = m_size_cnt.load();
 			}
-			//call wait function here
+			//call wait() here
 		};
 
 		auto n = (table_index_t{table_size(size) + table_diff(size)}); ///< Get the index of the new row
@@ -315,12 +294,12 @@ namespace vllt {
 		slot_size_t new_size = slot_size_t{ table_size(size), table_diff(size) + 1, NUMBITS1 };	///< Increase size to validate the new row
 		while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ table_size(new_size) + 1, table_diff(new_size) - 1, NUMBITS1 } ));
 		
-		//if constexpr (FAIR) {
-		//	if(table_diff(new_size) - 1 == 0) { 
-		//		m_starving.store(0); //allow pushes again
-		//		m_starving.notify_all(); //notify all waiting threads
-		//	}
-		//}
+		if constexpr (FAIR) {
+			if(table_diff(new_size) - 1 == 0) { 
+				m_starving.store(0); //allow pushes again
+				m_starving.notify_all(); //notify all waiting threads
+			}
+		}
 		
 		return table_index_t{ table_size(size) + table_diff(size) };	///< Return index of new entry
 	}
@@ -333,12 +312,12 @@ namespace vllt {
 	/// @returns Pointer to the block map.
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::resize(table_index_t slot) -> block_ptr_t {
-		std::shared_timed_mutex m;
+		static std::shared_timed_mutex m;
 
 		//Get a pointer to the block map. If there is none, then allocate a new one.
 		auto map_ptr{ m_block_map.load() };
 		if (!map_ptr) {
-			std::shared_lock lock(m);
+			std::scoped_lock lock(m);
 			map_ptr = m_block_map.load();
 			if( !map_ptr ) {
 				map_ptr = std::make_shared<block_map_t>( //map has always as many MINSLOTS as its capacity is -> size==capacity
@@ -361,7 +340,7 @@ namespace vllt {
 				auto ptr = map_ptr->m_blocks[(size_t)idx].load();
 				if( ptr ) return ptr;	  //yes -> return
 
-				std::shared_lock lock(m);
+				std::scoped_lock lock(m);
 				map_ptr = m_block_map.load();
 				ptr = map_ptr->m_blocks[(size_t)idx].load();
 				if( ptr ) {
@@ -371,7 +350,7 @@ namespace vllt {
 				return map_ptr->m_blocks[(size_t)idx].load();
 			}
 
-			std::shared_lock lock(m);
+			std::scoped_lock lock(m);
 
 			map_ptr =  m_block_map.load();
 			if( idx < map_ptr->m_blocks.size() ) {
@@ -405,8 +384,7 @@ namespace vllt {
 
 
 	/// @brief Pop the last row if there is one.
-	/// @param[in] tup Pointer to tuple to move the row data into.
-	/// @param[in] del If true, then call desctructor on the removed slot.
+	/// @param[out] idx_ptr Index of the deleted row.
 	/// @returns values of the popped row.
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::pop_back(table_index_t* idx_ptr) noexcept -> tuple_value_t {
@@ -414,10 +392,10 @@ namespace vllt {
 		table_index_t idx{};
 		if(idx_ptr) *idx_ptr = idx; ///< Initialize the index to an invalid value
 
-		//if constexpr (FAIR) {
-		//	if( m_starving.load()==1 ) m_starving.wait(1); //wait until pulls are done and pushes have a chance to catch up
-		//	if( table_diff(m_size_cnt.load()) > 4 ) m_starving.store(-1); //if pushes are starving the pulls, then prevent pushes
-		//}
+		if constexpr (FAIR) {
+			if( m_starving.load()==1 ) m_starving.wait(1); //wait until pulls are done and pushes have a chance to catch up
+			if( table_diff(m_size_cnt.load()) > 4 ) m_starving.store(-1); //if pushes are starving the pulls, then prevent pushes
+		}
 
 		slot_size_t size = m_size_cnt.load();
 		if (table_size(size) + table_diff(size) == 0) return {};	///< Is there a row to pop off?
@@ -431,16 +409,17 @@ namespace vllt {
 		auto map_ptr{ m_block_map.load() };						///< Access the block map
 
 		idx = table_size(size) + table_diff(size) - 1; 		///< Get the index of the row to pop
-		if(idx_ptr) *idx_ptr = idx; ///< Initialize the index to an invalid value
+		if(idx_ptr) *idx_ptr = idx; ///< Store index of popped row as out value
 
+		auto block_ptr = m_block_map.load()->m_blocks[(size_t)block_idx(idx)].load();
 		vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 			[&](auto i) {
 				using type = vtll::Nth_type<DATA, i>;
-				if		constexpr (std::is_move_assignable_v<type>) { std::get<i>(ret) = std::move(* (this->template get_component_ptr<i>(table_index_t{ idx })) ); }	//move
-				else if constexpr (std::is_copy_assignable_v<type>) { std::get<i>(ret) = *(this->template get_component_ptr<i>(table_index_t{ idx }, map_ptr)); }				//copy
-				else if constexpr (vtll::is_atomic<type>::value) { std::get<i>(ret) = this->template get_component_ptr<i>(table_index_t{ idx }, map_ptr)->load(); } 		//atomic
+				if		constexpr (std::is_move_assignable_v<type>) { std::get<i>(ret) = std::move(* (this->template get_component_ptr<i>(block_ptr, table_index_t{ idx })) ); }	//move
+				else if constexpr (std::is_copy_assignable_v<type>) { std::get<i>(ret) = *(this->template get_component_ptr<i>(block_ptr, table_index_t{ idx }, map_ptr)); }		//copy
+				else if constexpr (vtll::is_atomic<type>::value) { std::get<i>(ret) = this->template get_component_ptr<i>(block_ptr, table_index_t{ idx }, map_ptr)->load(); } 		//atomic
 
-				if constexpr (std::is_destructible_v<type> && !std::is_trivially_destructible_v<type>) { this->template get_component_ptr<i>(table_index_t{ idx })->~type(); }	///< Call destructor
+				if constexpr (std::is_destructible_v<type> && !std::is_trivially_destructible_v<type>) { this->template get_component_ptr<i>(block_ptr, table_index_t{ idx })->~type(); }	///< Call destructor
 			}
 		);
 
@@ -453,12 +432,12 @@ namespace vllt {
 		slot_size_t new_size = slot_size_t{ table_size(size), table_diff(size) - 1, NUMBITS1 };	///< Commit the popping of the row
 		while (!m_size_cnt.compare_exchange_weak(new_size, slot_size_t{ table_size(new_size) - 1, table_diff(new_size) + 1, NUMBITS1 }));
 
-		//if constexpr (FAIR) {
-		//	if(table_diff(new_size) + 1 == 0) { 
-		//		m_starving.store(0); //allow pushes again
-		//		m_starving.notify_all(); //notify all waiting threads
-		//	}
-		//}	
+		if constexpr (FAIR) {
+			if(table_diff(new_size) + 1 == 0) { 
+				m_starving.store(0); //allow pushes again
+				m_starving.notify_all(); //notify all waiting threads
+			}
+		}	
 		
 		return ret; //RVO?
 	}
@@ -585,7 +564,7 @@ namespace vllt {
 		/// @brief Add a new row to the table.
 		/// @tparam ...Cs Types of the data to add.
 		/// @param ...data Data to add.
-		/// @return Index of the new row.
+		/// @returns Index of the new row.
 		template<typename... Cs>
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
 		inline auto push_back(Cs&&... data) -> table_index_t requires (OWNER || VlltStaticTableAllowPushback<SYNC>) { 
