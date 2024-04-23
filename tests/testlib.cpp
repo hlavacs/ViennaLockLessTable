@@ -133,6 +133,7 @@ void parallel_test() {
 	vllt::VlltStaticTable<types, SYNC, 1 << 5> table;
 
 	std::latch start_work{std::thread::hardware_concurrency()};
+	std::latch start_read{std::thread::hardware_concurrency()};
 
 	auto write = [&](int id){
 		auto view = table.view();
@@ -148,6 +149,7 @@ void parallel_test() {
 		auto num = 1000;
 		auto s = view.size();		
 		assert( s == num*std::thread::hardware_concurrency() );
+		start_read.arrive_and_wait();
 		for( int i = 0; i < s; i++ ) {
 			auto data = view.get( vllt::table_index_t{i} );
 			//std::cout << "Read: ID " << id << " " << std::get<0>(data) << " " << std::get<1>(data) << " " << std::get<2>(data) << " " << std::get<3>(data) << " " << std::get<4>(data) << std::endl;
