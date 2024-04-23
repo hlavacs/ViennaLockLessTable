@@ -135,7 +135,7 @@ namespace vllt {
 		/// @brief Constructor of class VlltStaticTable
 		/// @param pmr Memory resource for allocating blocks
 		VlltStaticTable(std::pmr::memory_resource* pmr = std::pmr::new_delete_resource()) noexcept
-			: m_pmr{ pmr }, m_block_map{ nullptr } {};
+			: m_alloc{ pmr }, m_block_map{ nullptr } {};
 
 		/// @brief Destructor of class VlltStaticTable
 		~VlltStaticTable() noexcept {};
@@ -212,8 +212,8 @@ namespace vllt {
 		inline auto resize(table_index_t slot) -> block_ptr_t; ///< If the map of blocks is too small, allocate a larger one and copy the previous block pointers into it.
 
 		std::array<std::shared_timed_mutex, vtll::size<DATA>::value> m_access_mutex;
+		std::pmr::polymorphic_allocator<block_t> m_alloc; ///< Allocator for the table
 
-		std::pmr::memory_resource* m_pmr; ///< Memory resource for allocating blocks
 		alignas(64) std::atomic<std::shared_ptr<block_map_t>> m_block_map{nullptr};///< Atomic shared ptr to the map of blocks
 
 		using slot_size_t = vsty::strong_type_t<uint64_t, vsty::counter<>>;
@@ -320,8 +320,8 @@ namespace vllt {
 			std::scoped_lock lock(m);
 			map_ptr = m_block_map.load();
 			if( !map_ptr ) {
-				map_ptr = std::make_shared<block_map_t>( //map has always as many MINSLOTS as its capacity is -> size==capacity
-					block_map_t{ std::pmr::vector<std::atomic<block_ptr_t>>{MINSLOTS, m_pmr} } //create a new map
+				map_ptr = std::allocate_shared<block_map_t>( //map has always as many MINSLOTS as its capacity is -> size==capacity
+					m_alloc, block_map_t{ std::pmr::vector<std::atomic<block_ptr_t>>{MINSLOTS, m_alloc} } //create a new map
 				);
 				m_block_map.store( map_ptr );
 			}
@@ -341,7 +341,7 @@ namespace vllt {
 				std::scoped_lock lock(m);
 				ptr = map_ptr->m_blocks[(size_t)idx].load();
 				if( ptr ) return ptr;	  //yes -> return
-				map_ptr->m_blocks[(size_t)idx].store( std::make_shared<block_t>() ); //no -> get a new block
+				map_ptr->m_blocks[(size_t)idx].store( std::allocate_shared<block_t>(m_alloc) ); //no -> get a new block
 				return map_ptr->m_blocks[(size_t)idx].load();
 			}
 
@@ -357,18 +357,18 @@ namespace vllt {
 			auto new_size = num_blocks << 2; //double the size of the map
 			while( idx >= new_size ) new_size <<= 2; //make sure there are enough slots for the new block
 
-			auto new_map_ptr = std::make_shared<block_map_t>( //map has always as many slots as its capacity is -> size==capacity
-				block_map_t{ std::pmr::vector<std::atomic<block_ptr_t>>{new_size, m_pmr} } //increase existing one
+			auto new_map_ptr = std::allocate_shared<block_map_t>( //map has always as many slots as its capacity is -> size==capacity
+				m_alloc, block_map_t{ std::pmr::vector<std::atomic<block_ptr_t>>{new_size, m_alloc} } //increase existing one
 			);
 
 			//Copy the old block pointers into the new map. 
 			for( size_t i = 0; i < num_blocks; ++i ) {
 				auto ptr = map_ptr->m_blocks[i].load();
 				if( ptr ) new_map_ptr->m_blocks[i].store( ptr );
-				else new_map_ptr->m_blocks[i].store( std::make_shared<block_t>() ); //get a new block
+				else new_map_ptr->m_blocks[i].store( std::allocate_shared<block_t>(m_alloc) ); //get a new block
 			}
 			for( size_t i = num_blocks; i <= idx; ++i ) {
-				new_map_ptr->m_blocks[i].store( std::make_shared<block_t>() ); //get a new block
+				new_map_ptr->m_blocks[i].store( std::allocate_shared<block_t>(m_alloc) ); //get a new block
 			}
 
 			map_ptr = new_map_ptr; ///<  remember for later	
