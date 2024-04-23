@@ -312,7 +312,7 @@ namespace vllt {
 	/// @returns Pointer to the block map.
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::resize(table_index_t slot) -> block_ptr_t {
-		static std::shared_timed_mutex m;
+		static std::mutex m;
 
 		//Get a pointer to the block map. If there is none, then allocate a new one.
 		auto map_ptr{ m_block_map.load() };
@@ -334,18 +334,13 @@ namespace vllt {
 		auto idx = block_idx(slot);
 
 		while(1) {
-			map_ptr = m_block_map.load();
-
 			if ( idx < map_ptr->m_blocks.size() ) {	//test if the block is already there
 				auto ptr = map_ptr->m_blocks[(size_t)idx].load();
 				if( ptr ) return ptr;	  //yes -> return
 
 				std::scoped_lock lock(m);
-				map_ptr = m_block_map.load();
 				ptr = map_ptr->m_blocks[(size_t)idx].load();
-				if( ptr ) {
-					return ptr;	  //yes -> return
-				}
+				if( ptr ) return ptr;	  //yes -> return
 				map_ptr->m_blocks[(size_t)idx].store( std::make_shared<block_t>() ); //no -> get a new block
 				return map_ptr->m_blocks[(size_t)idx].load();
 			}

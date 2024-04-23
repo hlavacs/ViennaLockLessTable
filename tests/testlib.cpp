@@ -31,10 +31,10 @@ void functional_test() {
 		//d1 = 'U';  //compile error
 
 		decltype(auto) d2 = std::get<2>(data); //reference
-		d2 = 3.0f;	//change the value in the table
+		d2 = 3;	//change the value in the table
 
 		auto d3 = std::get<3>(data); //copy of the data (int)
-		d3 = 3;	//change the copy, not the value in the table
+		d3 = 3.0f;	//change the copy, not the value in the table
 
 		std::cout << "Data: " << std::get<0>(data) //unchanged
 				  << " " << std::get<1>(data)
@@ -131,7 +131,7 @@ void functional_test() {
 template<vllt::sync_t SYNC>
 void parallel_test(int num_threads = std::thread::hardware_concurrency() ) {
 	using types = vtll::tl<double, float, int, char, std::string>;
-	vllt::VlltStaticTable<types, SYNC, 1 << 15, false, 16> table;
+	vllt::VlltStaticTable<types, SYNC, 1 << 5, false, 8> table;
 
 	std::latch start_work{num_threads};
 	std::latch start_read{num_threads};
@@ -153,7 +153,7 @@ void parallel_test(int num_threads = std::thread::hardware_concurrency() ) {
 		assert( s == num*num_threads );
 		start_read.arrive_and_wait();
 		for( int i = 0; i < s; i++ ) {
-			auto data = view.get( vllt::table_index_t{i} );
+			auto data = view.get( vllt::table_index_t{(uint64_t)i} );
 			//std::cout << "Read: ID " << id << " " << std::get<0>(data) << " " << std::get<1>(data) << " " << std::get<2>(data) << " " << std::get<3>(data) << " " << std::get<4>(data) << std::endl;
 		}
 	};
@@ -180,7 +180,7 @@ void parallel_test(int num_threads = std::thread::hardware_concurrency() ) {
 
 	for( int i = 0; i < num_threads; i++ ) {
 		for( int j=0; j < view.size(); j++ ) {
-			auto data = view.get( vllt::table_index_t{j} );
+			auto data = view.get( vllt::table_index_t{(uint64_t)j} );
 			if( std::get<int&>(data) == i ) {
 				//std::cout << "DATA " << view.size() << " " << std::get<0>(data) << " " << std::get<1>(data) << " " << std::get<2>(data) << " " << std::get<3>(data) << " " << std::get<4>(data) << std::endl;
 				sizes[i].insert( std::get<0>(data) );
