@@ -278,15 +278,11 @@ namespace vllt {
 
 		auto n = (table_index_t{table_size(size) + table_diff(size)}); ///< Get the index of the new row
 		auto block_ptr = resize(n); //if need be, grow the map of blocks
-		assert(block_ptr != nullptr); ///< Make sure that the pointer is valid
 
 		//copy or move the data to the new slot, using a recursive templated lambda
 		auto f = [&]<size_t I, typename T, typename... Ts>(auto && fun, T && dat, Ts&&... dats) {
-			auto ptr = get_component_ptr<I>(block_ptr, n);
-			assert(ptr != nullptr); ///< Make sure that the pointer is valid
-
-			if constexpr (vtll::is_atomic<T>::value) ptr->store(dat); //copy value for atomic
-			else *ptr = std::forward<T>(dat); //move or copy
+			if constexpr (vtll::is_atomic<T>::value) get_component_ptr<I>(block_ptr, n)->store(dat); //copy value for atomic
+			else *get_component_ptr<I>(block_ptr, n) = std::forward<T>(dat); //move or copy
 			if constexpr (sizeof...(dats) > 0) { fun.template operator() < I + 1 > (fun, std::forward<Ts>(dats)...); } //recurse
 		};
 		f.template operator() < 0 > (f, std::forward<Cs>(data)...);
