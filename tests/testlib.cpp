@@ -126,7 +126,7 @@ void functional_test() {
 	}
 
 	{
-		vllt::VlltQueue<double, vllt::sync_t::VLLT_SYNC_EXTERNAL, 1 << 5> queue;
+		vllt::VlltQueue<double, 1 << 5> queue;
 		
 		for( int i = 0; i < 10; i++ ) {
 			queue.push_back((double)i);

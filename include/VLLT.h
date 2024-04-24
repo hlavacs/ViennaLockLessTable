@@ -30,7 +30,7 @@
 #include "VSTY.h"
 
 
-/// @brief 
+/// \brief 
 namespace vllt {
 
 
@@ -91,12 +91,12 @@ namespace vllt {
 	class VlltStack;
 
 	/// VlltStaticTable is the base class for some classes, enabling management of tables that can be appended in parallel.
-	/// @tparam DATA Types of the table.
-	/// @tparam SYNC Synchronization type for the table.
-	/// @tparam N0 Number of rows in a block.
-	/// @tparam ROW If true, then the table is row based, otherwise column based.
-	/// @tparam MINSLOTS Minimum number of slots in a block.
-	/// @tparam FAIR If true, then the table is fair, otherwise not.
+	/// \tparam DATA Types of the table.
+	/// \tparam SYNC Synchronization type for the table.
+	/// \tparam N0 Number of rows in a block.
+	/// \tparam ROW If true, then the table is row based, otherwise column based.
+	/// \tparam MINSLOTS Minimum number of slots in a block.
+	/// \tparam FAIR If true, then the table is fair, otherwise not.
 	template<typename DATA, sync_t SYNC = sync_t::VLLT_SYNC_EXTERNAL, size_t N0 = 1 << 5, bool ROW = false, size_t MINSLOTS = 16, bool FAIR = false>
 		requires VlltStaticTableConcept<DATA>
 	class VlltStaticTable {
@@ -132,16 +132,13 @@ namespace vllt {
 		};
 
 	public:
-		/// @brief Constructor of class VlltStaticTable
-		/// @param pmr Memory resource for allocating blocks
+		/// \brief Constructor of class VlltStaticTable
+		/// \param pmr Memory resource for allocating blocks
 		VlltStaticTable(std::pmr::memory_resource* pmr = std::pmr::new_delete_resource()) noexcept
 			: m_alloc{ pmr }, m_block_map{ nullptr } {};
 
-		/// @brief Destructor of class VlltStaticTable
-		~VlltStaticTable() noexcept {};
-
 		/// Return the number of rows in the table.
-		/// @return The number of rows in the table.
+		/// \returns The number of rows in the table.
 		inline auto size() noexcept {
 			auto size = m_size_cnt.load();
 			auto s1 = table_index_t{ table_size(size) + table_diff(size) };
@@ -150,8 +147,8 @@ namespace vllt {
  		}
 
 		/// Return a view to the table.
-		/// @tparam ...Ts Types of the table the view accesses.
-		/// @return a view to the table.
+		/// \tparam ...Ts Types of the table the view accesses.
+		/// \returns a view to the table.
 		template<typename... Ts >
 		inline auto view() noexcept;
 
@@ -169,9 +166,9 @@ namespace vllt {
 
 	protected:
 
-		/// @brief Add a new row to the table.
-		/// @param data Data for the new row.
-		/// @return Index of the new row.
+		/// \brief Add a new row to the table.
+		/// \param data Data for the new row.
+		/// \returns Index of the new row.
 		template<typename... Cs>
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
 		inline auto push_back_p( Cs&&... data ) noexcept -> table_index_t;
@@ -224,8 +221,8 @@ namespace vllt {
 	};
 
 
-	/// @brief Create a view to the table.
-	/// @return a view to the table.
+	/// \brief Create a view to the table.
+	/// \returns a view to the table.
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
 	template<typename... Ts >
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::view() noexcept {
@@ -301,11 +298,11 @@ namespace vllt {
 	}
 
 
-	/// @brief If the map of blocks is too small, allocate a larger one and copy the previous block pointers into it.
+	/// \brief If the map of blocks is too small, allocate a larger one and copy the previous block pointers into it.
 	/// Then make one CAS attempt. If the attempt succeeds, then remember the new block map.
 	/// If the CAS fails because another thread beat us, then CAS will copy the new pointer so we can use it.
-	/// @param[in] slot Slot number in the table.
-	/// @returns Pointer to the block map.
+	/// \param[in] slot Slot number in the table.
+	/// \returnss Pointer to the block map.
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::resize(table_index_t slot) -> block_ptr_t {
 		static std::mutex m;
@@ -374,9 +371,9 @@ namespace vllt {
 
 
 
-	/// @brief Pop the last row if there is one.
-	/// @param[out] idx_ptr Index of the deleted row.
-	/// @returns values of the popped row.
+	/// \brief Pop the last row if there is one.
+	/// \param[out] idx_ptr Index of the deleted row.
+	/// \returnss values of the popped row.
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::pop_back(table_index_t* idx_ptr) noexcept -> tuple_value_t {
 	vtll::to_tuple<vtll::remove_atomic<DATA>> ret{};
@@ -434,8 +431,8 @@ namespace vllt {
 	}
 
 
-	/// @brief Pop all rows and call the destructors.
-	/// @returns number of popped rows.
+	/// \brief Pop all rows and call the destructors.
+	/// \returnss number of popped rows.
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::clear() noexcept {
 		auto num = size();
@@ -446,10 +443,10 @@ namespace vllt {
 	}
 
 
-	/// @brief Swap the values of two rows.
-	/// @param[in] n1 Index of first row.
-	/// @param[in] n2 Index of second row.
-	/// @returns true if the operation was successful.
+	/// \brief Swap the values of two rows.
+	/// \param[in] n1 Index of first row.
+	/// \param[in] n2 Index of second row.
+	/// \returnss true if the operation was successful.
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::swap( auto src, auto dst ) noexcept -> void {
 		if constexpr (std::is_same_v< decltype(src), table_index_t  >) assert(dst < size() && src < size());
@@ -472,9 +469,9 @@ namespace vllt {
 		return;
 	}
 
-	/// @brief Remove a row from the table.
-	/// @param n1 Index of the row to remove.
-	/// @return Tuple holding the values of the removed row.
+	/// \brief Remove a row from the table.
+	/// \param n1 Index of the row to remove.
+	/// \returns Tuple holding the values of the removed row.
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::erase(table_index_t n1) -> tuple_value_t {
 		table_index_t n2;
@@ -488,15 +485,15 @@ namespace vllt {
 	//---------------------------------------------------------------------------------------------------
 	//table view
 
-	/// @brief VlltStaticTableView is a view to a VlltStaticTable. It allows to read and write to the table.
-	/// @tparam DATA Types of the table.
-	/// @tparam SYNC Synchronization type for the table.
-	/// @tparam N0 Number of rows in a block.
-	/// @tparam ROW If true, then the table is row based, otherwise column based.
-	/// @tparam MINSLOTS Minimum number of slots in a block.
-	/// @tparam FAIR If true, then the table is fair, otherwise not.
-	/// @tparam READ Types that can be read from the table.
-	/// @tparam WRITE Types that can be written to the table.
+	/// \brief VlltStaticTableView is a view to a VlltStaticTable. It allows to read and write to the table.
+	/// \tparam DATA Types of the table.
+	/// \tparam SYNC Synchronization type for the table.
+	/// \tparam N0 Number of rows in a block.
+	/// \tparam ROW If true, then the table is row based, otherwise column based.
+	/// \tparam MINSLOTS Minimum number of slots in a block.
+	/// \tparam FAIR If true, then the table is fair, otherwise not.
+	/// \tparam READ Types that can be read from the table.
+	/// \tparam WRITE Types that can be written to the table.
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
 	class VlltStaticTableView {
 
@@ -513,7 +510,7 @@ namespace vllt {
 
 		static const bool OWNER = (vtll::has_all_types<DATA, WRITE>::value && vtll::has_all_types<WRITE, DATA>::value); ///< Is the view the owner of the table?
 
-		/// @brief Constructor of class VlltStaticTableView. This is private because only the table is allowed to create a view.
+		/// \brief Constructor of class VlltStaticTableView. This is private because only the table is allowed to create a view.
 		VlltStaticTableView(table_type& table ) : m_table{ table } {	
 			if constexpr (SYNC == sync_t::VLLT_SYNC_EXTERNAL) return;
 
@@ -533,7 +530,7 @@ namespace vllt {
 		
 
 	public:
-		/// @brief Destructor of class VlltStaticTableView
+		/// \brief Destructor of class VlltStaticTableView
 		~VlltStaticTableView() {
 			if constexpr (SYNC == sync_t::VLLT_SYNC_EXTERNAL) return;
 
@@ -552,49 +549,49 @@ namespace vllt {
 	
 		inline auto size() noexcept { return m_table.size(); } ///< Return the number of rows in the table.
 
-		/// @brief Add a new row to the table.
-		/// @tparam ...Cs Types of the data to add.
-		/// @param ...data Data to add.
-		/// @returns Index of the new row.
+		/// \brief Add a new row to the table.
+		/// \tparam ...Cs Types of the data to add.
+		/// \param ...data Data to add.
+		/// \returnss Index of the new row.
 		template<typename... Cs>
 			requires std::is_same_v<vtll::tl<std::decay_t<Cs>...>, vtll::remove_atomic<DATA>>
 		inline auto push_back(Cs&&... data) -> table_index_t requires (OWNER || VlltStaticTableAllowPushback<SYNC>) { 
 			return m_table.push_back_p(std::forward<Cs>(data)...); 
 		};
 
-		/// @brief Get a tuple with refs to all components of an entry.
-		/// @param n Index to the entry.
-		/// @returns a tuple with refs to all components of entry n.
+		/// \brief Get a tuple with refs to all components of an entry.
+		/// \param n Index to the entry.
+		/// \returnss a tuple with refs to all components of entry n.
 		inline decltype(auto) get(table_index_t n) {
 			if constexpr (vtll::size<READ>::value == 0) return m_table.template get_ref_tuple<WRITE>(n);
 			else if constexpr (vtll::size<WRITE>::value == 0) return m_table.template get_const_ref_tuple<READ>(n);
 			else return std::tuple_cat( m_table.template get_const_ref_tuple<READ>(n), m_table.template get_ref_tuple<WRITE>(n) ); 
 		};
 
-		/// @brief Pop last row from the table.
-		/// @returns Tuple with the data of the last row.
+		/// \brief Pop last row from the table.
+		/// \returnss Tuple with the data of the last row.
 		inline auto pop_back() noexcept requires OWNER { return m_table.pop_back(); }; 
 
-		/// @brief Clear the table.
+		/// \brief Clear the table.
 		inline auto clear() noexcept requires OWNER { return m_table.clear(); };
 
-		/// @brief Swap the values of two rows.
+		/// \brief Swap the values of two rows.
 		inline auto swap(table_index_t lhs, table_index_t rhs) noexcept -> void requires OWNER { m_table.swap(lhs, rhs); };	
 		
-		/// @brief Erase a row from the table. Replace it with the last row. Return the values.
+		/// \brief Erase a row from the table. Replace it with the last row. Return the values.
 		inline auto erase(table_index_t n) -> tuple_value_t requires OWNER { return m_table.erase(n); }
 
-		/// @brief Equality comparison operator
+		/// \brief Equality comparison operator
     	friend bool operator==(const VlltStaticTableView& lhs, const VlltStaticTableView& rhs) {
         	return lhs.m_table == rhs.m_table;
     	}
 
-		/// @brief Create an iterator to the beginning of the table.
-		/// @return  Iterator to the beginning of the table.
+		/// \brief Create an iterator to the beginning of the table.
+		/// \returns  Iterator to the beginning of the table.
 		auto begin() { return VtllStaticIterator<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, READ, WRITE>(*this, table_index_t{0}); } 
 		
-		/// @brief Create an iterator to the end of the table.
-		/// @return  Iterator to the end of the table.
+		/// \brief Create an iterator to the end of the table.
+		/// \returns  Iterator to the end of the table.
 		auto end() { return VtllStaticIterator<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, READ, WRITE>(*this, table_index_t{size() - 1}); } 
 
 	private:
@@ -615,16 +612,16 @@ namespace vllt {
 
     	using iterator_category = std::random_access_iterator_tag ; ///< Type of the iterator category
 
-		/// @brief Constructor of the iterator
-		/// @param view View to the table
-		/// @param n Index of the row the iterator points to
+		/// \brief Constructor of the iterator
+		/// \param view View to the table
+		/// \param n Index of the row the iterator points to
     	VtllStaticIterator(view_type& view , table_index_t n = table_index_t{}) : m_view{ view }, m_n{n} {}; 
 
-    	/// @brief Constructor of the iterator
-    	/// @param view  View to the table
+    	/// \brief Constructor of the iterator
+    	/// \param view  View to the table
     	VtllStaticIterator(VtllStaticIterator& view) : m_view{ &view }, m_n{view.m_n} {};
 
-		/// @brief Copy assignment operator
+		/// \brief Copy assignment operator
     	VtllStaticIterator& operator=(VtllStaticIterator& rhs){ m_view = rhs.m_view; m_n = rhs.m_n; return *this; };
     	reference operator*() const { return m_view.get(m_n); } ///< Dereference operator
     	pointer operator->() const { return m_view.get(m_n); }  ///< Arrow operator
@@ -637,25 +634,25 @@ namespace vllt {
     	VtllStaticIterator& operator+=(difference_type n) { m_n += n; return *this;} ///< Addition assignment operator
     	VtllStaticIterator& operator-=(difference_type n) { m_n -= n; return *this; } ///< Subtraction assignment operator
 
-    	/// @brief Unequality comparison operator
-    	/// @param rhs  Right hand side of the comparison
-    	/// @return  True if the iterators are not equal
+    	/// \brief Unequality comparison operator
+    	/// \param rhs  Right hand side of the comparison
+    	/// \returns  True if the iterators are not equal
     	auto operator!=(const VtllStaticIterator& rhs) {
 			return m_view != rhs.m_view || m_n != rhs.m_n;
 		}
 
-		/// @brief Spaceship comparison operator
-		/// @param rhs  Right hand side of the comparison
-		/// @return  Partial ordering of the iterators
+		/// \brief Spaceship comparison operator
+		/// \param rhs  Right hand side of the comparison
+		/// \returns  Partial ordering of the iterators
     	std::partial_ordering operator<=>(const VtllStaticIterator& rhs) {
 			if(m_view == rhs.m_view) return m_n <=> rhs.m_n;
 			return std::partial_ordering::unordered;
 		}
 
-		/// @brief Spaceship comparison operator
-		/// @param lhs First iterator
-		/// @param rhs  Second iterator
-		/// @return  Partial ordering of the iterators
+		/// \brief Spaceship comparison operator
+		/// \param lhs First iterator
+		/// \param rhs  Second iterator
+		/// \returns  Partial ordering of the iterators
 		friend std::partial_ordering operator<=>(const VtllStaticIterator& lhs, const VtllStaticIterator& rhs) {
 			if(lhs.m_view == rhs.m_view) return lhs.m_n <=> rhs.m_n;
 			return std::partial_ordering::unordered;
@@ -670,13 +667,13 @@ namespace vllt {
 	//---------------------------------------------------------------------------------------------------
 
 
-	/// @brief VlltStack is a simple stack on top of a VlltStaticTable.
-	/// @tparam T Type being stored in the stack.
-	/// @tparam N0 SIze of blocks in the table.
-	/// @tparam ROW Boolean if the table is row based or column based.
-	/// @tparam MINSLOTS Minimum number of slots in a block.
-	/// @tparam FAIR If true then the stack will try to balance the number of pushes and pops.
-	/// @tparam SYNC In deug checks whether the stack is used concurrently with other views (which is not allowed).
+	/// \brief VlltStack is a simple stack on top of a VlltStaticTable.
+	/// \tparam T Type being stored in the stack.
+	/// \tparam N0 SIze of blocks in the table.
+	/// \tparam ROW Boolean if the table is row based or column based.
+	/// \tparam MINSLOTS Minimum number of slots in a block.
+	/// \tparam FAIR If true then the stack will try to balance the number of pushes and pops.
+	/// \tparam SYNC In deug checks whether the stack is used concurrently with other views (which is not allowed).
 	template<typename T, size_t N0 = 1 << 5, bool ROW = false, size_t MINSLOTS = 16, bool FAIR = false>
 	class VlltStack {
 		using tuple_value_t = vtll::to_tuple<vtll::tl<T>>;	///< Tuple holding the entries as value
@@ -684,22 +681,22 @@ namespace vllt {
 		using view_type_t = VlltStaticTableView<vtll::tl<T>, sync_t::VLLT_SYNC_EXTERNAL, N0, ROW, MINSLOTS, FAIR, vtll::tl<>, vtll::tl<T>>;
 
 	public:
-		/// @brief Constructor of class VlltStaticStack
-		/// @param table Reference to the table
+		/// \brief Constructor of class VlltStaticStack
+		/// \param table Reference to the table
 		VlltStack(std::pmr::memory_resource* pmr = std::pmr::new_delete_resource() ) : m_table{ pmr } {};
 
 		inline auto size() noexcept { return m_table.size(); } ///< Return the number of rows in the table.
 
-		/// @brief Add a new row to the table.
-		/// @tparam ...Cs Types of the data to add.
-		/// @param ...data Data to add.
-		/// @return Index of the new row.
+		/// \brief Add a new row to the table.
+		/// \tparam ...Cs Types of the data to add.
+		/// \param ...data Data to add.
+		/// \returns Index of the new row.
 		inline auto push_back(T&& data) -> table_index_t { 
 			return m_view.push_back(std::forward<T>(data)); 
 		};
 
 		/// Pop last row from the table.
-		/// @returns Tuple with the data of the last row.
+		/// \returnss Tuple with the data of the last row.
 		inline auto pop_back() noexcept -> std::optional< tuple_value_t > { 
 			if( size() > 0 ) { return { m_view.pop_back() }; }
 			return std::nullopt; 
@@ -713,35 +710,49 @@ namespace vllt {
 
 	//---------------------------------------------------------------------------------------------------
 
+	using queue_index_t = vsty::strong_type_t<uint32_t, vsty::counter<>, std::integral_constant<uint32_t, std::numeric_limits<uint32_t>::max()>>;///< Strong integer type for indexing rows, 0 to number rows - 1
 
-	template<typename T, sync_t SYNC = sync_t::VLLT_SYNC_INTERNAL, size_t N0 = 1 << 5, bool ROW = false, size_t MINSLOTS = 16, bool FAIR = false>
+	template<typename T, size_t N0 = 1 << 5, bool ROW = false, size_t MINSLOTS = 16, bool FAIR = false>
 	class VlltQueue {
-		const size_t NUMBITS = sizeof(uint64_t)/2; ///< Number of bits for the index of the first item in the stack
-
 		using tuple_value_t = vtll::to_tuple<vtll::tl<T>>;	///< Tuple holding the entries as value
-		using table_types_t = vtll::tl<T, table_index_t>;
-		using table_type_t = VlltStaticTable<table_types_t, sync_t::VLLT_SYNC_EXTERNAL, N0, ROW, MINSLOTS, FAIR>;
-		using view_type_t = VlltStaticTableView<table_types_t, sync_t::VLLT_SYNC_EXTERNAL, N0, ROW, MINSLOTS, FAIR, vtll::tl<>, vtll::tl<T>>;
+		using table_types_t = vtll::tl<T, queue_index_t>;
+		using table_type_t = VlltStaticTable<	 table_types_t, sync_t::VLLT_SYNC_EXTERNAL, N0, ROW, MINSLOTS, FAIR>;
+		using view_type_t  = VlltStaticTableView<table_types_t, sync_t::VLLT_SYNC_EXTERNAL, N0, ROW, MINSLOTS, FAIR, vtll::tl<>, vtll::tl<T>>;
+
+		struct front_back_t {
+			queue_index_t m_front{};
+			queue_index_t m_back{};
+		};
 
 	public:
-		/// @brief Constructor of class VlltStaticStack
-		/// @param table Reference to the table
+		/// \brief Constructor of class VlltStaticStack
+		/// \param table Reference to the table
 		VlltQueue(std::pmr::memory_resource* pmr = std::pmr::new_delete_resource() ) : m_table{ pmr } {};
 
 		inline auto size() noexcept { return m_table.size(); } ///< Return the number of rows in the table.
 
-		/// @brief Add a new row to the table.
-		/// @tparam ...T Type of the data to add.
-		/// @param ...data Data to add.
-		/// @return Index of the new row.
-		inline auto push_back(T&& data) -> table_index_t { 
+		/// \brief Add a new row to the table.
+		/// \tparam ...T Type of the data to add.
+		/// \param ...data Data to add.
+		/// \returns Index of the new row.
+		inline auto push_back(T&& data) { 
 			auto view = m_table.view();
-			table_index_t idx{0};
-			return view.push_back(std::forward<T>(data), idx); 
+			queue_index_t idx{m_first_free};
+			if(idx.has_value()) {
+				auto tup = view.get(table_index_t{ idx });
+				m_first_free = std::get<1>(tup);
+				std::get<0>(tup) = std::forward<T>(data);
+			} else {
+				idx = view.push_back(std::forward<T>(data), m_front_back.load().m_front );
+			}
+			if( m_front_back.load().m_back.has_value() ) {
+				auto tup = view.get( table_index_t{ m_front_back.load().m_back });
+				std::get<1>(tup) = idx;
+			}
 		};
 
 		/// Pop last row from the table.
-		/// @returns Tuple with the data of the last row.
+		/// \returnss Tuple with the data of the last row.
 		inline auto pop_front() noexcept -> std::optional< tuple_value_t > { 
 			auto view = m_table.view();
 			if( size() == 0 ) return std::nullopt;
@@ -749,9 +760,8 @@ namespace vllt {
 		};  
 
 	private:
-		table_index_t m_front_back{}; ///< indexes of the front and back of the queue
-		table_index_t index_front(table_index_t size) { return table_index_t{ size.get_bits(0, NUMBITS) }; }	
-		table_diff_t  index_back(table_index_t size) { return table_index_t{ (int64_t)size.get_bits_signed(NUMBITS) }; }
+		std::atomic<front_back_t> m_front_back{}; ///< indexes of the front and back of the queue
+		std::atomic<queue_index_t> m_first_free{}; ///< index of the first free slot
 		table_type_t m_table; ///< the table used by the queue
 	};
 
