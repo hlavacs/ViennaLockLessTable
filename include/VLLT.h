@@ -714,6 +714,42 @@ namespace vllt {
 	//---------------------------------------------------------------------------------------------------
 
 
+	template<typename T, sync_t SYNC = sync_t::VLLT_SYNC_INTERNAL, size_t N0 = 1 << 5, bool ROW = false, size_t MINSLOTS = 16, bool FAIR = false>
+	class VlltQueue {
+		using tuple_value_t = vtll::to_tuple<vtll::tl<T>>;	///< Tuple holding the entries as value
+		using table_types_t = vtll::tl<T, table_index_t>;
+		using table_type_t = VlltStaticTable<table_types_t, sync_t::VLLT_SYNC_EXTERNAL, N0, ROW, MINSLOTS, FAIR>;
+		using view_type_t = VlltStaticTableView<table_types_t, sync_t::VLLT_SYNC_EXTERNAL, N0, ROW, MINSLOTS, FAIR, vtll::tl<>, vtll::tl<T>>;
+
+	public:
+		/// @brief Constructor of class VlltStaticStack
+		/// @param table Reference to the table
+		VlltQueue(std::pmr::memory_resource* pmr = std::pmr::new_delete_resource() ) : m_table{ pmr } {};
+
+		inline auto size() noexcept { return m_table.size(); } ///< Return the number of rows in the table.
+
+		/// @brief Add a new row to the table.
+		/// @tparam ...T Type of the data to add.
+		/// @param ...data Data to add.
+		/// @return Index of the new row.
+		inline auto push_back(T&& data) -> table_index_t { 
+			auto view = m_table.view();
+			table_index_t idx{0};
+			return view.push_back(std::forward<T>(data), idx); 
+		};
+
+		/// Pop last row from the table.
+		/// @returns Tuple with the data of the last row.
+		inline auto pop_front() noexcept -> std::optional< tuple_value_t > { 
+			auto view = m_table.view();
+			if( size() == 0 ) return std::nullopt;
+			return std::nullopt; 
+		};  
+
+	private:
+		table_index_t m_front_back{}; ///< indexes of the front and back of the queue
+		table_type_t m_table; ///< the table used by the queue
+	};
 
 
 

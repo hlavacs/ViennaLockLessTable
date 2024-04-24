@@ -125,6 +125,19 @@ void functional_test() {
 		}
 	}
 
+	{
+		vllt::VlltQueue<double, vllt::sync_t::VLLT_SYNC_EXTERNAL, 1 << 5> queue;
+		
+		for( int i = 0; i < 10; i++ ) {
+			queue.push_back((double)i);
+		}
+
+		for( auto ret = queue.pop_front(); ret.has_value(); ret = queue.pop_front() ) {
+			std::cout << "Queue Size: " << queue.size() << std::endl;			
+		}
+	}
+
+
 }
 
 
