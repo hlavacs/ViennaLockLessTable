@@ -716,6 +716,8 @@ namespace vllt {
 
 	template<typename T, sync_t SYNC = sync_t::VLLT_SYNC_INTERNAL, size_t N0 = 1 << 5, bool ROW = false, size_t MINSLOTS = 16, bool FAIR = false>
 	class VlltQueue {
+		const size_t NUMBITS = sizeof(uint64_t)/2; ///< Number of bits for the index of the first item in the stack
+
 		using tuple_value_t = vtll::to_tuple<vtll::tl<T>>;	///< Tuple holding the entries as value
 		using table_types_t = vtll::tl<T, table_index_t>;
 		using table_type_t = VlltStaticTable<table_types_t, sync_t::VLLT_SYNC_EXTERNAL, N0, ROW, MINSLOTS, FAIR>;
@@ -748,6 +750,8 @@ namespace vllt {
 
 	private:
 		table_index_t m_front_back{}; ///< indexes of the front and back of the queue
+		table_index_t index_front(table_index_t size) { return table_index_t{ size.get_bits(0, NUMBITS) }; }	
+		table_diff_t  index_back(table_index_t size) { return table_index_t{ (int64_t)size.get_bits_signed(NUMBITS) }; }
 		table_type_t m_table; ///< the table used by the queue
 	};
 
