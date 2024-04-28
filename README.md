@@ -45,7 +45,7 @@ VLLT's main base class is VlltStaticTable. The class depends on the following te
 You create a table using a list of column types. Types must be unique!
 ```c
 using types = vtll::tl<double, float, int, char, std::string>; //typelist contaning the table column types (must be unique)
-vllt::VlltStaticTable<types, vllt::sync_t::VLLT_SYNC_DEBUG_RELAXED, 1 << 5> table;
+vllt::VlltStaticTable<types, vllt::sync_t::VLLT_SYNC_DEBUG_PUSHBACK, 1 << 5> table;
 ```
 
 VlltStaticTable offers a slim API only:
@@ -57,39 +57,42 @@ push_bak(): insert a new row to the end of the table.
 
 ## VlltStaticTableView
 
-Table views are he main way to interact with a table, following a data access object (DAO) pattern. Threads can interact with a table through a view, e.g., reading, writing values or inserting new rows etc. When creating views, the columns to read and write must be specified. Creating a view may also entail enforcing parallel access restrictions. Which restrictions apply is specified by the SYNC option:
+Table views are he main way to interact with a table, following a data access object (DAO) pattern. Threads can interact with a table through a view, e.g., reading, writing values or inserting new rows etc. When creating views, the columns to read and write must be specified. Creating a view may also entail enforcing parallel access restrictions. In this context, a *push-back-only* view is a view that can only push back new rows or return the size of the table, no more. Which restrictions apply is specified by the SYNC option:
 
 ### VLLT_SYNC_EXTERNAL
-In this mode there are no restrictions. Synchronization is done externally, you can create views with full access capabilities any time. In game engines, external synchronizaiton can be enforced, e.g., by a directed acyclic graph that manages access from different game systems.
+In this mode there are no restrictions. Synchronization is done externally, you can create views with full access capabilities any time. In game engines, external synchronizaiton can be enforced, e.g., by a directed acyclic graph that manages access from different game systems. However, there are no push-back-only views allowed.
+
+### VLLT_SYNC_EXTERNAL_PUSHBACK
+This is like VLLT_SYNC_EXTERNAL, but additionally *push-back-only* views can be created calling *view<VlltWrite>()* on the table. Using this mechanism, the game engine can allow parallel row creation to a system even if the system currently is not the owner of the table, by passing  push-back-only views of a table to the system. Creating new rows is lock less and does not affect other operations of a table.
 
 ### VLLT_SYNC_INTERNAL
-When creating a view, all columns are locked using read and write locks. Reading columns can be done by arbitrary readers, but if a view wants to write to a column, then there can be no other readers or writers to this column. In conflict, the construction of views is blocked by spin locks until the conflict is removed. Also, the view can insert new rows only if it is the current owner, i.e. it is allowed to write to all columns. This mode can be used if there is no external synchronization method, and the tables are rarely written to, but mostly read from. It also allows to add new rows only if the new information depends on the existing information (e.g., avoid duplicates), and the inserting thread can make sure of this before hand using locks. Also, in this mode, the *push_back()* method is *not* available to the table itself. Only an owning view can insert a new row.
+When creating a view, all columns are locked using read and write locks. Reading columns can be done by arbitrary readers, but if a view wants to write to a column, then there can be no other readers or writers to this column. Also, the view can insert new rows only if it is the current owner, i.e. it is allowed to write to all columns. This mode can be used if there is no external synchronization method, and the tables are rarely written to, but mostly read from. It also allows to add new rows only if the new information depends on the existing information (e.g., avoid duplicates), and the inserting thread can make sure of this before hand using locks. 
 
-### VLLT_SYNC_INTERNAL_RELAXED
-Like VLLT_SYNC_INTERNAL, but irrespective of ownership, any view (and the table itself) can insert a new row any time. This does not influence other readers and writers, but since threads can do this in parallel, this might cause inconsistent rows, e.g., duplicates.
+### VLLT_SYNC_INTERNAL_PUSHBACK
+Like VLLT_SYNC_INTERNAL, but push-back only views are allowed and can insert a new row any time. Since threads can do this in parallel, this might cause inconsistent rows, e.g., duplicates.
 
 ### VLLT_SYNC_DEBUG
-Like VLLT_SYNC_INTERNAL, but instead of blocked wait the construction of a view results in a failed assertion. Use this mode for debugging if the intended finaly use is VLLT_SYNC_EXTERNAL and you want to make sure that forbidden concurrent operations never happen. This is meant to catch all violations during debugging, but afterwards switch it of at shipping. 
+Like VLLT_SYNC_INTERNAL, but instead of blocked wait the construction of a view results in a failed assertion. Use this mode for debugging if the intended final use is VLLT_SYNC_EXTERNAL and you want to make sure that forbidden concurrent operations never happen. This is meant to catch all violations during debugging, but afterwards switch VLLT_SYNC_EXTERNAL for shipping. 
 
-### VLLT_SYNC_DEBUG_RELAXED
-Like VLLT_SYNC_INTERNAL_RELAXED, but allows creation of new rows any time, i.e., inserting new rows even without ownership will not result in a failed assertion. 
+### VLLT_SYNC_DEBUG_PUSHBACK
+Like VLLT_SYNC_INTERNAL_PUSHBACK, but allows push-back-only views.
 
 It must be noted that irrespective of the sync mode, adding new rows at the end of the table will never interfere with normal table operations, be it reading, writing, erasing etc. A view can add new rows in the following situations:
-* Its table uses sync modes VLLT_SYNC_EXTERNAL, VLLT_SYNC_INTERNAL_RELAXED, VLLT_SYNC_DEBUG_RELAXED
+* Its table uses sync modes VLLT_SYNC_EXTERNAL, VLLT_SYNC_INTERNAL_PUSHBACK, VLLT_SYNC_DEBUG_PUSHBACK
 * It is the sole owner of the table, i.e., it has write access to all columns.
 This enables game systems to produce new items any time without interfering with other systems. 
 
 When creating a view, the columns this view wants to access, as well as the intended use (read only or read/write) must be specified. This is done using variadic type lists in the templated version of the view() function.
 ```c
 using types = vtll::tl<double, float, int, char, std::string>;
-vllt::VlltStaticTable<types, vllt::sync_t::VLLT_SYNC_DEBUG_RELAXED, 1 << 5> table;
+vllt::VlltStaticTable<types, vllt::sync_t::VLLT_SYNC_DEBUG_PUSHBACK, 1 << 5> table;
 auto view1 = table.view<vllt::VlltWrite, double, float, int, char, std::string>(); //full ownership
 auto view2 = table.view(); //alternative for ownership
 ```
 The above code creates two views having full read/write ownership of all table columns. Notice the tag *vllt::VlltWrite*, which flags write accesses for the following types. An alternative is given by not specifying any type, which also grants write access to all table columns. You can mix read and write accesses by moving the tag to different places like so:
 ```c
 using types = vtll::tl<double, float, int, char, std::string>;
-vllt::VlltStaticTable<types, vllt::sync_t::VLLT_SYNC_DEBUG_RELAXED, 1 << 5> table;
+vllt::VlltStaticTable<types, vllt::sync_t::VLLT_SYNC_DEBUG_PUSHBACK, 1 << 5> table;
 auto view = table.view<double, float, vllt::VlltWrite, std::string>(); //read to the first two, write to the last
 ```
 In the above exaple, *view* has read access to the *double* and *float* type, and write access to *std::string*. It does not have access to *int* and *char*, so any other thread can concurrently create any view that either also reads from *double* and *float*, or even writes to *int* and *char* without interference with this thread. The view in the following example creates read access to all columns, which is compatible with any other reader, but which blocks (or should not be mixed with) write accesses.
@@ -100,9 +103,9 @@ The ordering of the type list does not matter for a view. It only matters of you
 Accessing the columns is done by calling *get()* on the view. This results in a tuple holding const references to all columns where the view has read accesses, and plain references where the column has write access:
 ```c
 using types = vtll::tl<double, float, int, char, std::string>;
-vllt::VlltStaticTable<types, vllt::sync_t::VLLT_SYNC_DEBUG_RELAXED, 1 << 5> table;
+vllt::VlltStaticTable<types, vllt::sync_t::VLLT_SYNC_DEBUG_PUSHBACK, 1 << 5> table;
 auto view = table.view<double, char, vllt::VlltWrite, int, float>(); //read to the first two, write to the last
-//view can insert new data irrespective of rights for VLLT_SYNC_DEBUG_RELAXED
+//view can insert new data irrespective of rights for VLLT_SYNC_DEBUG_PUSHBACK
 view.push_back(0.0, 1.0f, 2, 'a', std::string("Hello")); //type ordering of table types!
 auto data = view.get( vllt::table_index_t{0} ); //returns std::tuple<const double&, const char&, int&, float&>
 ```
