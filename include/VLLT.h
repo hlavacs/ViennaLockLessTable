@@ -710,61 +710,6 @@ namespace vllt {
 
 	//---------------------------------------------------------------------------------------------------
 
-	using queue_index_t = vsty::strong_type_t<uint32_t, vsty::counter<>, std::integral_constant<uint32_t, std::numeric_limits<uint32_t>::max()>>;///< Strong integer type for indexing rows, 0 to number rows - 1
-
-	template<typename T, size_t N0 = 1 << 5, bool ROW = false, size_t MINSLOTS = 16, bool FAIR = false>
-	class VlltQueue {
-		using tuple_value_t = vtll::to_tuple<vtll::tl<T>>;	///< Tuple holding the entries as value
-		using table_types_t = vtll::tl<T, queue_index_t>;
-		using table_type_t = VlltStaticTable<	 table_types_t, sync_t::VLLT_SYNC_EXTERNAL, N0, ROW, MINSLOTS, FAIR>;
-		using view_type_t  = VlltStaticTableView<table_types_t, sync_t::VLLT_SYNC_EXTERNAL, N0, ROW, MINSLOTS, FAIR, vtll::tl<>, vtll::tl<T>>;
-
-		struct front_back_t {
-			queue_index_t m_front{};
-			queue_index_t m_back{};
-		};
-
-	public:
-		/// \brief Constructor of class VlltStaticStack
-		/// \param table Reference to the table
-		VlltQueue(std::pmr::memory_resource* pmr = std::pmr::new_delete_resource() ) : m_table{ pmr } {};
-
-		inline auto size() noexcept { return m_table.size(); } ///< Return the number of rows in the table.
-
-		/// \brief Add a new row to the table.
-		/// \tparam ...T Type of the data to add.
-		/// \param ...data Data to add.
-		/// \returns Index of the new row.
-		inline auto push_back(T&& data) { 
-			auto view = m_table.view();
-			queue_index_t idx{m_first_free};
-			if(idx.has_value()) {
-				auto tup = view.get(table_index_t{ idx });
-				m_first_free = std::get<1>(tup);
-				std::get<0>(tup) = std::forward<T>(data);
-			} else {
-				idx = view.push_back(std::forward<T>(data), m_front_back.load().m_front );
-			}
-			if( m_front_back.load().m_back.has_value() ) {
-				auto tup = view.get( table_index_t{ m_front_back.load().m_back });
-				std::get<1>(tup) = idx;
-			}
-		};
-
-		/// Pop last row from the table.
-		/// \returnss Tuple with the data of the last row.
-		inline auto pop_front() noexcept -> std::optional< tuple_value_t > { 
-			auto view = m_table.view();
-			if( size() == 0 ) return std::nullopt;
-			return std::nullopt; 
-		};  
-
-	private:
-		std::atomic<front_back_t> m_front_back{}; ///< indexes of the front and back of the queue
-		std::atomic<queue_index_t> m_first_free{}; ///< index of the first free slot
-		table_type_t m_table; ///< the table used by the queue
-	};
-
 
 
 	//---------------------------------------------------------------------------------------------------
