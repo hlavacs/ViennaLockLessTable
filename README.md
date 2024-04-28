@@ -60,22 +60,52 @@ push_bak(): insert a new row to the end of the table.
 Table views are he main way to interact with a table, following a data access object (DAO) pattern. Threads can interact with a table through a view, e.g., reading, writing values or inserting new rows etc. When creating views, the columns to read and write must be specified. Creating a view may also entail enforcing parallel access restrictions. In this context, a *push-back-only* view is a view that can only push back new rows or return the size of the table, no more. Which restrictions apply is specified by the SYNC option:
 
 ### VLLT_SYNC_EXTERNAL
-In this mode there are no restrictions. Synchronization is done externally, you can create views with full access capabilities any time. In game engines, external synchronizaiton can be enforced, e.g., by a directed acyclic graph that manages access from different game systems. However, there are no push-back-only views allowed.
+In this mode there are no restrictions. Synchronization is done externally, you can create views with full access capabilities any time. In game engines, external synchronizaiton can be enforced, e.g., by a directed acyclic graph that manages access from different game systems. The details are:
+* Use case single threaded access.
+* No internal syncing.
+* No atomics used.
+* No push-back-only views allowed. 
+* Adding new rows by: owning thread.
 
 ### VLLT_SYNC_EXTERNAL_PUSHBACK
-This is like VLLT_SYNC_EXTERNAL, but additionally *push-back-only* views can be created calling *view<VlltWrite>()* on the table. Using this mechanism, the game engine can allow parallel row creation to a system even if the system currently is not the owner of the table, by passing  push-back-only views of a table to the system. Creating new rows is lock less and does not affect other operations of a table.
+This is like VLLT_SYNC_EXTERNAL, but additionally *push-back-only* views can be created calling *view<VlltWrite>()* on the table. Using this mechanism, the game engine can allow parallel row creation to a system even if the system currently is not the owner of the table, by passing  push-back-only views of a table to the system. Creating new rows is lock less and does not affect other operations of a table. The details are:
+* Use case multithreaded access.
+* No internal syncing.
+* Atomics are used.
+* Push-back-only views allowed. 
+* Adding new rows by: owning view and push-back only views.
 
 ### VLLT_SYNC_INTERNAL
-When creating a view, all columns are locked using read and write locks. Reading columns can be done by arbitrary readers, but if a view wants to write to a column, then there can be no other readers or writers to this column. Also, the view can insert new rows only if it is the current owner, i.e. it is allowed to write to all columns. This mode can be used if there is no external synchronization method, and the tables are rarely written to, but mostly read from. It also allows to add new rows only if the new information depends on the existing information (e.g., avoid duplicates), and the inserting thread can make sure of this before hand using locks. 
+When creating a view, all columns are locked using read and write locks. Reading columns can be done by arbitrary readers, but if a view wants to write to a column, then there can be no other readers or writers to this column. Also, the view can insert new rows only if it is the current owner, i.e. it is allowed to write to all columns. This mode can be used if there is no external synchronization method, and the tables are rarely written to, but mostly read from. It also allows to add new rows only if the new information depends on the existing information (e.g., avoid duplicates), and the inserting thread can make sure of this before hand using locks. The details are:
+* Use case multithreaded access.
+* Internal syncing with mutexes.
+* Atomics are used.
+* No push-back only view allowed.
+* Adding new rows by: owning view.
 
 ### VLLT_SYNC_INTERNAL_PUSHBACK
-Like VLLT_SYNC_INTERNAL, but push-back only views are allowed and can insert a new row any time. Since threads can do this in parallel, this might cause inconsistent rows, e.g., duplicates.
+Like VLLT_SYNC_INTERNAL, but push-back only views are allowed and can insert a new row any time. Since threads can do this in parallel, this might cause inconsistent rows, e.g., duplicates. The details are:
+* Use case multithreaded access.
+* Internal syncing with mutexes.
+* No atomics used.
+* Push-back only view allowed.
+* Adding new rows by: owning view and push-back only views.
 
 ### VLLT_SYNC_DEBUG
-Like VLLT_SYNC_INTERNAL, but instead of blocked wait the construction of a view results in a failed assertion. Use this mode for debugging if the intended final use is VLLT_SYNC_EXTERNAL and you want to make sure that forbidden concurrent operations never happen. This is meant to catch all violations during debugging, but afterwards switch VLLT_SYNC_EXTERNAL for shipping. 
+Like VLLT_SYNC_INTERNAL, but instead of blocked wait the construction of a view results in a failed assertion. Use this mode for debugging if the intended final use is VLLT_SYNC_EXTERNAL and you want to make sure that forbidden concurrent operations never happen. This is meant to catch all violations during debugging, but afterwards switch VLLT_SYNC_EXTERNAL for shipping. The details are:
+* Use case single threaded access. Fails if multithreaded access is detected.
+* Internal syncing with mutexes. Assert fails if conflict.
+* Atomics are used.
+* No push-back only view allowed.
+* Adding new rows by: owning view.
 
 ### VLLT_SYNC_DEBUG_PUSHBACK
-Like VLLT_SYNC_INTERNAL_PUSHBACK, but allows push-back-only views.
+Like VLLT_SYNC_INTERNAL_PUSHBACK, but allows push-back-only views. The details are:
+* Use case single threaded access. Fails if multithreaded access is detected.
+* Internal syncing with mutexes. Assert fails if conflict.
+* Atomics are used.
+* Push-back only view allowed.
+* Adding new rows by: owning view and push-back only views.
 
 It must be noted that irrespective of the sync mode, adding new rows at the end of the table will never interfere with normal table operations, be it reading, writing, erasing etc. A view can add new rows in the following situations:
 * Its table uses sync modes VLLT_SYNC_EXTERNAL, VLLT_SYNC_INTERNAL_PUSHBACK, VLLT_SYNC_DEBUG_PUSHBACK
