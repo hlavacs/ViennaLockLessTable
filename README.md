@@ -13,7 +13,7 @@ VLLT uses other projects:
 * Vienna Strong Type (VSTY), see https://github.com/hlavacs/ViennaStrongType.git
 * Vienna Type List Library (VTLL), see https://github.com/hlavacs/ViennaTypeListLibrary.
 
-Both are contained in single header files that are automatically copied to the project when cmake configures the project. You do not have to do anything here.
+Both are contained in single header files that are automatically copied to the project directory extern when cmake configures the project. Make sure to include their directories in your include path.
 
 ## Cloning VLLT
 
@@ -25,6 +25,7 @@ cd ViennaLockLessTable
 ```
 
 VLLT has been developed with MS Visual Code and cmake extensions. In MS Visual Code, select View/Command Palette/CMake: Configure and View/Command Palette/CMake: Build . VLLT has been tested on Windows and Linux with MSCV and Clang compiler.
+For configurng and building either run build.cmd on Windows, or use 
 
 
 ## Using VLLT
