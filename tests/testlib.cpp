@@ -9,7 +9,7 @@ using namespace std::chrono;
 /// @brief 
 void functional_test() {
 	using types = vtll::tl<double, float, int, char, std::string>;
-	vllt::VlltStaticTable<types, vllt::sync_t::VLLT_SYNC_DEBUG_PUSHBACK, 1 << 5> table;
+	vllt::VlltStaticTable<types, vllt::sync_t::VLLT_SYNC_EXTERNAL_PUSHBACK, 1 << 5> table;
 
 	{
 		auto view = table.view<vllt::VlltWrite>();
@@ -143,7 +143,7 @@ void parallel_test(int num_threads = std::thread::hardware_concurrency() ) {
 
 	auto write = [&](int id){
 		auto view = table.view();
-		//std::cout << "Write: ID " << id << std::endl;
+		std::cout << "Write: ID " << id << std::endl;
 		start_work.arrive_and_wait();
 		for( int i = 0; i < num; i++ ) {
 			view.push_back((double)i, (float)i, id, 'a', std::string("Hello")); //inserting new rows always in order of the table types!
@@ -201,7 +201,7 @@ void parallel_test(int num_threads = std::thread::hardware_concurrency() ) {
 int main() {
 	std::cout << std::thread::hardware_concurrency() << " Threads" << std::endl;
 	functional_test();
-	parallel_test<vllt::sync_t::VLLT_SYNC_EXTERNAL>( );
+	parallel_test<vllt::sync_t::VLLT_SYNC_EXTERNAL_PUSHBACK>( );
 	return 0;
 }
 

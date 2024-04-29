@@ -144,6 +144,12 @@ namespace vllt {
 			std::pmr::vector<std::atomic<block_ptr_t>> m_blocks;	///< Vector of shared pointers to the blocks
 		};
 
+		using slot_size_t = vsty::strong_type_t<uint64_t, vsty::counter<>> ;
+		using size_cnt_t1 = vsty::strong_type_t<slot_size_t, vsty::counter<>> ;
+		using size_cnt_t2 = std::atomic<slot_size_t>;
+		using size_cnt_t = std::conditional_t< SYNC == sync_t::VLLT_SYNC_EXTERNAL, size_cnt_t1, size_cnt_t2 >; ///< Atomic size counter
+		using starving_t = std::atomic<uint64_t>; ///< Indicator for starving, use only for stack
+
 	public:
 		/// \brief Constructor of class VlltStaticTable
 		/// \param pmr Memory resource for allocating blocks
@@ -220,10 +226,9 @@ namespace vllt {
 
 		alignas(64) std::atomic<std::shared_ptr<block_map_t>> m_block_map{nullptr};///< Atomic shared ptr to the map of blocks
 
-		using slot_size_t = vsty::strong_type_t<uint64_t, vsty::counter<>>;
 		table_index_t table_size(slot_size_t size) { return table_index_t{ size.get_bits(0, NUMBITS1) }; }	
 		table_diff_t  table_diff(slot_size_t size) { return table_diff_t{ (int64_t)size.get_bits_signed(NUMBITS1) }; }
-		alignas(64) std::atomic<slot_size_t> m_size_cnt{ slot_size_t{ table_index_t{ 0 }, table_diff_t{0}, NUMBITS1 } };	///< Next slot and size as atomic
+		alignas(64) size_cnt_t m_size_cnt{ slot_size_t{ table_index_t{ 0 }, table_diff_t{0}, NUMBITS1 } };	///< Next slot and size as atomic
 		alignas(64) std::atomic<uint64_t> m_starving{0}; ///< prevent one operation to starve the other: -1...pulls are starving 1...pushes are starving
 	};
 
@@ -525,7 +530,7 @@ namespace vllt {
 
 		/// \brief Constructor of class VlltStaticTableView. This is private because only the table is allowed to create a view.
 		VlltStaticTableView(table_type& table ) : m_table{ table } {	
-			if constexpr (SYNC == sync_t::VLLT_SYNC_EXTERNAL) return;
+			if constexpr (SYNC == sync_t::VLLT_SYNC_EXTERNAL || SYNC == sync_t::VLLT_SYNC_EXTERNAL_PUSHBACK) return;
 
 			vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 				[&](auto i) {
@@ -545,7 +550,7 @@ namespace vllt {
 	public:
 		/// \brief Destructor of class VlltStaticTableView
 		~VlltStaticTableView() {
-			if constexpr (SYNC == sync_t::VLLT_SYNC_EXTERNAL) return;
+			if constexpr (SYNC == sync_t::VLLT_SYNC_EXTERNAL || SYNC == sync_t::VLLT_SYNC_EXTERNAL_PUSHBACK) return;
 
 			vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 				[&](auto i) {
