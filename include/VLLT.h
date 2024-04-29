@@ -531,6 +531,7 @@ namespace vllt {
 		/// \brief Constructor of class VlltStaticTableView. This is private because only the table is allowed to create a view.
 		VlltStaticTableView(table_type& table ) : m_table{ table } {	
 			if constexpr (SYNC == sync_t::VLLT_SYNC_EXTERNAL || SYNC == sync_t::VLLT_SYNC_EXTERNAL_PUSHBACK) return;
+			if constexpr (VlltOnlyPushback<DATA, SYNC, READ, WRITE>) return;
 
 			vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 				[&](auto i) {
@@ -551,6 +552,7 @@ namespace vllt {
 		/// \brief Destructor of class VlltStaticTableView
 		~VlltStaticTableView() {
 			if constexpr (SYNC == sync_t::VLLT_SYNC_EXTERNAL || SYNC == sync_t::VLLT_SYNC_EXTERNAL_PUSHBACK) return;
+			if constexpr (VlltOnlyPushback<DATA, SYNC, READ, WRITE>) return;
 
 			vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 				[&](auto i) {

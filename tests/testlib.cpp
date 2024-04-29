@@ -142,19 +142,22 @@ void parallel_test(int num_threads = std::thread::hardware_concurrency() ) {
 	auto num = 10000;
 
 	auto write = [&](int id){
-		auto view = table.view();
 		std::cout << "Write: ID " << id << std::endl;
 		start_work.arrive_and_wait();
+
+		auto view = table.template view<vllt::VlltWrite>();
 		for( int i = 0; i < num; i++ ) {
 			view.push_back((double)i, (float)i, id, 'a', std::string("Hello")); //inserting new rows always in order of the table types!
 		}
 	};
 
 	auto read = [&](int id){
+		std::cout << "Read: ID " << id << std::endl;
+		start_read.arrive_and_wait();
+
 		auto view = table.template view<double, float, int, char, std::string>();
 		auto s = view.size();		
 		assert( s == num*num_threads );
-		start_read.arrive_and_wait();
 		for( int i = 0; i < s; i++ ) {
 			auto data = view.get( vllt::table_index_t{(uint64_t)i} );
 			//std::cout << "Read: ID " << id << " " << std::get<0>(data) << " " << std::get<1>(data) << " " << std::get<2>(data) << " " << std::get<3>(data) << " " << std::get<4>(data) << std::endl;
@@ -201,7 +204,7 @@ void parallel_test(int num_threads = std::thread::hardware_concurrency() ) {
 int main() {
 	std::cout << std::thread::hardware_concurrency() << " Threads" << std::endl;
 	functional_test();
-	parallel_test<vllt::sync_t::VLLT_SYNC_EXTERNAL_PUSHBACK>( );
+	parallel_test<vllt::sync_t::VLLT_SYNC_DEBUG_PUSHBACK>( );
 	return 0;
 }
 
