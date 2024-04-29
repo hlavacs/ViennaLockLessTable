@@ -79,17 +79,21 @@ namespace vllt {
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
 	class VlltStaticTableView;
 
-	// Relaxed sync means that the table can be appended in parallel via push_back by this view
+	// A TABLE that satisfies this concept is ALLOWED to CREATE pushback-only views.
 	template<sync_t SYNC>
 	concept VlltAllowOnlyPushback = (((int)SYNC & VLLT_SYNC_PUSHBACK) != 0);
 
+	//a VIEW that satisfies this concept has write access to all columns of the table is the owner and can add, pop, erase, and change anything
 	template<typename DATA, typename WRITE>
 	concept VlltWriteAll = (vtll::has_all_types<DATA, WRITE>::value && vtll::has_all_types<WRITE, DATA>::value); ///< Is the view the owner of the table?
 
-	// Relaxed sync means that the table can be appended in parallel via push_back, but nothing else is allowed for this view
+	// A VIEW that satisfies this concept is a push-back only view, i.e., it can only add rows to the table but nothing else,
+	// even though it is also an owner.
 	template<typename DATA, sync_t SYNC, typename READ, typename WRITE>
-	concept VlltOnlyPushback = (VlltWriteAll<DATA, WRITE> && VlltAllowOnlyPushback<SYNC>
-		&& (vtll::size<READ>::value == 1 && std::is_same_v< vtll::front<READ>, VlltWrite > ) ); ///< Is the view only allowed to push back?
+	concept VlltOnlyPushback = (vtll::size<READ>::value == 1 && std::is_same_v< vtll::front<READ>, VlltWrite >); ///< Is the view only allowed to push back?
+
+	template<typename DATA, sync_t SYNC, typename READ, typename WRITE>
+	concept VlltOwner = (VlltWriteAll<DATA, WRITE> && !VlltOnlyPushback<DATA, SYNC, READ, WRITE>);
 
 	/// Iterator forward declaration
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
@@ -232,19 +236,20 @@ namespace vllt {
 		using parameters = vtll::tl<Ts...>;		///< List of types in the view
 
 		if constexpr (sizeof...(Ts) == 1 && std::is_same_v<vtll::front<parameters>, VlltWrite>) {
+			static_assert(VlltAllowOnlyPushback<SYNC>, "This table's SYNC option does not allow pushback-only views!");
 			return VlltStaticTableView<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, vtll::tl<VlltWrite>, DATA>(*this); ///< Create a view
+		} else {
+			static const size_t write = vtll::index_of<parameters, VlltWrite>::value; 		///< Index of VlltWrite in the view
+			static const bool write_valid = (write != std::numeric_limits<size_t>::max()); 	///< Is VlltWrite in the view?
+
+			using read_list1 = typename std::conditional< sizeof...(Ts) == 0 || (write_valid && write == 0), vtll::tl<>, vtll::sublist<parameters, 0, write> >::type;
+			using read_list = vtll::remove_types< read_list1, vtll::tl<VlltWrite> >; //cannot use write - 1 if write == 0!
+
+			using write_list = typename std::conditional< sizeof...(Ts) == 0 	//if no types are given
+				|| !write_valid, vtll::tl<>, vtll::sublist<parameters, write + 1, sizeof...(Ts) - 1> >::type; //list of types with write access
+
+			return VlltStaticTableView<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, read_list, write_list>(*this); ///< Create a view
 		}
-
-		static const size_t write = vtll::index_of<parameters, VlltWrite>::value; 		///< Index of VlltWrite in the view
-		static const bool write_valid = (write != std::numeric_limits<size_t>::max()); 	///< Is VlltWrite in the view?
-
-		using read_list1 = typename std::conditional< sizeof...(Ts) == 0 || (write_valid && write == 0), vtll::tl<>, vtll::sublist<parameters, 0, write> >::type;
-		using read_list = vtll::remove_types< read_list1, vtll::tl<VlltWrite> >; //cannot use write - 1 if write == 0!
-
-		using write_list = typename std::conditional< sizeof...(Ts) == 0 	//if no types are given
-			|| !write_valid, vtll::tl<>, vtll::sublist<parameters, write + 1, sizeof...(Ts) - 1> >::type; //list of types with write access
-
-		return VlltStaticTableView<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, read_list, write_list>(*this); ///< Create a view
 	}
 
 
@@ -555,7 +560,7 @@ namespace vllt {
 		VlltStaticTableView(VlltStaticTableView&& other) = delete; ///< Move constructor is deleted
 		VlltStaticTableView& operator=(VlltStaticTableView&& other) = delete; ///< Move assignment operator is deleted
 	
-		inline auto size() noexcept { return m_table.size(); } ///< Return the number of rows in the table.
+		inline auto size() noexcept (!VlltOnlyPushback<DATA, SYNC, READ, WRITE>) { return m_table.size(); } ///< Return the number of rows in the table.
 
 		/// \brief Add a new row to the table.
 		/// \tparam ...Cs Types of the data to add.
@@ -578,16 +583,16 @@ namespace vllt {
 
 		/// \brief Pop last row from the table.
 		/// \returnss Tuple with the data of the last row.
-		inline auto pop_back() noexcept requires (VlltWriteAll<DATA, WRITE> && !VlltOnlyPushback<DATA, SYNC, READ, WRITE>) { return m_table.pop_back(); }; 
+		inline auto pop_back() noexcept requires VlltOwner<DATA, SYNC, READ, WRITE> { return m_table.pop_back(); }; 
 
 		/// \brief Clear the table.
-		inline auto clear() noexcept requires (VlltWriteAll<DATA, WRITE> && !VlltOnlyPushback<DATA, SYNC, READ, WRITE>) { return m_table.clear(); };
+		inline auto clear() noexcept requires VlltOwner<DATA, SYNC, READ, WRITE> { return m_table.clear(); };
 
 		/// \brief Swap the values of two rows.
-		inline auto swap(table_index_t lhs, table_index_t rhs) noexcept -> void requires (VlltWriteAll<DATA, WRITE> && !VlltOnlyPushback<DATA, SYNC, READ, WRITE>) { m_table.swap(lhs, rhs); };	
+		inline auto swap(table_index_t lhs, table_index_t rhs) noexcept -> void requires VlltOwner<DATA, SYNC, READ, WRITE> { m_table.swap(lhs, rhs); };	
 		
 		/// \brief Erase a row from the table. Replace it with the last row. Return the values.
-		inline auto erase(table_index_t n) -> tuple_value_t requires (VlltWriteAll<DATA, WRITE> && !VlltOnlyPushback<DATA, SYNC, READ, WRITE>) { return m_table.erase(n); }
+		inline auto erase(table_index_t n) -> tuple_value_t requires VlltOwner<DATA, SYNC, READ, WRITE> { return m_table.erase(n); }
 
 		/// \brief Equality comparison operator
     	friend bool operator==(const VlltStaticTableView& lhs, const VlltStaticTableView& rhs) {

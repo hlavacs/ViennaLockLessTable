@@ -47,6 +47,7 @@ namespace vsty {
         strong_type_t<T, P, D>& operator=(strong_type_t<T, P, D>&&) noexcept = default;			//move assignable
 
 		T& value() noexcept { return m_value; }	//get reference to the value
+
 		operator const T& () const noexcept { return m_value; }	//retrieve m_value
 		operator T& () noexcept { return m_value; }				//retrieve m_value
 
@@ -61,6 +62,21 @@ namespace vsty {
         };
 
 		bool has_value() const noexcept requires (!std::is_same_v<D, void>) { return m_value != D::value; }
+
+		//-----------------------------------------------------------------------------------
+		// interface mimicking atomic operations - can be used if you selectively want to mimick atomic operations
+		// but don't want to use atomic types
+
+		T load() noexcept { return m_value; }	//get the value
+		void store( const T& value ) noexcept { m_value = value;  }	//store the value
+		void store( T&& value ) noexcept { m_value = value;  }	//store the value
+		bool compare_exchange_weak( T& expected, T desired ) {
+			if( m_value != expected) return false; //might turn this into an assert
+			m_value = desired;
+			return true;
+		}
+
+		bool compare_exchange_strong( T& expected, T desired ) { return compare_exchange_weak(expected, desired); }
 
 		//-----------------------------------------------------------------------------------
 

@@ -12,7 +12,7 @@ void functional_test() {
 	vllt::VlltStaticTable<types, vllt::sync_t::VLLT_SYNC_DEBUG_PUSHBACK, 1 << 5> table;
 
 	{
-		auto view = table.view();
+		auto view = table.view<vllt::VlltWrite>();
 		for( int i = 0; i < 100; i++ ) {
 			view.push_back((double)i, (float)i, i, 'a', std::string("Hello")); //inserting new rows always in order of the table types!
 		}

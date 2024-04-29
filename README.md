@@ -61,7 +61,7 @@ Table views are he main way to interact with a table, following a data access ob
 
 ### VLLT_SYNC_EXTERNAL
 In this mode there are no restrictions. Synchronization is done externally, you can create views with full access capabilities any time. In game engines, external synchronizaiton can be enforced, e.g., by a directed acyclic graph that manages access from different game systems. The details are:
-* Use case single threaded access.
+* Use case single threaded access. An external mechanism ensures single threaded access.
 * No internal syncing.
 * No atomics used.
 * No push-back-only views allowed. 
