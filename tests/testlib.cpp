@@ -106,6 +106,12 @@ void functional_test() {
 
 	{
 		auto view = table.view();
+		vllt::VlltStaticTableViewBase* view2 = &view;
+		auto p = view2->get_ptrs(vllt::table_index_t{0});
+	}
+
+	{
+		auto view = table.view();
 		for( int i=0; i<10; ++i) {
 			auto last = view.pop_back();
 			std::cout << "Pop: " << std::get<double>(last) << std::endl;

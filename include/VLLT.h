@@ -61,11 +61,6 @@ namespace vllt {
 	template<typename DATA>
 	concept VlltStaticTableConcept = vtll::unique<DATA>::value;
 
-	/// Forward declaration of VlltStaticTable
-	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR>
-		requires VlltStaticTableConcept<DATA>
-	class VlltStaticTable;
-
 	/// Concept for view. Types must be unique, and no type must be in both READ and WRITE
 	/// Currently defunct because of compiler error
 	template<typename DATA, typename READ, typename WRITE>
@@ -76,9 +71,29 @@ namespace vllt {
 		&& (vtll::has_all_types<DATA, WRITE>::value)
 	);
 
+	/// Forward declaration of VlltStaticTable
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR>
+		requires VlltStaticTableConcept<DATA>
+	class VlltStaticTable;
+
+	/// Forward declaration of VlltStaticTableViewBase
+	class VlltStaticTableViewBase;
+
 	/// Used for accessing a table.
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
 	class VlltStaticTableView;
+
+	/// Iterator forward declaration
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
+	class VtllStaticIterator;
+
+	/// Stack forward declaration
+	template<typename T, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR>
+	class VlltStack;
+
+
+	//---------------------------------------------------------------------------------------------------
+
 
 	// A TABLE that satisfies this concept is ALLOWED to CREATE pushback-only views.
 	template<sync_t SYNC>
@@ -96,13 +111,9 @@ namespace vllt {
 	template<typename DATA, sync_t SYNC, typename READ, typename WRITE>
 	concept VlltOwner = (VlltWriteAll<DATA, WRITE> && !VlltOnlyPushback<DATA, SYNC, READ, WRITE>);
 
-	/// Iterator forward declaration
-	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
-	class VtllStaticIterator;
 
-	/// Stack forward declaration
-	template<typename T, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR>
-	class VlltStack;
+	//---------------------------------------------------------------------------------------------------
+
 
 	/// VlltStaticTable is the base class for some classes, enabling management of tables that can be appended in parallel.
 	/// \tparam DATA Types of the table.
@@ -259,7 +270,7 @@ namespace vllt {
 	}
 
 
-	/// \brief Get a tuple with pointers to all components of an entry.
+	/// \brief Get a tuple with references to components of an entry.
 	/// \param[in] n Index to the entry.
 	/// \returns a tuple with pointers to all components of entry n.
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
@@ -504,9 +515,10 @@ namespace vllt {
 	//---------------------------------------------------------------------------------------------------
 	//table view
 
+	/// \brief Base class for a view to a table.
 	class VlltStaticTableViewBase {
 	public:
-		virtual auto get_ptrs(table_index_t idx) -> std::vector<void*> { return {}; }
+		virtual auto get_ptrs(table_index_t idx) -> std::vector<void*> { return {}; }; ///< Get pointers to the components of a row.
 		std::vector<std::type_index> m_types;
 	};
 
@@ -523,6 +535,9 @@ namespace vllt {
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
 	class VlltStaticTableView : public VlltStaticTableViewBase {
 	public:
+		template<typename X1, sync_t X2, size_t X3, bool X4, size_t X5, bool X6, typename X7, typename X8>
+		friend class VlltStaticTableViewPtrs;
+
 		using table_type = VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>; ///< Type of the table
 
 		using tuple_value_t = table_type::tuple_value_t;	///< Tuple holding the entries as value
@@ -620,29 +635,19 @@ namespace vllt {
 		/// \returns  Iterator to the end of the table.
 		auto end() requires (!VlltOnlyPushback<DATA, SYNC, READ, WRITE>) { return VtllStaticIterator<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, READ, WRITE>(*this, table_index_t{size() - 1}); } 
 
-	private:
-		table_type& m_table; ///< Reference to the table
-	};
-
-
-	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
-	class VlltStaticTableViewPtrs : public VlltStaticTableView<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, READ, WRITE> {
-	public:
-		using view_type = VlltStaticTableView<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, READ, WRITE>; ///< Type of the view
-		VlltStaticTableViewPtrs(const view_type& view) : view_type{view} {};
-		VlltStaticTableViewPtrs() = delete;
-		VlltStaticTableViewPtrs(view_type&& view) = delete;
-		VlltStaticTableViewPtrs& operator=(VlltStaticTableViewPtrs&& view) = delete;
-		VlltStaticTableViewPtrs& operator=(const VlltStaticTableViewPtrs& view) = delete;
-
+		/// \brief Get a vector with pointers to all components of an entry.
+		/// \param[in] n Index to the entry.
+		/// \returns a vector with pointers to all components of entry n.
 		virtual auto get_ptrs( table_index_t idx) -> std::vector<void*> {
-			std::vector<void*> ptrs;
-			auto ret = m_table.get_ref_tuple(idx);
-			vtll::static_for<size_t, 0, vtll::size<DATA>::value >( [&](auto i) { ptrs.push_back( &std::get<i>(ret)); } );
+			std::vector<void*> ptrs(vtll::size<DATA>::value);
+			auto ret = m_table.template get_ref_tuple<DATA>(idx);
+			vtll::static_for<size_t, 0, vtll::size<DATA>::value >( [&](auto i) { ptrs.push_back( &std::get<i>(ret) ); } );
 			return ptrs;
 		}
-	};
 
+	protected:
+		table_type& m_table; ///< Reference to the table
+	};
 
 
 
