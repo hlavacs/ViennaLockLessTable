@@ -519,6 +519,8 @@ namespace vllt {
 	class VlltStaticTableViewBase {
 	public:
 		virtual auto get_ptrs(table_index_t idx) -> std::vector<void*> { return {}; }; ///< Get pointers to the components of a row.
+		auto get_types() -> std::vector<std::type_index> { return m_types; }; ///< Get the types of the components of the table.
+	protected:
 		std::vector<std::type_index> m_types;
 	};
 
@@ -639,9 +641,11 @@ namespace vllt {
 		/// \param[in] n Index to the entry.
 		/// \returns a vector with pointers to all components of entry n.
 		virtual auto get_ptrs( table_index_t idx) -> std::vector<void*> {
+			static const bool owner = VlltOwner<DATA, SYNC, READ, WRITE>;
+			assert(owner);
 			std::vector<void*> ptrs(vtll::size<DATA>::value);
 			auto ret = m_table.template get_ref_tuple<DATA>(idx);
-			vtll::static_for<size_t, 0, vtll::size<DATA>::value >( [&](auto i) { ptrs.push_back( &std::get<i>(ret) ); } );
+			vtll::static_for<size_t, 0, vtll::size<DATA>::value >( [&](auto i) { ptrs[i] = &std::get<i>(ret) ; } );
 			return ptrs;
 		}
 
