@@ -25,7 +25,7 @@
 #include <memory>
 #include <mutex>
 #include <typeinfo>
-
+#include <typeindex>
 
 #include "VTLL.h"
 #include "VSTY.h"
@@ -509,9 +509,8 @@ namespace vllt {
 		virtual auto get_ptr() -> std::vector<void*> { 
 			return {};			
 		}
-		std::vector<std::type_info> m_types;
+		std::vector<std::type_index> m_types;
 	};
-
 
 
 	/// \brief VlltStaticTableView is a view to a VlltStaticTable. It allows to read and write to the table.
@@ -524,7 +523,7 @@ namespace vllt {
 	/// \tparam READ Types that can be read from the table.
 	/// \tparam WRITE Types that can be written to the table.
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
-	class VlltStaticTableView : VlltStaticTableViewBase {
+	class VlltStaticTableView : public VlltStaticTableViewBase {
 
 	public:
 		using table_type = VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>; ///< Type of the table
@@ -538,12 +537,13 @@ namespace vllt {
 		friend class VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>; ///< Allow the table to access the view
 
 		/// \brief Constructor of class VlltStaticTableView. This is private because only the table is allowed to create a view.
-		VlltStaticTableView(table_type& table ) :  public VlltStaticTableViewBase{}, m_table{ table } {	
+		VlltStaticTableView(table_type& table ) : VlltStaticTableViewBase{}, m_table{ table } {	
 			if constexpr (SYNC == sync_t::VLLT_SYNC_EXTERNAL || SYNC == sync_t::VLLT_SYNC_EXTERNAL_PUSHBACK) return;
 			if constexpr (VlltOnlyPushback<DATA, SYNC, READ, WRITE>) return;
 
 			vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 				[&](auto i) {
+					m_types.emplace_back( typeid(vtll::Nth_type<DATA,i>) );
 					if constexpr ( vtll::size<READ>::value >0 && vtll::has_type<READ,vtll::Nth_type<DATA,i>>::value ) { 
 						if constexpr (SYNC == sync_t::VLLT_SYNC_DEBUG || SYNC == sync_t::VLLT_SYNC_DEBUG_PUSHBACK) assert(m_table.m_access_mutex[i].try_lock_shared());
 						else m_table.m_access_mutex[i].lock_shared(); 
