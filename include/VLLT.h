@@ -506,9 +506,7 @@ namespace vllt {
 
 	class VlltStaticTableViewBase {
 	public:
-		virtual auto get_ptr() -> std::vector<void*> { 
-			return {};			
-		}
+		virtual auto get_ptrs(table_index_t idx) -> std::vector<void*> { return {}; }
 		std::vector<std::type_index> m_types;
 	};
 
@@ -524,7 +522,6 @@ namespace vllt {
 	/// \tparam WRITE Types that can be written to the table.
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
 	class VlltStaticTableView : public VlltStaticTableViewBase {
-
 	public:
 		using table_type = VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>; ///< Type of the table
 
@@ -626,6 +623,28 @@ namespace vllt {
 	private:
 		table_type& m_table; ///< Reference to the table
 	};
+
+
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
+	class VlltStaticTableViewPtrs : public VlltStaticTableView<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, READ, WRITE> {
+	public:
+		using view_type = VlltStaticTableView<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, READ, WRITE>; ///< Type of the view
+		VlltStaticTableViewPtrs(const view_type& view) : view_type{view} {};
+		VlltStaticTableViewPtrs() = delete;
+		VlltStaticTableViewPtrs(view_type&& view) = delete;
+		VlltStaticTableViewPtrs& operator=(VlltStaticTableViewPtrs&& view) = delete;
+		VlltStaticTableViewPtrs& operator=(const VlltStaticTableViewPtrs& view) = delete;
+
+		virtual auto get_ptrs( table_index_t idx) -> std::vector<void*> {
+			std::vector<void*> ptrs;
+			auto ret = m_table.get_ref_tuple(idx);
+			vtll::static_for<size_t, 0, vtll::size<DATA>::value >( [&](auto i) { ptrs.push_back( &std::get<i>(ret)); } );
+			return ptrs;
+		}
+	};
+
+
+
 
 	//---------------------------------------------------------------------------------------------------
 	//table view iterator
@@ -738,6 +757,7 @@ namespace vllt {
 		table_type_t m_table; ///< the table used by the stack
 		view_type_t m_view = m_table.view(); ///< view to the table
 	};
+
 
 
 	//---------------------------------------------------------------------------------------------------

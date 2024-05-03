@@ -75,7 +75,8 @@
         "unordered_map": "cpp",
         "xhash": "cpp",
         "set": "cpp",
-        "xtree": "cpp"
+        "xtree": "cpp",
+        "typeindex": "cpp"
     },
     "cmake.configureOnOpen": false,
     "C_Cpp.errorSquiggles": "disabled",
