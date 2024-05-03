@@ -590,7 +590,7 @@ namespace vllt {
 
 		/// \brief Pop last row from the table.
 		/// \returnss Tuple with the data of the last row.
-		inline auto pop_back() noexcept requires VlltOwner<DATA, SYNC, READ, WRITE> { return m_table.pop_back(); }; 
+		inline auto pop_back(table_index_t *idx = nullptr ) noexcept requires VlltOwner<DATA, SYNC, READ, WRITE> { return m_table.pop_back(idx); }; 
 
 		/// \brief Clear the table.
 		inline auto clear() noexcept requires VlltOwner<DATA, SYNC, READ, WRITE> { return m_table.clear(); };
@@ -717,10 +717,13 @@ namespace vllt {
 
 		/// Pop last row from the table.
 		/// \returnss Tuple with the data of the last row.
-		inline auto pop_back() noexcept -> std::optional< tuple_value_t > { 
-			if( size() > 0 ) { return { m_view.pop_back() }; }
+		inline auto pop_back() noexcept -> std::optional< tuple_value_t > {
+			if( size() == 0 ) return std::nullopt;
+			table_index_t n2;
+			auto ret = m_view.pop_back( &n2 );
+			if( n2.has_value() ) return ret;
 			return std::nullopt; 
-		};  
+		};
 
 	private:
 		table_type_t m_table; ///< the table used by the stack
