@@ -24,6 +24,7 @@
 #include <compare>
 #include <memory>
 #include <mutex>
+#include <typeinfo>
 
 
 #include "VTLL.h"
@@ -503,6 +504,16 @@ namespace vllt {
 	//---------------------------------------------------------------------------------------------------
 	//table view
 
+	class VlltStaticTableViewBase {
+	public:
+		virtual auto get_ptr() -> std::vector<void*> { 
+			return {};			
+		}
+		std::vector<std::type_info> m_types;
+	};
+
+
+
 	/// \brief VlltStaticTableView is a view to a VlltStaticTable. It allows to read and write to the table.
 	/// \tparam DATA Types of the table.
 	/// \tparam SYNC Synchronization type for the table.
@@ -513,7 +524,7 @@ namespace vllt {
 	/// \tparam READ Types that can be read from the table.
 	/// \tparam WRITE Types that can be written to the table.
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
-	class VlltStaticTableView {
+	class VlltStaticTableView : VlltStaticTableViewBase {
 
 	public:
 		using table_type = VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>; ///< Type of the table
@@ -527,7 +538,7 @@ namespace vllt {
 		friend class VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>; ///< Allow the table to access the view
 
 		/// \brief Constructor of class VlltStaticTableView. This is private because only the table is allowed to create a view.
-		VlltStaticTableView(table_type& table ) : m_table{ table } {	
+		VlltStaticTableView(table_type& table ) :  public VlltStaticTableViewBase{}, m_table{ table } {	
 			if constexpr (SYNC == sync_t::VLLT_SYNC_EXTERNAL || SYNC == sync_t::VLLT_SYNC_EXTERNAL_PUSHBACK) return;
 			if constexpr (VlltOnlyPushback<DATA, SYNC, READ, WRITE>) return;
 
