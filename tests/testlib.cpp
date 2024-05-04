@@ -111,6 +111,13 @@ void functional_test() {
 		vllt::VlltStaticTableViewBase* view2 = &view;
 		auto p = view2->get_component_ptrs(vllt::table_index_t{0}); //std::any container
 		std::cout << "Types: " << p[0].type().name() << " " << p[1].type().name() << " " << p[2].type().name() << " " << p[3].type().name() << " " << p[4].type().name() << std::endl;
+
+		for( auto p : *view2 ) { //need to use decltype(auto) to get the references right
+			auto *p0t = &p[0].type();
+			auto p0n = p[0].type().name();
+			std::cout << "Types: " << p[0].type().name() << " " << p[1].type().name() << " " << p[2].type().name() << " " << p[3].type().name() << " " << p[4].type().name() << std::endl;
+		}
+
 	}
 
 	{
