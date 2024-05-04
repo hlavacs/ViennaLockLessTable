@@ -106,11 +106,12 @@ namespace vllt {
 
 	// A VIEW that satisfies this concept is a push-back only view, i.e., it can only add rows to the table but nothing else,
 	// even though it is also an owner.
-	template<typename DATA, sync_t SYNC, typename READ, typename WRITE>
-	concept VlltOnlyPushback = (vtll::size<READ>::value == 1 && std::is_same_v< vtll::front<READ>, VlltWrite >); ///< Is the view only allowed to push back?
+	template<typename WRITELIST>
+	concept VlltOnlyPushback = vtll::is_same_set<WRITELIST, vtll::tl<VlltWrite>>::value; ///< Is the view only allowed to push back?
 
-	template<typename DATA, sync_t SYNC, typename READ, typename WRITE>
-	concept VlltOwner = (VlltWriteAll<DATA, WRITE> && !VlltOnlyPushback<DATA, SYNC, READ, WRITE>);
+	// A VIEW that satisfies this concept is the owner of the table and can add, pop, erase, and change anything
+	template<typename DATA, typename WRITE, typename WRITELIST>
+	concept VlltOwner = (VlltWriteAll<DATA, WRITE> && !VlltOnlyPushback<WRITELIST>);
 
 
 	//---------------------------------------------------------------------------------------------------
@@ -263,7 +264,7 @@ namespace vllt {
 
 		if constexpr (sizeof...(Ts) == 1 && std::is_same_v<vtll::front<parameters>, VlltWrite>) {
 			static_assert(VlltAllowOnlyPushback<SYNC>, "This table's SYNC option does not allow pushback-only views!");
-			return VlltStaticTableView<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, vtll::tl<VlltWrite>, DATA>(*this); ///< Create a view
+			return VlltStaticTableView<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, vtll::tl<>, vtll::tl<VlltWrite>>(*this); ///< Create a pushback only view
 		} else {
 			static const size_t write = vtll::index_of<parameters, VlltWrite>::value; 		///< Index of VlltWrite in the view
 			static const bool write_valid = (write != std::numeric_limits<size_t>::max()); 	///< Is VlltWrite in the view?
@@ -539,11 +540,11 @@ namespace vllt {
 	/// \tparam MINSLOTS Minimum number of slots in a block.
 	/// \tparam FAIR If true, then the table is fair, otherwise not.
 	/// \tparam READ Types that can be read from the table.
-	/// \tparam WRITE Types that can be written to the table.
-	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
+	/// \tparam WRITELIST Types that can be written to the table.
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITELIST>
 	class VlltStaticTableView : public VlltStaticTableViewBase {
 	public:
-		using WRITELIST = std::conditional< vtll::is_same_set<WRITE, vtll::tl<VlltWrite> >::value, DATA, WRITE>; ///< Types that can be written to the table
+		using WRITE = std::conditional_t< vtll::is_same_set<WRITELIST, vtll::tl<VlltWrite> >::value, DATA, WRITELIST>; ///< Types that can be written to the table
 		
 		using table_type = VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>; ///< Type of the table
 		using tuple_value_t = table_type::tuple_value_t;	///< Tuple holding the entries as value
@@ -557,7 +558,7 @@ namespace vllt {
 		/// \brief Constructor of class VlltStaticTableView. This is private because only the table is allowed to create a view.
 		VlltStaticTableView(table_type& table ) : VlltStaticTableViewBase{}, m_table{ table } {	
 			if constexpr (SYNC == sync_t::VLLT_SYNC_EXTERNAL || SYNC == sync_t::VLLT_SYNC_EXTERNAL_PUSHBACK) return;
-			if constexpr (VlltOnlyPushback<DATA, SYNC, READ, WRITE>) return;
+			if constexpr (VlltOnlyPushback<WRITELIST>) return;
 
 			vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 				[&](auto i) {
@@ -578,7 +579,7 @@ namespace vllt {
 		/// \brief Destructor of class VlltStaticTableView
 		~VlltStaticTableView() {
 			if constexpr (SYNC == sync_t::VLLT_SYNC_EXTERNAL || SYNC == sync_t::VLLT_SYNC_EXTERNAL_PUSHBACK) return;
-			if constexpr (VlltOnlyPushback<DATA, SYNC, READ, WRITE>) return;
+			if constexpr (VlltOnlyPushback<WRITELIST>) return;
 
 			vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 				[&](auto i) {
@@ -593,7 +594,7 @@ namespace vllt {
 		VlltStaticTableView(VlltStaticTableView&& other) = delete; ///< Move constructor is deleted
 		VlltStaticTableView& operator=(VlltStaticTableView&& other) = delete; ///< Move assignment operator is deleted
 	
-		inline auto size() noexcept (!VlltOnlyPushback<DATA, SYNC, READ, WRITE>) { return m_table.size(); } ///< Return the number of rows in the table.
+		inline auto size() noexcept (!VlltOnlyPushback<WRITELIST>) { return m_table.size(); } ///< Return the number of rows in the table.
 
 		/// \brief Add a new row to the table.
 		/// \tparam ...Cs Types of the data to add.
@@ -608,7 +609,7 @@ namespace vllt {
 		/// \brief Get a tuple with refs to all components of an entry.
 		/// \param n Index to the entry.
 		/// \returnss a tuple with refs to all components of entry n.
-		inline decltype(auto) get(table_index_t n) requires (!VlltOnlyPushback<DATA, SYNC, READ, WRITE>) {
+		inline decltype(auto) get(table_index_t n) requires (!VlltOnlyPushback<WRITELIST>) {
 			if constexpr (vtll::size<READ>::value == 0) return m_table.template get_ref_tuple<WRITE>(n);
 			else if constexpr (vtll::size<WRITE>::value == 0) return m_table.template get_const_ref_tuple<READ>(n);
 			else return std::tuple_cat( m_table.template get_const_ref_tuple<READ>(n), m_table.template get_ref_tuple<WRITE>(n) ); 
@@ -616,16 +617,16 @@ namespace vllt {
 
 		/// \brief Pop last row from the table.
 		/// \returnss Tuple with the data of the last row.
-		inline auto pop_back(table_index_t *idx = nullptr ) noexcept requires VlltOwner<DATA, SYNC, READ, WRITE> { return m_table.pop_back(idx); }; 
+		inline auto pop_back(table_index_t *idx = nullptr ) noexcept requires VlltOwner<DATA, WRITE, WRITELIST> { return m_table.pop_back(idx); }; 
 
 		/// \brief Clear the table.
-		inline auto clear() noexcept requires VlltOwner<DATA, SYNC, READ, WRITE> { return m_table.clear(); };
+		inline auto clear() noexcept requires VlltOwner<DATA, WRITE, WRITELIST> { return m_table.clear(); };
 
 		/// \brief Swap the values of two rows.
-		inline auto swap(table_index_t lhs, table_index_t rhs) noexcept -> void requires VlltOwner<DATA, SYNC, READ, WRITE> { m_table.swap(lhs, rhs); };	
+		inline auto swap(table_index_t lhs, table_index_t rhs) noexcept -> void requires VlltOwner<DATA, WRITE, WRITELIST> { m_table.swap(lhs, rhs); };	
 		
 		/// \brief Erase a row from the table. Replace it with the last row. Return the values.
-		inline auto erase(table_index_t n) -> tuple_value_t requires VlltOwner<DATA, SYNC, READ, WRITE> { return m_table.erase(n); }
+		inline auto erase(table_index_t n) -> tuple_value_t requires VlltOwner<DATA, WRITE, WRITELIST> { return m_table.erase(n); }
 
 		/// \brief Equality comparison operator
     	friend bool operator==(const VlltStaticTableView& lhs, const VlltStaticTableView& rhs) {
@@ -634,11 +635,11 @@ namespace vllt {
 
 		/// \brief Create an iterator to the beginning of the table.
 		/// \returns  Iterator to the beginning of the table.
-		auto begin() requires (!VlltOnlyPushback<DATA, SYNC, READ, WRITE>) { return VtllStaticIterator<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, READ, WRITE>(*this, table_index_t{0}); } 
+		auto begin() requires (!VlltOnlyPushback<WRITELIST>) { return VtllStaticIterator<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, READ, WRITE>(*this, table_index_t{0}); } 
 		
 		/// \brief Create an iterator to the end of the table.
 		/// \returns  Iterator to the end of the table.
-		auto end() requires (!VlltOnlyPushback<DATA, SYNC, READ, WRITE>) { return VtllStaticIterator<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, READ, WRITE>(*this, table_index_t{size() - 1}); } 
+		auto end() requires (!VlltOnlyPushback<WRITELIST>) { return VtllStaticIterator<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, READ, WRITE>(*this, table_index_t{size() - 1}); } 
 
 		//---------------------------------------------------------------------------------------------------
 
@@ -649,7 +650,7 @@ namespace vllt {
 			std::vector<std::any> ptrs(vtll::size<READ>::value + vtll::size<WRITE>::value);
 
 			int j=0;
-			if constexpr (vtll::size<READ>::value > 0 && !std::is_same_v< vtll::front<READ>, VlltWrite>) {
+			if constexpr (vtll::size<READ>::value > 0) {
 				auto ret = m_table.template get_const_ref_tuple<READ>(n);
 				vtll::static_for<size_t, 0, vtll::size<READ>::value >( [&](auto i) { ptrs[j++] = &std::get<i>(ret) ; } );
 			}
@@ -665,7 +666,6 @@ namespace vllt {
 	protected:
 		table_type& m_table; ///< Reference to the table
 	};
-
 
 
 	//---------------------------------------------------------------------------------------------------
