@@ -86,6 +86,8 @@ namespace vllt {
 
 	class VtllStaticIteratorBase;
 
+	class VtllStaticIteratorBaseWrapper;
+
 	/// Iterator forward declaration
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITELIST, typename WRITE>
 	class VtllStaticIterator;
@@ -530,17 +532,6 @@ namespace vllt {
 	/// \brief Base class for a iterator to a view.
 	class VtllStaticIteratorBase {
 	public:
-	    using difference_type = table_diff_t; ///< Type of the difference between two iterators
-		using value_type = std::vector<std::any>; ///< Type of the value the iterator points to
-   	 	using pointer = table_index_t; ///< Type of the pointer the iterator points to
-		using reference = std::vector<std::any>; ///< Type of the reference the iterator points to
-    	using iterator_category = std::forward_iterator_tag ; ///< Type of the iterator category
-
-		VtllStaticIteratorBase() {};
-	    reference operator*() { return get_component_ptrs(); } ///< Dereference operator
-	    auto operator!=(const VtllStaticIteratorBase& rhs) -> bool { return not_equal(rhs); } ///< Dereference operator
-    	VtllStaticIteratorBase& operator++() { return plusplus(); }; ///< Prefix increment operator
-
 		virtual auto get_component_ptrs() -> std::vector<std::any> { return {};}; ///< Get pointers to the components of a row.
 	    virtual auto not_equal(const VtllStaticIteratorBase& rhs) -> bool { return true; }; ///< Dereference operator
     	virtual auto plusplus() -> VtllStaticIteratorBase& { return *this; }; ///< Prefix increment operator
@@ -549,14 +540,9 @@ namespace vllt {
 
 	class VtllStaticIteratorBaseWrapper {
 	public:
-	    using difference_type = table_diff_t; ///< Type of the difference between two iterators
-		using value_type = std::vector<std::any>; ///< Type of the value the iterator points to
-   	 	using pointer = table_index_t; ///< Type of the pointer the iterator points to
-		using reference = std::vector<std::any>; ///< Type of the reference the iterator points to
     	using iterator_category = std::forward_iterator_tag ; ///< Type of the iterator category
-
 		VtllStaticIteratorBaseWrapper(std::shared_ptr<VtllStaticIteratorBase> p) : m_ptr{p} {};
-	    reference operator*() { return m_ptr->get_component_ptrs(); } ///< Dereference operator
+	    std::vector<std::any> operator*() { return m_ptr->get_component_ptrs(); } ///< Dereference operator
 	    auto operator!=(const VtllStaticIteratorBaseWrapper& rhs) -> bool { return m_ptr->not_equal(*rhs.m_ptr); } ///< Dereference operator
     	VtllStaticIteratorBase& operator++() { return m_ptr->plusplus(); }; ///< Prefix increment operator
 
