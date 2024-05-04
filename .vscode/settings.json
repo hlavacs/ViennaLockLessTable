@@ -76,7 +76,8 @@
         "xhash": "cpp",
         "set": "cpp",
         "xtree": "cpp",
-        "typeindex": "cpp"
+        "typeindex": "cpp",
+        "any": "cpp"
     },
     "cmake.configureOnOpen": false,
     "C_Cpp.errorSquiggles": "disabled",

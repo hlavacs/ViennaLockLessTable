@@ -84,8 +84,10 @@ namespace vllt {
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
 	class VlltStaticTableView;
 
+	class VtllStaticIteratorBase;
+
 	/// Iterator forward declaration
-	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITELIST, typename WRITE>
 	class VtllStaticIterator;
 
 	/// Stack forward declaration
@@ -525,10 +527,26 @@ namespace vllt {
 	//---------------------------------------------------------------------------------------------------
 	//table view
 
+
+	/// \brief Base class for a iterator to a view.
+	class VtllStaticIteratorBase {
+	public:
+	    auto operator*() -> std::vector<std::any> { return this->get_component_ptrs(); } ///< Dereference operator
+    	virtual VtllStaticIteratorBase& operator++() { return *this; }; ///< Prefix increment operator
+	private:
+		virtual auto get_component_ptrs() -> std::vector<std::any> { return {}; }; ///< Get pointers to the components of a row.
+	};
+
+
 	/// \brief Base class for a view to a table.
 	class VlltStaticTableViewBase {
 	public:
-		virtual auto get_component_ptrs(table_index_t idx) -> std::vector<std::any> { return {}; }; ///< Get pointers to the components of a row.
+		virtual auto get_component_ptrs(table_index_t idx) -> std::vector<std::any> = 0; ///< Get pointers to the components of a row.
+		auto begin() -> VtllStaticIteratorBase { return begin_p(); }; ///< Get an iterator to the first row.
+		auto end() -> VtllStaticIteratorBase { return end_p(); }; ///< Get an iterator to the first row.
+	private:
+		virtual auto begin_p() -> VtllStaticIteratorBase = 0; ///< Get an iterator to the first row.
+		virtual auto end_p() -> VtllStaticIteratorBase = 0; ///< Get an iterator to the first row.
 	};
 
 
@@ -635,13 +653,22 @@ namespace vllt {
 
 		/// \brief Create an iterator to the beginning of the table.
 		/// \returns  Iterator to the beginning of the table.
-		auto begin() requires (!VlltOnlyPushback<WRITELIST>) { return VtllStaticIterator<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, READ, WRITE>(*this, table_index_t{0}); } 
-		
+		inline auto begin() {
+			assert(!VlltOnlyPushback<WRITELIST>);
+			return VtllStaticIterator<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, READ, WRITELIST, WRITE>(*this, table_index_t{0}); 
+		}
+
 		/// \brief Create an iterator to the end of the table.
 		/// \returns  Iterator to the end of the table.
-		auto end() requires (!VlltOnlyPushback<WRITELIST>) { return VtllStaticIterator<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, READ, WRITE>(*this, table_index_t{size() - 1}); } 
+		inline auto end() {
+			assert(!VlltOnlyPushback<WRITELIST>);
+			return VtllStaticIterator<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, READ, WRITELIST, WRITE>(*this, table_index_t{size() - 1});
+		}
 
 		//---------------------------------------------------------------------------------------------------
+
+		virtual auto begin_p() -> VtllStaticIteratorBase { return begin(); }; ///< Get an iterator to the first row.
+		virtual auto end_p() -> VtllStaticIteratorBase { return end(); }; ///< Get an iterator to the first row.
 
 		/// \brief Get a vector with pointers to all components of an entry.
 		/// \param[in] n Index to the entry.
@@ -671,10 +698,11 @@ namespace vllt {
 	//---------------------------------------------------------------------------------------------------
 	//table view iterator
 
-	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
-	class VtllStaticIterator {
+
+	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITELIST, typename WRITE>
+	class VtllStaticIterator : public VtllStaticIteratorBase {
 	public:
-		using view_type = VlltStaticTableView<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, READ, WRITE>; ///< Type of the view	
+		using view_type = VlltStaticTableView<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, READ, WRITELIST>; ///< Type of the view	
     	using difference_type = table_diff_t; ///< Type of the difference between two iterators
 		using value_type = vtll::to_tuple< vtll::cat< READ, WRITE > >; ///< Type of the value the iterator points to
    	 	using pointer = table_index_t; ///< Type of the pointer the iterator points to
@@ -729,6 +757,7 @@ namespace vllt {
 		}
 
 	private:
+		virtual auto get_ptrs() -> std::vector<std::any> { return m_view.get_component_ptrs(m_n); }; ///< Get pointers to the components of a row.
 		table_index_t m_n;
 		view_type& m_view;
 	};
