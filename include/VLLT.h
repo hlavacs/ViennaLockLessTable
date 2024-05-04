@@ -102,7 +102,7 @@ namespace vllt {
 
 	//a VIEW that satisfies this concept has write access to all columns of the table is the owner and can add, pop, erase, and change anything
 	template<typename DATA, typename WRITE>
-	concept VlltWriteAll = (vtll::has_all_types<DATA, WRITE>::value && vtll::has_all_types<WRITE, DATA>::value); ///< Is the view the owner of the table?
+	concept VlltWriteAll = vtll::is_same_set<DATA, WRITE>::value; ///< Is the view the owner of the table?
 
 	// A VIEW that satisfies this concept is a push-back only view, i.e., it can only add rows to the table but nothing else,
 	// even though it is also an owner.
@@ -543,11 +543,8 @@ namespace vllt {
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
 	class VlltStaticTableView : public VlltStaticTableViewBase {
 	public:
-		template<typename X1, sync_t X2, size_t X3, bool X4, size_t X5, bool X6, typename X7, typename X8>
-		friend class VlltStaticTableViewPtrs;
-
+		using WRITEL = std::conditional<vtll::size<WRITE>::value == 1 && std::is_same_v<vtll::front<WRITE>, VlltWrite>, DATA, WRITE>; ///< Types that can be written to the table
 		using table_type = VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>; ///< Type of the table
-
 		using tuple_value_t = table_type::tuple_value_t;	///< Tuple holding the entries as value
 		using tuple_ref_t = vtll::to_ref_tuple<WRITE>; ///< Tuple holding refs to the entries
 		using tuple_const_ref_t = vtll::to_const_ref_tuple<READ>; ///< Tuple holding refs to the entries
