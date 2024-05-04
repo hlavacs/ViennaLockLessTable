@@ -26,6 +26,7 @@
 #include <mutex>
 #include <typeinfo>
 #include <typeindex>
+#include <any>
 
 #include "VTLL.h"
 #include "VSTY.h"
@@ -188,6 +189,14 @@ namespace vllt {
 		inline auto view<>() noexcept { return VlltStaticTableView<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, vtll::tl<>, DATA>(*this); };
 
 		friend bool operator==(const VlltStaticTable& lhs, const VlltStaticTable& rhs) noexcept { return &lhs == &rhs; }
+
+		/// \brief Return a vector with the types of the table.
+		/// \return a vector with the types of the table.
+		auto get_types() -> std::vector<const std::type_info*> {
+			std::vector<const std::type_info*> types;
+			vtll::static_for<size_t, 0, vtll::size<DATA>::value >([&](auto i) {types.emplace_back(&typeid(vtll::Nth_type<DATA,i>));} );
+			return types; 
+		}; 
 
 	protected:
 
@@ -518,10 +527,7 @@ namespace vllt {
 	/// \brief Base class for a view to a table.
 	class VlltStaticTableViewBase {
 	public:
-		virtual auto get_ptrs(table_index_t idx) -> std::vector<void*> { return {}; }; ///< Get pointers to the components of a row.
-		auto get_types() -> std::vector<std::type_index> { return m_types; }; ///< Get the types of the components of the table.
-	protected:
-		std::vector<std::type_index> m_types;
+		virtual auto get_component_ptrs(table_index_t idx) -> std::vector<std::any> { return {}; }; ///< Get pointers to the components of a row.
 	};
 
 
@@ -557,7 +563,6 @@ namespace vllt {
 
 			vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 				[&](auto i) {
-					m_types.emplace_back( typeid(vtll::Nth_type<DATA,i>) );
 					if constexpr ( vtll::size<READ>::value >0 && vtll::has_type<READ,vtll::Nth_type<DATA,i>>::value ) { 
 						if constexpr (SYNC == sync_t::VLLT_SYNC_DEBUG || SYNC == sync_t::VLLT_SYNC_DEBUG_PUSHBACK) assert(m_table.m_access_mutex[i].try_lock_shared());
 						else m_table.m_access_mutex[i].lock_shared(); 
@@ -637,15 +642,25 @@ namespace vllt {
 		/// \returns  Iterator to the end of the table.
 		auto end() requires (!VlltOnlyPushback<DATA, SYNC, READ, WRITE>) { return VtllStaticIterator<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, READ, WRITE>(*this, table_index_t{size() - 1}); } 
 
+		//---------------------------------------------------------------------------------------------------
+
 		/// \brief Get a vector with pointers to all components of an entry.
 		/// \param[in] n Index to the entry.
 		/// \returns a vector with pointers to all components of entry n.
-		virtual auto get_ptrs( table_index_t idx) -> std::vector<void*> {
-			static const bool owner = VlltOwner<DATA, SYNC, READ, WRITE>;
-			assert(owner);
-			std::vector<void*> ptrs(vtll::size<DATA>::value);
-			auto ret = m_table.template get_ref_tuple<DATA>(idx);
-			vtll::static_for<size_t, 0, vtll::size<DATA>::value >( [&](auto i) { ptrs[i] = &std::get<i>(ret) ; } );
+		virtual auto get_component_ptrs( table_index_t n) -> std::vector<std::any> {
+			std::vector<std::any> ptrs(vtll::size<READ>::value + vtll::size<WRITE>::value);
+
+			int j=0;
+			if constexpr (vtll::size<READ>::value > 0 && !std::is_same_v< vtll::front<READ>, VlltWrite>) {
+				auto ret = m_table.template get_const_ref_tuple<READ>(n);
+				vtll::static_for<size_t, 0, vtll::size<READ>::value >( [&](auto i) { ptrs[j++] = &std::get<i>(ret) ; } );
+			}
+
+			if constexpr (vtll::size<WRITE>::value > 0) {
+				auto ret = m_table.template get_ref_tuple<WRITE>(n);
+				vtll::static_for<size_t, 0, vtll::size<WRITE>::value >( [&](auto i) { ptrs[j++] = &std::get<i>(ret) ; } );
+			}
+
 			return ptrs;
 		}
 

@@ -105,9 +105,11 @@ void functional_test() {
 	}
 
 	{
-		auto view = table.view();
+		auto types = table.get_types();
+		auto view = table.view<double, float, vllt::VlltWrite, int, char, std::string>();
 		vllt::VlltStaticTableViewBase* view2 = &view;
-		auto p = view2->get_ptrs(vllt::table_index_t{0});
+		auto p = view2->get_component_ptrs(vllt::table_index_t{0}); //std::any container
+		std::cout << "Types: " << p[0].type().name() << " " << p[1].type().name() << " " << p[2].type().name() << " " << p[3].type().name() << " " << p[4].type().name() << std::endl;
 	}
 
 	{
