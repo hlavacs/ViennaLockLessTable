@@ -13,6 +13,7 @@ void functional_test() {
 
 	{
 		auto view = table.view<vllt::VlltWrite>();
+		//auto ret = view.get( vllt::table_index_t{0} ); //compile error
 		for( int i = 0; i < 100; i++ ) {
 			view.push_back((double)i, (float)i, i, 'a', std::string("Hello")); //inserting new rows always in order of the table types!
 		}

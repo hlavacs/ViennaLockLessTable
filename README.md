@@ -108,9 +108,9 @@ Like VLLT_SYNC_INTERNAL_PUSHBACK, but allows push-back-only views. The details a
 * Push-back only view allowed.
 * Adding new rows by: owning view and push-back only views.
 
-It must be noted that irrespective of the sync mode, adding new rows at the end of the table will never interfere with normal table operations, be it reading, writing, erasing etc. A view can add new rows in the following situations:
-* Its table uses sync modes VLLT_SYNC_EXTERNAL, VLLT_SYNC_INTERNAL_PUSHBACK, VLLT_SYNC_DEBUG_PUSHBACK
-* It is the sole owner of the table, i.e., it has write access to all columns.
+It must be noted that irrespective of the sync mode, adding new rows at the end of the table will not interfere with normal table operations, be it reading, writing, adding, swapping, removing, etc. A view can add new rows in the following situations:
+* It is the sole owner of the table, i.e., it has write access to all columns, or
+* the table sync mode includes PUSHBACK and the view is a pushback-only view.
 This enables game systems to produce new items any time without interfering with other systems. 
 
 When creating a view, the columns this view wants to access, as well as the intended use (read only or read/write) must be specified. This is done using variadic type lists in the templated version of the view() function.
@@ -124,44 +124,55 @@ The above code creates two views having full read/write ownership of all table c
 ```c
 using types = vtll::tl<double, float, int, char, std::string>;
 vllt::VlltStaticTable<types, vllt::sync_t::VLLT_SYNC_DEBUG_PUSHBACK, 1 << 5> table;
-auto view = table.view<double, float, vllt::VlltWrite, std::string>(); //read to the first two, write to the last
+auto view = table.view<int, vllt::VlltWrite, float, std::string>(); //read to the first two, write to the last
 ```
-In the above exaple, *view* has read access to the *double* and *float* type, and write access to *std::string*. It does not have access to *int* and *char*, so any other thread can concurrently create any view that either also reads from *double* and *float*, or even writes to *int* and *char* without interference with this thread. The view in the following example creates read access to all columns, which is compatible with any other reader, but which blocks (or should not be mixed with) write accesses.
+In the above example, *view* has read access to the *int* type, and write access to *float* and *std::string*. It does not have access to *double* and *char*, so any other thread can concurrently create any view that either also reads from *int*, or even writes to *double* and *char* without interference with this thread. The view in the following example creates read access to all columns, which is compatible with any other reader, but which blocks (or should not be mixed with) write accesses.
 ```c
 auto view = table.view<std::string, int, char, double, float>(); //read access to all columns, ordering irrelevant
 ```
 The ordering of the type list does not matter for a view. It only matters of you insert a new row to the table. 
-Accessing the columns is done by calling *get()* on the view. This results in a tuple holding const references to all columns where the view has read accesses, and plain references where the column has write access:
+Accessing the columns is done by calling *get()* on the view. This results in a tuple holding const references to all columns where the view has read accesses, and non-const references where the column has write access:
 ```c
 using types = vtll::tl<double, float, int, char, std::string>;
 vllt::VlltStaticTable<types, vllt::sync_t::VLLT_SYNC_DEBUG_PUSHBACK, 1 << 5> table;
 auto view = table.view<double, char, vllt::VlltWrite, int, float>(); //read to the first two, write to the last
-//view can insert new data irrespective of rights for VLLT_SYNC_DEBUG_PUSHBACK
-view.push_back(0.0, 1.0f, 2, 'a', std::string("Hello")); //type ordering of table types!
 auto data = view.get( vllt::table_index_t{0} ); //returns std::tuple<const double&, const char&, int&, float&>
 ```
 In the above code the result variable data is a tuple of type *std::tuple<const double&, const char&, int&, float&>*. Accessing the single components can be done with the *std::get<>()* function. The template argument is either an integer number or the correct types:
 ```c
-std::cout << "Data: " << view.size() << " " << std::get<const double&>(data) << " " << std::get<const char&>(data) 
-		  << " " << std::get<int&>(data) << " " << std::get<float&>(data) << " " << std::endl;
+std::cout << "Data: " << view.size() << " " << std::get<0>(data) << " " << std::get<const char&>(data) 
+		  << " " << std::get<2>(data) << " " << std::get<float&>(data) << " " << std::endl;
+```
+A pushback-only view enables non-owning systems of the game engine to add new objects anyway. This option must be enabled by choosing a sync mode with PUSHBACK in its name. If this is not done, then trying to create a pushback-only view results in a compile error. 
+You can create a pushback-only view by using *vllt::VlltWrite* as sole template parameter. If you call any other function than *push_back()* on this view, the result is a compile error. 
+```c
+using types = vtll::tl<double, float, int, char, std::string>;
+vllt::VlltStaticTable<types, vllt::sync_t::VLLT_SYNC_DEBUG_PUSHBACK, 1 << 5> table;
+auto view1 = table.view(); //view owning the table
+view1.push_back(0.0, 0.0f, 0, 'a', std::string("Hello1")); //type ordering of table types!
+
+auto view2 = table.view<vllt::VlltWrite>(); //pushback-only view does not interfere with others
+view2.push_back(1.0, 1.0f, 1, 'b', std::string("Hello2")); //type ordering of table types!
+
+auto data1 = view1.get( vllt::table_index_t{0} ); //returns std::tuple<double&, float, int&, char&, std::string&>
+//auto data2 = view2.get( vllt::table_index_t{0} ); //compile error
 ```
 Care must be taken when accessing the data. Using only auto generats the base type, and copying it creates a copy of the data. The new copy can be changed irrespective of whether the reference was const or not. 
 Using *decltype(auto)* creates a copy of the *reference*, and also a const qualifier with it if there is one!
 ```c
-	auto d0 = std::get<0>(data); //d0 is a copy, changing its value does not affect the table.
-	d0 = 3.0; //change the copy, not the table
+auto d0 = std::get<0>(data); //d0 is a copy, changing its value does not affect the table.
+d0 = 3.0; //change the copy, not the table
 
-	decltype(auto) d1 = std::get<1>(data); // is the same const reference as in the tuple.
-	//d1 = 3; // compile error since the reference is const!
+decltype(auto) d1 = std::get<1>(data); // is the same const reference as in the tuple.
+//d1 = 3; // compile error since the reference is const!
 
-	decltype(auto) d2 = std::get<2>(data); // is the same reference as in the tuple.
-	d2 = 3.0f; // this is a reference, so this changes the value in the table!
+decltype(auto) d2 = std::get<2>(data); // is the same reference as in the tuple.
+d2 = 3.0f; // this is a reference, so this changes the value in the table!
 
-	auto d3 = std::get<3>(data); //copy of the data (int)
-	d3 = 3;	//change the copy, not the value in the table
+auto d3 = std::get<3>(data); //copy of the data (int)
+d3 = 3;	//change the copy, not the value in the table
 ```
 You can use iterators and range based for loops. Care must be taken to use decltype(auto), since using auto alone results in copies of the data instead of references!
-
 ```c
 {
 	auto it = view.begin(); //iterator to the first row
