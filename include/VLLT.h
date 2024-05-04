@@ -543,7 +543,8 @@ namespace vllt {
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
 	class VlltStaticTableView : public VlltStaticTableViewBase {
 	public:
-		using WRITEL = std::conditional<vtll::size<WRITE>::value == 1 && std::is_same_v<vtll::front<WRITE>, VlltWrite>, DATA, WRITE>; ///< Types that can be written to the table
+		using WRITELIST = std::conditional< vtll::is_same_set<WRITE, vtll::tl<VlltWrite> >::value, DATA, WRITE>; ///< Types that can be written to the table
+		
 		using table_type = VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>; ///< Type of the table
 		using tuple_value_t = table_type::tuple_value_t;	///< Tuple holding the entries as value
 		using tuple_ref_t = vtll::to_ref_tuple<WRITE>; ///< Tuple holding refs to the entries
