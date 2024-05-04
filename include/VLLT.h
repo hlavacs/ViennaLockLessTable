@@ -527,40 +527,46 @@ namespace vllt {
 
 
 	//---------------------------------------------------------------------------------------------------
-	//table view
+	//iterator to a view 
 
 	/// \brief Base class for a iterator to a view.
 	class VtllStaticIteratorBase {
-	public:
-		virtual auto get_component_ptrs() -> std::vector<std::any> { return {};}; ///< Get pointers to the components of a row.
-	    virtual auto not_equal(const VtllStaticIteratorBase& rhs) -> bool { return true; }; ///< Dereference operator
-    	virtual auto plusplus() -> VtllStaticIteratorBase& { return *this; }; ///< Prefix increment operator
+		friend class VtllStaticIteratorBaseWrapper;
+		virtual inline auto get_component_ptrs() -> std::vector<std::any> { return {};}; ///< Get pointers to the components of a row.
+	    virtual inline auto not_equal(const VtllStaticIteratorBase& rhs) -> bool { return true; }; ///< Dereference operator
+    	virtual inline auto plusplus() -> VtllStaticIteratorBase& { return *this; }; ///< Prefix increment operator
 	};
 
 
+	/// \brief Wrapper for a iterator to a view.
 	class VtllStaticIteratorBaseWrapper {
 	public:
     	using iterator_category = std::forward_iterator_tag ; ///< Type of the iterator category
-		VtllStaticIteratorBaseWrapper(std::shared_ptr<VtllStaticIteratorBase> p) : m_ptr{p} {};
-	    std::vector<std::any> operator*() { return m_ptr->get_component_ptrs(); } ///< Dereference operator
-	    auto operator!=(const VtllStaticIteratorBaseWrapper& rhs) -> bool { return m_ptr->not_equal(*rhs.m_ptr); } ///< Dereference operator
-    	VtllStaticIteratorBase& operator++() { return m_ptr->plusplus(); }; ///< Prefix increment operator
+
+		VtllStaticIteratorBaseWrapper( const VtllStaticIteratorBase& b, size_t sz) { memcpy(m_data.data(), (const void*)&b, sz); };
+	    std::vector<std::any> operator*() { return ((VtllStaticIteratorBase*)(m_data.data()))->get_component_ptrs(); }; ///< Dereference operator
+		auto operator!=(const VtllStaticIteratorBaseWrapper& rhs) -> bool { 
+			return ((VtllStaticIteratorBase*)(m_data.data()))->not_equal( *((VtllStaticIteratorBase*)rhs.m_data.data()) ); 
+		};
+    	VtllStaticIteratorBase& operator++() { return ((VtllStaticIteratorBase*)(m_data.data()))->plusplus(); }; ///< Prefix increment operator
 
 	private:
-		std::shared_ptr<VtllStaticIteratorBase> m_ptr;
+		std::array<uint8_t, 32> m_data;
 	};
 
 
+	//---------------------------------------------------------------------------------------------------
+	//table view
 
 	/// \brief Base class for a view to a table.
 	class VlltStaticTableViewBase {
 	public:
-		virtual auto get_component_ptrs(table_index_t idx) -> std::vector<std::any> = 0; ///< Get pointers to the components of a row.
-		auto begin() -> VtllStaticIteratorBaseWrapper { return begin_p(); }; ///< Get an iterator to the first row.
-		auto end() -> VtllStaticIteratorBaseWrapper { return end_p(); }; ///< Get an iterator to the first row.
+		virtual inline auto get_component_ptrs(table_index_t idx) -> std::vector<std::any> = 0; ///< Get pointers to the components of a row.
+		inline auto begin() -> VtllStaticIteratorBaseWrapper { return begin_p(); }; ///< Get an iterator to the first row.
+		inline auto end() -> VtllStaticIteratorBaseWrapper { return end_p(); }; ///< Get an iterator to the first row.
 	private:
-		virtual auto begin_p() -> VtllStaticIteratorBaseWrapper = 0; ///< Get an iterator to the first row.
-		virtual auto end_p() -> VtllStaticIteratorBaseWrapper = 0; ///< Get an iterator to the first row.
+		virtual inline auto begin_p() -> VtllStaticIteratorBaseWrapper = 0; ///< Get an iterator to the first row.
+		virtual inline auto end_p() -> VtllStaticIteratorBaseWrapper = 0; ///< Get an iterator to the first row.
 	};
 
 
@@ -667,29 +673,13 @@ namespace vllt {
 
 		/// \brief Create an iterator to the beginning of the table.
 		/// \returns  Iterator to the beginning of the table.
-		inline auto begin() {
-			assert(!VlltOnlyPushback<WRITELIST>);
-			return iterator_t(*this, table_index_t{0}); 
-		}
+		inline auto begin() { assert(!VlltOnlyPushback<WRITELIST>); return iterator_t(*this, table_index_t{0}); }
 
 		/// \brief Create an iterator to the end of the table.
 		/// \returns  Iterator to the end of the table.
-		inline auto end() {
-			assert(!VlltOnlyPushback<WRITELIST>);
-			return iterator_t(*this, table_index_t{size() - 1});
-		}
+		inline auto end() { assert(!VlltOnlyPushback<WRITELIST>); return iterator_t(*this, table_index_t{size() - 1}); }
 
 		//---------------------------------------------------------------------------------------------------
-
-		virtual auto begin_p() -> VtllStaticIteratorBaseWrapper { ///< Get an iterator to the first row.
-			assert(!VlltOnlyPushback<WRITELIST>);
-			return VtllStaticIteratorBaseWrapper( std::make_shared<iterator_t>(*this, table_index_t{0}) ); 
-		}; 
-
-		virtual auto end_p() -> VtllStaticIteratorBaseWrapper { ///< Get an iterator to the first row.
-			assert(!VlltOnlyPushback<WRITELIST>);
-			return VtllStaticIteratorBaseWrapper( std::make_shared<iterator_t>(*this, table_index_t{size() - 1}) ); 
-		}; 
 
 		/// \brief Get a vector with pointers to all components of an entry.
 		/// \param[in] n Index to the entry.
@@ -711,7 +701,16 @@ namespace vllt {
 			return ptrs;
 		}
 
-	protected:
+	private:
+
+		/// \brief Create an iterator to the beginning of the table.
+		/// \returns  Iterator to the beginning of the table.
+		virtual inline auto begin_p() -> VtllStaticIteratorBaseWrapper { return VtllStaticIteratorBaseWrapper( begin(), sizeof(iterator_t) ); }; 
+		
+		/// \brief Create an iterator to the end of the table.
+		/// \returns  Iterator to the end of the table.
+		virtual inline auto end_p() -> VtllStaticIteratorBaseWrapper { return VtllStaticIteratorBaseWrapper( end(), sizeof(iterator_t) ); }; 
+
 		table_type& m_table; ///< Reference to the table
 	};
 
