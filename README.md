@@ -193,7 +193,7 @@ You can use iterators and range based for loops. Care must be taken to use declt
 	}
 }
 ```
-## Dynamic Polymorphism
+## Dynamic Polymorphism and *get_ptr_vector()*
 If you want to combine multiple static tables to achieve dynamic polymorphism, e.g., for an entity component system, you can call *get_ptr_vector* instead of *get_ref_tuple()*. This results in a *std::vector<std::any>* holding non-const or const pointers to the components of a row. *std::any* stores typed values, in this case, pointers, accessing to the stored values is done with *std::any_cast*. You can query the type of the *std::any* value by calling *type()*. Dynamic polymorphism is achieved by using *vllt::VlltStaticTableViewBase* pointers, which denote the common base class for all views. The base class also emits generic iterators with its *begin()* and *end()* methods and can be used for range based loops:
 ```c
 auto types = table.get_types();
