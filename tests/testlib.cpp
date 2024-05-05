@@ -107,7 +107,7 @@ void functional_test() {
 	{
 		auto view = table.view();
 		view.clear();
-		for( int i = 0; i < 100; i++ ) {
+		for( int i = 0; i < 10; i++ ) {
 			view.push_back((double)i, (float)i, i, 'a', std::string("Hello")); //inserting new rows always in order of the table types!
 		}
 	}
@@ -125,7 +125,12 @@ void functional_test() {
 			auto p0n = p[0].type().name();
 			//std::cout << "Types: " << p[0].type().name() << " " << p[1].type().name() << " " << p[2].type().name() << " " << p[3].type().name() << " " << p[4].type().name() << std::endl;
 			std::cout << "Data: " << *std::any_cast<double const *>(p[0]) << " " << *std::any_cast<float const *>(p[1]) << " " << *std::any_cast<int *>(p[2]) << " " << *std::any_cast<char *>(p[3]) << " " << *std::any_cast<std::string *>(p[4]) << std::endl;
+			*std::any_cast<int *>(p[2]) = *std::any_cast<int *>(p[2]) * 2;
 		}
+		for( auto p : *view2 ) { //need to use decltype(auto) to get the references right
+			std::cout << "Data: " << *std::any_cast<double const *>(p[0]) << " " << *std::any_cast<float const *>(p[1]) << " " << *std::any_cast<int *>(p[2]) << " " << *std::any_cast<char *>(p[3]) << " " << *std::any_cast<std::string *>(p[4]) << std::endl;
+		}
+
 	}
 
 	{
