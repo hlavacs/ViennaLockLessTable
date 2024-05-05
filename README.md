@@ -138,10 +138,10 @@ vllt::VlltStaticTable<types, vllt::sync_t::VLLT_SYNC_DEBUG_PUSHBACK, 1 << 5> tab
 auto view = table.view<double, char, vllt::VlltWrite, int, float>(); //read to the first two, write to the last
 auto data = view.get_ref_tuple( vllt::table_index_t{0} ); //returns std::tuple<const double&, const char&, int&, float&>
 ```
-In the above code the result variable data is a tuple of type *std::tuple<const double&, const char&, int&, float&>*. Accessing the single components can be done with the *std::get<>()* function. The template argument is either an integer number or the correct types:
+In the above code the result variable data is a tuple of type *std::tuple<const double&, const char&, int&, float&>*. Accessing the single components can be done with the *vllt::get<>()* function. The template argument is either an integer number or the correct types:
 ```c
-std::cout << "Data: " << view.size() << " " << std::get<0>(data) << " " << std::get<const char&>(data) 
-		  << " " << std::get<2>(data) << " " << std::get<float&>(data) << " " << std::endl;
+std::cout << "Data: " << view.size() << " " << vllt::get<0>(data) << " " << vllt::get<const char&>(data) 
+		  << " " << vllt::get<2>(data) << " " << vllt::get<float&>(data) << " " << std::endl;
 ```
 A pushback-only view enables non-owning systems of the game engine to add new objects anyway. This option must be enabled by choosing a sync mode with PUSHBACK in its name. If this is not done, then trying to create a pushback-only view results in a compile error. 
 You can create a pushback-only view by using *vllt::VlltWrite* as sole template parameter. If you call any other function than *push_back()* on this view, the result is a compile error. 
@@ -160,16 +160,16 @@ auto data1 = view1.get_ref_tuple( vllt::table_index_t{0} ); //returns std::tuple
 Care must be taken when accessing the data. Using only auto generats the base type, and copying it creates a copy of the data. The new copy can be changed irrespective of whether the reference was const or not. 
 Using *decltype(auto)* creates a copy of the *reference*, and also a const qualifier with it if there is one!
 ```c
-auto d0 = std::get<0>(data); //d0 is a copy, changing its value does not affect the table.
+auto d0 = vllt::get<0>(data); //d0 is a copy, changing its value does not affect the table.
 d0 = 3.0; //change the copy, not the table
 
-decltype(auto) d1 = std::get<1>(data); // is the same const reference as in the tuple.
+decltype(auto) d1 = vllt::get<1>(data); // is the same const reference as in the tuple.
 //d1 = 3; // compile error since the reference is const!
 
-decltype(auto) d2 = std::get<2>(data); // is the same reference as in the tuple.
+decltype(auto) d2 = vllt::get<2>(data); // is the same reference as in the tuple.
 d2 = 3.0f; // this is a reference, so this changes the value in the table!
 
-auto d3 = std::get<3>(data); //copy of the data (int)
+auto d3 = vllt::get<3>(data); //copy of the data (int)
 d3 = 3;	//change the copy, not the value in the table
 ```
 You can use iterators and range based for loops. Care must be taken to use decltype(auto), since using auto alone results in copies of the data instead of references!
@@ -179,37 +179,43 @@ You can use iterators and range based for loops. Care must be taken to use declt
 	auto view = table.view< float, vllt::VlltWrite, double>();
 	auto it = view.begin();
 	for( auto it = view.begin(); it != view.end(); ++it) {
-		std::cout << "Data: " << std::get<double &>(*it) << std::endl;
+		std::cout << "Data: " << vllt::get<double &>(*it) << std::endl;
 	}
 }
 {
 	auto view = table.view< double, vllt::VlltWrite, float, int, char, std::string>();
 	for( decltype(auto) el : view ) {   //need to use decltype(auto) to get the references right
-		auto d = std::get<const double&>(el); //read only, get a copy
-		std::get<float&>(el) = 0.0f;
-		std::get<int&>(el) = 1;
-		std::get<char&>(el) = 'b';
-		std::get<std::string&>(el) = "0.0f";
+		auto d = vllt::get<const double&>(el); //read only, get a copy
+		vllt::get<float&>(el) = 0.0f;
+		vllt::get<int&>(el) = 1;
+		vllt::get<char&>(el) = 'b';
+		vllt::get<std::string&>(el) = "0.0f";
 	}
 }
 ```
-## Dynamic Polymorphism and *get_ptr_vector()*
-If you want to combine multiple static tables to achieve dynamic polymorphism, e.g., for an entity component system, you can call *get_ptr_vector* instead of *get_ref_tuple()*. This results in a *std::vector<std::any>* holding non-const or const pointers to the components of a row. *std::any* stores typed values, in this case, pointers, accessing to the stored values is done with *std::any_cast*. You can query the type of the *std::any* value by calling *type()*. Dynamic polymorphism is achieved by using *vllt::VlltStaticTableViewBase* pointers, which denote the common base class for all views. The base class also emits generic iterators with its *begin()* and *end()* methods and can be used for range based loops:
+## Dynamic Polymorphism and *get_ptrs()*
+If you want to combine multiple static tables to achieve dynamic polymorphism, e.g., for an entity component system, you can call *get_ptrs* instead of *get_ref_tuple()*. This results in a *ptr_array_t* holding non-const or const pointers to the components of a row. VLLT offers three functions to get the reference (*vllt::get_ref()*), the number of pointers (*vllt::get_size()*), and the type of a pointer (*vllt::get_any*). *vllt::get_any* returns a *std::any* storing the pointer, which you can also ask for the pointer type.
+
+Dynamic polymorphism is achieved by using *vllt::VlltStaticTableViewBase* pointers, which denote the common base class for all views. The base class also emits generic iterators with its *begin()* and *end()* methods and can be used for range based loops:
 ```c
 auto types = table.get_types();
 auto view = table.view<double, float, vllt::VlltWrite, int, char, std::string>();
-vllt::VlltStaticTableViewBase* view2 = &view; // Dynamic polymorphism is here !!!!
-auto p = view2->get_ptr_vector(vllt::table_index_t{0}); //std::any container
-std::cout << "Types: " << p[0].type().name() << " " << p[1].type().name() << " " << p[2].type().name() << " " << p[3].type().name() << " " << p[4].type().name() << std::endl;
+vllt::VlltStaticTableViewBase* view2 = &view;
+auto p = view2->get(vllt::table_index_t{0}); //std::any container
+		
+std::cout << "Types:";
+for( size_t i=0; i<vllt::get_size(p); ++i) {
+	auto a = vllt::get_any(p, i);
+	std::cout << " " << a.type().name();
+}
+std::cout << std::endl;
 
 for( auto p : *view2 ) { //range based loop, returns std::vector<std::any> holding pointers!
-	auto *p0t = &p[0].type();
-	auto p0n = p[0].type().name();
-	std::cout << "Data: " << *std::any_cast<double const *>(p[0]) << " " << *std::any_cast<float const *>(p[1]) << " " << *std::any_cast<int *>(p[2]) << " " << *std::any_cast<char *>(p[3]) << " " << *std::any_cast<std::string *>(p[4]) << std::endl;
-	*std::any_cast<int *>(p[2]) = *std::any_cast<int *>(p[2]) * 2;
+	std::cout << "Data: " << vllt::get<double const&>(p) << " " << vllt::get<float const&>(p) << " " << vllt::get<int&>(p) << " " << vllt::get<char&>(p) << " " << vllt::get<std::string&>(p) << std::endl;
+	vllt::get<int&>(p) = vllt::get<int&>(p) * 2;
 }
-for( auto p : *view2 ) { 
-	std::cout << "Data: " << *std::any_cast<double const *>(p[0]) << " " << *std::any_cast<float const *>(p[1]) << " " << *std::any_cast<int *>(p[2]) << " " << *std::any_cast<char *>(p[3]) << " " << *std::any_cast<std::string *>(p[4]) << std::endl;
+for( auto p : *view2 ) { //range based loop, returns std::vector<std::any> holding pointers!
+	std::cout << "Data: " << vllt::get<double const&>(p) << " " << vllt::get<float const&>(p) << " " << vllt::get<int&>(p) << " " << vllt::get<char&>(p) << " " << vllt::get<std::string&>(p) << std::endl;
 }
 ```
 

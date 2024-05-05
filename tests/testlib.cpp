@@ -23,25 +23,25 @@ void functional_test() {
 		auto view = table.view<double, char, vllt::VlltWrite, int, float>();
 		auto data = view.get_ref_tuple( vllt::table_index_t{0} );
 
-		std::cout << "Data: " << std::get<const double&>(data) << " " << std::get<const char&>(data) 
-				  << " " << std::get<int&>(data) << " " << std::get<float&>(data) << " " << std::endl;
+		std::cout << "Data: " << vllt::get<const double&>(data) << " " << vllt::get<const char&>(data) 
+				  << " " << vllt::get<int&>(data) << " " << vllt::get<float&>(data) << " " << std::endl;
 
-		auto d0 = std::get<0>(data); //copy of the data (double), not a reference
+		auto d0 = vllt::get<0>(data); //copy of the data (double), not a reference
 		d0 = 3.0; //change the copy, not the value in the table
 
-		decltype(auto) d1 = std::get<1>(data); //const reference!
+		decltype(auto) d1 = vllt::get<1>(data); //const reference!
 		//d1 = 'U';  //compile error
 
-		decltype(auto) d2 = std::get<2>(data); //reference
+		decltype(auto) d2 = vllt::get<2>(data); //reference
 		d2 = 3;	//change the value in the table
 
-		auto d3 = std::get<3>(data); //copy of the data (int)
+		auto d3 = vllt::get<3>(data); //copy of the data (int)
 		d3 = 3.0f;	//change the copy, not the value in the table
 
-		std::cout << "Data: " << std::get<0>(data) //unchanged
-				  << " " << std::get<1>(data)
-				  << " " << std::get<2>(data) //changed to new value
-				  << " " << std::get<3>(data) << " "  << std::endl; //unchanged
+		std::cout << "Data: " << vllt::get<0>(data) //unchanged
+				  << " " << vllt::get<1>(data)
+				  << " " << vllt::get<2>(data) //changed to new value
+				  << " " << vllt::get<3>(data) << " "  << std::endl; //unchanged
 
 	}
 
@@ -60,8 +60,8 @@ void functional_test() {
 		for( uint64_t i = 0; i < table.size(); i++ ) {	
 			auto data = view1.get_ref_tuple( vllt::table_index_t{(uint64_t)i} );
 			auto data2 = view2.get_ref_tuple( vllt::table_index_t{(uint64_t)i} );
-			assert( std::get<0>(data) == (double)i && std::get<1>(data) == (float)i ); 
-			assert( std::get<2>(data) == i && std::get<3>(data) == 'a' && std::get<4>(data) == "Hello" );
+			assert( vllt::get<0>(data) == (double)i && vllt::get<1>(data) == (float)i ); 
+			assert( vllt::get<2>(data) == i && vllt::get<3>(data) == 'a' && vllt::get<4>(data) == "Hello" );
 		}
 	}
 
@@ -69,7 +69,7 @@ void functional_test() {
 		auto view  = table.view();
 		for( int i = 0; i < 10; i++ ) {	
 			auto data = view.get_ref_tuple( vllt::table_index_t{0} );
-			std::cout << "Data: " << view.size() << " " << std::get<0>(data) << " " << std::get<1>(data) << " " << std::get<2>(data) << " " << std::get<3>(data) << " " << std::get<4>(data) << std::endl;
+			std::cout << "Data: " << view.size() << " " << vllt::get<0>(data) << " " << vllt::get<1>(data) << " " << vllt::get<2>(data) << " " << vllt::get<3>(data) << " " << vllt::get<4>(data) << std::endl;
 			view.erase( vllt::table_index_t{0} );
 		}
 
@@ -79,11 +79,11 @@ void functional_test() {
 	{
 		auto view = table.view< double, vllt::VlltWrite, float, int, char, std::string>();
 		for( decltype(auto) el : view ) { //need to use decltype(auto) to get the references right
-			auto d = std::get<const double&>(el);
-			std::get<float&>(el) = 0.0f;
-			std::get<int&>(el) = 1;
-			std::get<char&>(el) = 'b';
-			std::get<std::string&>(el) = "0.0f";
+			auto d = vllt::get<const double&>(el);
+			vllt::get<float&>(el) = 0.0f;
+			vllt::get<int&>(el) = 1;
+			vllt::get<char&>(el) = 'b';
+			vllt::get<std::string&>(el) = "0.0f";
 		}
 	}
 
@@ -91,7 +91,7 @@ void functional_test() {
 		auto view = table.view< float, vllt::VlltWrite, double>();
 		auto it = view.begin();
 		for( auto it = view.begin(); it != view.end(); ++it) {
-			std::cout << "Data: " << std::get<double &>(*it) << std::endl;
+			std::cout << "Data: " << vllt::get<double &>(*it) << std::endl;
 		}
 	}
 
@@ -99,8 +99,8 @@ void functional_test() {
 		auto view = table.view< float, vllt::VlltWrite, double>();
 		auto it = view.begin();
 		for( int64_t i=0; (uint64_t)i < view.size(); ++i) {
-			std::get<double&>( it[ vllt::table_diff_t{i} ] ) = (double)i;
-			std::cout << "Data2: " << view.size() << " " << std::get<double&>( it[ vllt::table_diff_t{i} ] ) << std::endl;
+			vllt::get<double&>( it[ vllt::table_diff_t{i} ] ) = (double)i;
+			std::cout << "Data2: " << view.size() << " " << vllt::get<double&>( it[ vllt::table_diff_t{i} ] ) << std::endl;
 		}
 	}
 
@@ -117,26 +117,29 @@ void functional_test() {
 		auto types = table.get_types();
 		auto view = table.view<double, float, vllt::VlltWrite, int, char, std::string>();
 		vllt::VlltStaticTableViewBase* view2 = &view;
-		auto p = view2->get_ptr_vector(vllt::table_index_t{0}); //std::any container
-		std::cout << "Types: " << p[0].type().name() << " " << p[1].type().name() << " " << p[2].type().name() << " " << p[3].type().name() << " " << p[4].type().name() << std::endl;
+		auto p = view2->get(vllt::table_index_t{0}); //std::any container
+		
+		std::cout << "Types:";
+		for( size_t i=0; i<vllt::get_size(p); ++i) {
+			auto a = vllt::get_any(p, i);
+			std::cout << " " << a.type().name();
+		}
+		std::cout << std::endl;
 
 		for( auto p : *view2 ) { //range based loop, returns std::vector<std::any> holding pointers!
-			auto *p0t = &p[0].type();
-			auto p0n = p[0].type().name();
-			std::cout << "Data: " << *std::any_cast<double const *>(p[0]) << " " << *std::any_cast<float const *>(p[1]) << " " << *std::any_cast<int *>(p[2]) << " " << *std::any_cast<char *>(p[3]) << " " << *std::any_cast<std::string *>(p[4]) << std::endl;
-			*std::any_cast<int *>(p[2]) = *std::any_cast<int *>(p[2]) * 2;
+			std::cout << "Data: " << vllt::get<double const&>(p) << " " << vllt::get<float const&>(p) << " " << vllt::get<int&>(p) << " " << vllt::get<char&>(p) << " " << vllt::get<std::string&>(p) << std::endl;
+			vllt::get<int&>(p) = vllt::get<int&>(p) * 2;
 		}
 		for( auto p : *view2 ) { //range based loop, returns std::vector<std::any> holding pointers!
-			std::cout << "Data: " << *std::any_cast<double const *>(p[0]) << " " << *std::any_cast<float const *>(p[1]) << " " << *std::any_cast<int *>(p[2]) << " " << *std::any_cast<char *>(p[3]) << " " << *std::any_cast<std::string *>(p[4]) << std::endl;
+			std::cout << "Data: " << vllt::get<double const&>(p) << " " << vllt::get<float const&>(p) << " " << vllt::get<int&>(p) << " " << vllt::get<char&>(p) << " " << vllt::get<std::string&>(p) << std::endl;
 		}
-
 	}
 
 	{
 		auto view = table.view();
 		for( int i=0; i<10; ++i) {
 			auto last = view.pop_back();
-			std::cout << "Pop: " << std::get<double>(last) << std::endl;
+			std::cout << "Pop: " << vllt::get<double>(last) << std::endl;
 		}
 		view.clear();
 		std::cout << "Size: " << view.size() << std::endl;
@@ -188,7 +191,7 @@ void parallel_test(int num_threads = std::thread::hardware_concurrency() ) {
 		assert( s == num*num_threads );
 		for( int i = 0; i < s; i++ ) {
 			auto data = view.get_ref_tuple( vllt::table_index_t{(uint64_t)i} );
-			//std::cout << "Read: ID " << id << " " << std::get<0>(data) << " " << std::get<1>(data) << " " << std::get<2>(data) << " " << std::get<3>(data) << " " << std::get<4>(data) << std::endl;
+			//std::cout << "Read: ID " << id << " " << vllt::get<0>(data) << " " << vllt::get<1>(data) << " " << vllt::get<2>(data) << " " << vllt::get<3>(data) << " " << vllt::get<4>(data) << std::endl;
 		}
 	};
 
@@ -215,9 +218,9 @@ void parallel_test(int num_threads = std::thread::hardware_concurrency() ) {
 	for( int i = 0; i < num_threads; i++ ) {
 		for( int j=0; j < view.size(); j++ ) {
 			auto data = view.get_ref_tuple( vllt::table_index_t{(uint64_t)j} );
-			if( std::get<int&>(data) == i ) {
-				//std::cout << "DATA " << view.size() << " " << std::get<0>(data) << " " << std::get<1>(data) << " " << std::get<2>(data) << " " << std::get<3>(data) << " " << std::get<4>(data) << std::endl;
-				sizes[i].insert( std::get<0>(data) );
+			if( vllt::get<int&>(data) == i ) {
+				//std::cout << "DATA " << view.size() << " " << vllt::get<0>(data) << " " << vllt::get<1>(data) << " " << vllt::get<2>(data) << " " << vllt::get<3>(data) << " " << vllt::get<4>(data) << std::endl;
+				sizes[i].insert( vllt::get<0>(data) );
 			}
 		}
 	}

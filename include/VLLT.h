@@ -527,12 +527,81 @@ namespace vllt {
 
 
 	//---------------------------------------------------------------------------------------------------
+	//Accessor fucntions to return values from view and iterator
+	
+	constexpr size_t REF_ARRAY_SIZE = 32; ///< Maximum size of the iterator
+	using ptr_array_t = std::variant< std::array<std::any, REF_ARRAY_SIZE>, std::vector<std::any> >;
+
+	/// \brief Get a pointer to a component of a row.
+	/// \param[in] ptrs Pointers to the components of a row.
+	/// \returns Pointer to the component.
+	template<typename T>
+	auto get_ptr( const ptr_array_t& ptrs ) {
+		if (ptrs.index() == 0) {
+			for( decltype(auto) a : std::get<0>(ptrs)) {
+				if (a.has_value() && a.type() == typeid(T)) return std::any_cast<T>(a);
+			}
+			assert(false);
+		}
+		for( decltype(auto) a : std::get<1>(ptrs)) {
+			if (a.has_value() && a.type() == typeid(T)) return std::any_cast<T>(a);
+		}
+		assert(false);
+		return T{};
+	}
+
+	/// \brief Get a reference to a component of a row.
+	/// \param[in] ptrs Pointers to the components of a row.
+	/// \returns Reference to the component.
+	template<typename T>
+	auto& get( const ptr_array_t& ptrs ) {
+		return *get_ptr<std::remove_reference_t<T>*>(ptrs);
+	}
+
+	/// \brief Get a reference to a component of a row. Wrapper for std::get
+	template<typename T>
+	auto& get( const auto& tuple ) {
+		return std::get<T>(tuple);
+	}
+
+	/// \brief Get a reference to a component of a row. Wrapper for std::get
+	/// \tparam T Index of the component.
+	/// \param[in] tuple Tuple holding the components.
+	/// \returns Reference to the component.
+	template<auto T>
+	auto& get( const auto& tuple ) {
+		return std::get<T>(tuple);
+	}
+
+	/// \brief Get the size of the row.
+	/// \param[in] ptrs Pointers to the components of a row.
+	/// \returns Size of the row.
+	size_t get_size(const ptr_array_t& ptrs) {
+		if( ptrs.index() == 1 ) return std::get<1>(ptrs).size();
+		size_t i = 0;
+		for( decltype(auto) a : std::get<0>(ptrs)) {
+			if (!a.has_value()) return i;
+			i++;
+		}
+		return i;
+	}
+
+	/// \brief Get the std:any that is storing the component pointer.
+	/// \param[in] ptrs Pointers to the components of a row.
+	/// \param[in] idx Index of the component.
+	/// \returns std::any that is storing the component pointer.
+	auto get_any( const ptr_array_t& ptr, size_t idx ) {
+		return ptr.index() == 0 ? std::get<0>(ptr)[idx] : std::get<1>(ptr)[idx];
+	}
+
+	//---------------------------------------------------------------------------------------------------
 	//iterator to a view 
+
 
 	/// \brief Base class for a iterator to a view.
 	class VtllStaticIteratorBase {
 		friend class VtllStaticIteratorBaseWrapper;
-		virtual inline auto get_ptr_vector() -> std::vector<std::any> { return {};}; ///< Get pointers to the components of a row.
+		virtual inline auto get() -> ptr_array_t { return {};}; ///< Get pointers to the components of a row.
 	    virtual inline auto not_equal(const VtllStaticIteratorBase& rhs) -> bool { return true; }; ///< Dereference operator
     	virtual inline auto plusplus() -> VtllStaticIteratorBase& { return *this; }; ///< Prefix increment operator
 	};
@@ -549,12 +618,12 @@ namespace vllt {
 			memcpy(m_data.data(), (const void*)&b, sz); 
 		};
 
-	    std::vector<std::any> operator*() { return get()->get_ptr_vector(); }; ///< Dereference operator
-		auto operator!=(VtllStaticIteratorBaseWrapper& rhs) -> bool { return get()->not_equal( *rhs.get() ); };
-		VtllStaticIteratorBase& operator++() { return get()->plusplus(); }; ///< Prefix increment operator
+	    ptr_array_t operator*() { return get_iteratorbase()->get(); }; ///< Dereference operator
+		auto operator!=(VtllStaticIteratorBaseWrapper& rhs) -> bool { return get_iteratorbase()->not_equal( *rhs.get_iteratorbase() ); };
+		VtllStaticIteratorBase& operator++() { return get_iteratorbase()->plusplus(); }; ///< Prefix increment operator
 
 	private:
-		VtllStaticIteratorBase* get() { return (VtllStaticIteratorBase*)(m_data.data()); };
+		VtllStaticIteratorBase* get_iteratorbase() { return (VtllStaticIteratorBase*)(m_data.data()); };
 		std::array<uint8_t, wrappersize> m_data;
 	};
 
@@ -565,7 +634,7 @@ namespace vllt {
 	/// \brief Base class for a view to a table.
 	class VlltStaticTableViewBase {
 	public:
-		virtual inline auto get_ptr_vector(table_index_t idx) -> std::vector<std::any> = 0; ///< Get pointers to the components of a row.
+		virtual inline auto get(table_index_t idx) -> ptr_array_t = 0; ///< Get pointers to the components of a row.
 		inline auto begin() -> VtllStaticIteratorBaseWrapper { return begin_p(); }; ///< Get an iterator to the first row.
 		inline auto end() -> VtllStaticIteratorBaseWrapper { return end_p(); }; ///< Get an iterator to the first row.
 	private:
@@ -681,25 +750,34 @@ namespace vllt {
 
 		/// \brief Create an iterator to the end of the table.
 		/// \returns  Iterator to the end of the table.
-		inline auto end() { assert(!VlltOnlyPushback<WRITELIST>); return iterator_t(*this, table_index_t{size() - 1}); }
+		inline auto end() { assert(!VlltOnlyPushback<WRITELIST>); return iterator_t(*this, table_index_t{size()}); }
 
 		//---------------------------------------------------------------------------------------------------
 
 		/// \brief Get a vector with pointers to all components of an entry.
 		/// \param[in] n Index to the entry.
 		/// \returns a vector with pointers to all components of entry n.
-		virtual auto get_ptr_vector( table_index_t n) -> std::vector<std::any> {
-			std::vector<std::any> ptrs(vtll::size<READ>::value + vtll::size<WRITE>::value);
+		virtual auto get( table_index_t n) -> ptr_array_t {
+			ptr_array_t ptrs;
+			std::any *ptr = nullptr;
+
+			if constexpr (vtll::size<READ>::value + vtll::size<WRITE>::value <= REF_ARRAY_SIZE ) {
+				ptrs = std::array<std::any, REF_ARRAY_SIZE>{};
+				ptr = std::get<0>(ptrs).data();
+			} else {
+				ptrs = std::vector<std::any>{ vtll::size<READ>::value + vtll::size<WRITE>::value };
+				ptr = std::get<1>(ptrs).data();
+			}
 
 			int j=0;
 			if constexpr (vtll::size<READ>::value > 0) {
 				auto ret = m_table.template get_const_ref_tuple<READ>(n);
-				vtll::static_for<size_t, 0, vtll::size<READ>::value >( [&](auto i) { ptrs[j++] = &std::get<i>(ret) ; } );
+				vtll::static_for<size_t, 0, vtll::size<READ>::value >( [&](auto i) { ptr[j++] = &std::get<i>(ret) ; } );
 			}
 
 			if constexpr (vtll::size<WRITE>::value > 0) {
 				auto ret = m_table.template get_ref_tuple<WRITE>(n);
-				vtll::static_for<size_t, 0, vtll::size<WRITE>::value >( [&](auto i) { ptrs[j++] = &std::get<i>(ret) ; } );
+				vtll::static_for<size_t, 0, vtll::size<WRITE>::value >( [&](auto i) { ptr[j++] = &std::get<i>(ret) ; } );
 			}
 
 			return ptrs;
@@ -781,7 +859,7 @@ namespace vllt {
 		}
 
 	private:
-		virtual auto get_ptr_vector() -> std::vector<std::any> { return m_view.get_ptr_vector(m_n); }; ///< Get pointers to the components of a row.
+		virtual auto get() -> ptr_array_t { return m_view.get(m_n); }; ///< Get pointers to the components of a row.
 	    virtual auto not_equal(const VtllStaticIteratorBase& rhs) -> bool { return *this != dynamic_cast<const VtllStaticIterator&>(rhs);}
     	virtual auto plusplus() -> VtllStaticIteratorBase& { ++m_n;; return *this; }
 
