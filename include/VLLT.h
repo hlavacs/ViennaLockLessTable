@@ -528,7 +528,7 @@ namespace vllt {
 
 	//---------------------------------------------------------------------------------------------------
 	//Accessor fucntions to return values from view and iterator
-	
+
 	constexpr size_t REF_ARRAY_SIZE = 32; ///< Maximum size of the iterator
 	using ptr_array_t = std::variant< std::array<std::any, REF_ARRAY_SIZE>, std::vector<std::any> >;
 
@@ -536,7 +536,8 @@ namespace vllt {
 	/// \param[in] ptrs Pointers to the components of a row.
 	/// \returns Pointer to the component.
 	template<typename T>
-	auto get_ptr( const ptr_array_t& ptrs ) {
+		requires std::is_pointer_v<T>
+	auto get( const ptr_array_t& ptrs ) {
 		if (ptrs.index() == 0) {
 			for( decltype(auto) a : std::get<0>(ptrs)) {
 				if (a.has_value() && a.type() == typeid(T)) return std::any_cast<T>(a);
@@ -554,8 +555,18 @@ namespace vllt {
 	/// \param[in] ptrs Pointers to the components of a row.
 	/// \returns Reference to the component.
 	template<typename T>
+		requires std::is_reference_v<T>
 	auto& get( const ptr_array_t& ptrs ) {
-		return *get_ptr<std::remove_reference_t<T>*>(ptrs);
+		return *get<std::remove_reference_t<T>*>(ptrs);
+	}
+
+	/// \brief Get a value to a component of a row.
+	/// \param[in] ptrs Pointers to the components of a row.
+	/// \returns Value of the component.
+	template<typename T>
+		requires (!std::is_reference_v<T> && !std::is_pointer_v<T>)
+	auto& get( const ptr_array_t& ptrs ) {
+		return *get<T*>(ptrs);
 	}
 
 	/// \brief Get a reference to a component of a row. Wrapper for std::get

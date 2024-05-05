@@ -193,8 +193,8 @@ You can use iterators and range based for loops. Care must be taken to use declt
 	}
 }
 ```
-## Dynamic Polymorphism and *get_ptrs()*
-If you want to combine multiple static tables to achieve dynamic polymorphism, e.g., for an entity component system, you can call *get_ptrs* instead of *get_ref_tuple()*. This results in a *ptr_array_t* holding non-const or const pointers to the components of a row. VLLT offers three functions to get the reference (*vllt::get_ref()*), the number of pointers (*vllt::get_size()*), and the type of a pointer (*vllt::get_any*). *vllt::get_any* returns a *std::any* storing the pointer, which you can also ask for the pointer type.
+## Dynamic Polymorphism and *get()*
+If you want to combine multiple static tables to achieve dynamic polymorphism, e.g., for an entity component system, you can call *get* instead of *get_ref_tuple()*. This results in a *vllt::ptr_array_t* holding non-const or const pointers to the components of a row. VLLT offers three functions to get the component (*vllt::get< T >()*), the number of pointers (*vllt::get_size()*), and the type of a pointer (*vllt::get_any*). *vllt::get_any* returns a *std::any* storing the pointer, which you can also ask for the pointer type. The type T that is specified in *vllt::get< T >()* can be a pointer, a reference or a value. It is important to specify const if the component is a read only component, failing so result in a runtime error.
 
 Dynamic polymorphism is achieved by using *vllt::VlltStaticTableViewBase* pointers, which denote the common base class for all views. The base class also emits generic iterators with its *begin()* and *end()* methods and can be used for range based loops:
 ```c
@@ -206,18 +206,20 @@ auto p = view2->get(vllt::table_index_t{0}); //std::any container
 std::cout << "Types:";
 for( size_t i=0; i<vllt::get_size(p); ++i) {
 	auto a = vllt::get_any(p, i);
-	std::cout << " " << a.type().name();
+	std::cout << " " << a.type().name(); //std::any can only store pointers, not references
 }
 std::cout << std::endl;
 
 for( auto p : *view2 ) { //range based loop, returns std::vector<std::any> holding pointers!
 	std::cout << "Data: " << vllt::get<double const&>(p) << " " << vllt::get<float const&>(p) << " " << vllt::get<int&>(p) << " " << vllt::get<char&>(p) << " " << vllt::get<std::string&>(p) << std::endl;
-	vllt::get<int&>(p) = vllt::get<int&>(p) * 2;
+	*vllt::get<int*>(p) = vllt::get<int>(p) * 2; //get a pointer and a value
 }
 for( auto p : *view2 ) { //range based loop, returns std::vector<std::any> holding pointers!
 	std::cout << "Data: " << vllt::get<double const&>(p) << " " << vllt::get<float const&>(p) << " " << vllt::get<int&>(p) << " " << vllt::get<char&>(p) << " " << vllt::get<std::string&>(p) << std::endl;
 }
 ```
+As an optimization, the return value *vllt::ptr_array_t* can hold pointers to REF_ARRAY_SIZE = 32 components locally. If you create tables with more columns, then *vllt::ptr_array_t* switches to a std::vector, which is less efficient since this needs heap allocation. If you have tables with more columns, increase the size of REF_ARRAY_SIZE accordingly.
+
 
 ## VlltStack
 

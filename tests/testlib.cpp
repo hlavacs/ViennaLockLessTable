@@ -116,6 +116,9 @@ void functional_test() {
 	{
 		auto types = table.get_types();
 		auto view = table.view<double, float, vllt::VlltWrite, int, char, std::string>();
+		auto q = view.get(vllt::table_index_t{0}); //std::any container
+		auto ptr = vllt::get<double const*>(q);
+
 		vllt::VlltStaticTableViewBase* view2 = &view;
 		auto p = view2->get(vllt::table_index_t{0}); //std::any container
 		
@@ -128,7 +131,7 @@ void functional_test() {
 
 		for( auto p : *view2 ) { //range based loop, returns std::vector<std::any> holding pointers!
 			std::cout << "Data: " << vllt::get<double const&>(p) << " " << vllt::get<float const&>(p) << " " << vllt::get<int&>(p) << " " << vllt::get<char&>(p) << " " << vllt::get<std::string&>(p) << std::endl;
-			vllt::get<int&>(p) = vllt::get<int&>(p) * 2;
+			*vllt::get<int*>(p) = vllt::get<double const>(p) * 2;
 		}
 		for( auto p : *view2 ) { //range based loop, returns std::vector<std::any> holding pointers!
 			std::cout << "Data: " << vllt::get<double const&>(p) << " " << vllt::get<float const&>(p) << " " << vllt::get<int&>(p) << " " << vllt::get<char&>(p) << " " << vllt::get<std::string&>(p) << std::endl;
