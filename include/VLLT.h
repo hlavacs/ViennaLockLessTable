@@ -542,16 +542,20 @@ namespace vllt {
 	class VtllStaticIteratorBaseWrapper {
 	public:
     	using iterator_category = std::forward_iterator_tag ; ///< Type of the iterator category
+		static const size_t wrappersize = 32; ///< Size of the iterator
 
-		VtllStaticIteratorBaseWrapper( const VtllStaticIteratorBase& b, size_t sz) { memcpy(m_data.data(), (const void*)&b, sz); };
-	    std::vector<std::any> operator*() { return ((VtllStaticIteratorBase*)(m_data.data()))->get_component_ptrs(); }; ///< Dereference operator
-		auto operator!=(const VtllStaticIteratorBaseWrapper& rhs) -> bool { 
-			return ((VtllStaticIteratorBase*)(m_data.data()))->not_equal( *((VtllStaticIteratorBase*)rhs.m_data.data()) ); 
+		VtllStaticIteratorBaseWrapper( const VtllStaticIteratorBase& b, size_t sz) { 
+			assert(sz <= wrappersize);
+			memcpy(m_data.data(), (const void*)&b, sz); 
 		};
-    	VtllStaticIteratorBase& operator++() { return ((VtllStaticIteratorBase*)(m_data.data()))->plusplus(); }; ///< Prefix increment operator
+
+	    std::vector<std::any> operator*() { return get()->get_component_ptrs(); }; ///< Dereference operator
+		auto operator!=(VtllStaticIteratorBaseWrapper& rhs) -> bool { return get()->not_equal( *rhs.get() ); };
+		VtllStaticIteratorBase& operator++() { return get()->plusplus(); }; ///< Prefix increment operator
 
 	private:
-		std::array<uint8_t, 32> m_data;
+		VtllStaticIteratorBase* get() { return (VtllStaticIteratorBase*)(m_data.data()); };
+		std::array<uint8_t, wrappersize> m_data;
 	};
 
 
