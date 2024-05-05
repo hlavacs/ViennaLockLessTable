@@ -21,7 +21,7 @@ void functional_test() {
 
 	{
 		auto view = table.view<double, char, vllt::VlltWrite, int, float>();
-		auto data = view.get( vllt::table_index_t{0} );
+		auto data = view.get_ref_tuple( vllt::table_index_t{0} );
 
 		std::cout << "Data: " << std::get<const double&>(data) << " " << std::get<const char&>(data) 
 				  << " " << std::get<int&>(data) << " " << std::get<float&>(data) << " " << std::endl;
@@ -58,8 +58,8 @@ void functional_test() {
 		auto view2  = table.view<double, int, float, std::string>();  //read only compatible
 
 		for( uint64_t i = 0; i < table.size(); i++ ) {	
-			auto data = view1.get( vllt::table_index_t{(uint64_t)i} );
-			auto data2 = view2.get( vllt::table_index_t{(uint64_t)i} );
+			auto data = view1.get_ref_tuple( vllt::table_index_t{(uint64_t)i} );
+			auto data2 = view2.get_ref_tuple( vllt::table_index_t{(uint64_t)i} );
 			assert( std::get<0>(data) == (double)i && std::get<1>(data) == (float)i ); 
 			assert( std::get<2>(data) == i && std::get<3>(data) == 'a' && std::get<4>(data) == "Hello" );
 		}
@@ -68,7 +68,7 @@ void functional_test() {
 	{
 		auto view  = table.view();
 		for( int i = 0; i < 10; i++ ) {	
-			auto data = view.get( vllt::table_index_t{0} );
+			auto data = view.get_ref_tuple( vllt::table_index_t{0} );
 			std::cout << "Data: " << view.size() << " " << std::get<0>(data) << " " << std::get<1>(data) << " " << std::get<2>(data) << " " << std::get<3>(data) << " " << std::get<4>(data) << std::endl;
 			view.erase( vllt::table_index_t{0} );
 		}
@@ -117,17 +117,16 @@ void functional_test() {
 		auto types = table.get_types();
 		auto view = table.view<double, float, vllt::VlltWrite, int, char, std::string>();
 		vllt::VlltStaticTableViewBase* view2 = &view;
-		auto p = view2->get_component_ptrs(vllt::table_index_t{0}); //std::any container
+		auto p = view2->get_ptr_vector(vllt::table_index_t{0}); //std::any container
 		std::cout << "Types: " << p[0].type().name() << " " << p[1].type().name() << " " << p[2].type().name() << " " << p[3].type().name() << " " << p[4].type().name() << std::endl;
 
-		for( auto p : *view2 ) { //need to use decltype(auto) to get the references right
+		for( auto p : *view2 ) { //range based loop, returns std::vector<std::any> holding pointers!
 			auto *p0t = &p[0].type();
 			auto p0n = p[0].type().name();
-			//std::cout << "Types: " << p[0].type().name() << " " << p[1].type().name() << " " << p[2].type().name() << " " << p[3].type().name() << " " << p[4].type().name() << std::endl;
 			std::cout << "Data: " << *std::any_cast<double const *>(p[0]) << " " << *std::any_cast<float const *>(p[1]) << " " << *std::any_cast<int *>(p[2]) << " " << *std::any_cast<char *>(p[3]) << " " << *std::any_cast<std::string *>(p[4]) << std::endl;
 			*std::any_cast<int *>(p[2]) = *std::any_cast<int *>(p[2]) * 2;
 		}
-		for( auto p : *view2 ) { //need to use decltype(auto) to get the references right
+		for( auto p : *view2 ) { //range based loop, returns std::vector<std::any> holding pointers!
 			std::cout << "Data: " << *std::any_cast<double const *>(p[0]) << " " << *std::any_cast<float const *>(p[1]) << " " << *std::any_cast<int *>(p[2]) << " " << *std::any_cast<char *>(p[3]) << " " << *std::any_cast<std::string *>(p[4]) << std::endl;
 		}
 
@@ -188,7 +187,7 @@ void parallel_test(int num_threads = std::thread::hardware_concurrency() ) {
 		auto s = view.size();		
 		assert( s == num*num_threads );
 		for( int i = 0; i < s; i++ ) {
-			auto data = view.get( vllt::table_index_t{(uint64_t)i} );
+			auto data = view.get_ref_tuple( vllt::table_index_t{(uint64_t)i} );
 			//std::cout << "Read: ID " << id << " " << std::get<0>(data) << " " << std::get<1>(data) << " " << std::get<2>(data) << " " << std::get<3>(data) << " " << std::get<4>(data) << std::endl;
 		}
 	};
@@ -215,7 +214,7 @@ void parallel_test(int num_threads = std::thread::hardware_concurrency() ) {
 
 	for( int i = 0; i < num_threads; i++ ) {
 		for( int j=0; j < view.size(); j++ ) {
-			auto data = view.get( vllt::table_index_t{(uint64_t)j} );
+			auto data = view.get_ref_tuple( vllt::table_index_t{(uint64_t)j} );
 			if( std::get<int&>(data) == i ) {
 				//std::cout << "DATA " << view.size() << " " << std::get<0>(data) << " " << std::get<1>(data) << " " << std::get<2>(data) << " " << std::get<3>(data) << " " << std::get<4>(data) << std::endl;
 				sizes[i].insert( std::get<0>(data) );

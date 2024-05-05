@@ -53,7 +53,7 @@ VlltStaticTable offers a slim API only:
 ```
 size(): return the number of rows in the table.
 view(): create a view to the table.
-push_bak(): insert a new row to the end of the table.
+push_back(): insert a new row to the end of the table.
 ```
 
 ## VlltStaticTableView
@@ -131,12 +131,12 @@ In the above example, *view* has read access to the *int* type, and write access
 auto view = table.view<std::string, int, char, double, float>(); //read access to all columns, ordering irrelevant
 ```
 The ordering of the type list does not matter for a view. It only matters of you insert a new row to the table. 
-Accessing the columns is done by calling *get()* on the view. This results in a tuple holding const references to all columns where the view has read accesses, and non-const references where the column has write access:
+Accessing the columns is done by calling *get_ref_tuple()* on the view. This results in a tuple holding const references to all columns where the view has read accesses, and non-const references where the column has write access:
 ```c
 using types = vtll::tl<double, float, int, char, std::string>;
 vllt::VlltStaticTable<types, vllt::sync_t::VLLT_SYNC_DEBUG_PUSHBACK, 1 << 5> table;
 auto view = table.view<double, char, vllt::VlltWrite, int, float>(); //read to the first two, write to the last
-auto data = view.get( vllt::table_index_t{0} ); //returns std::tuple<const double&, const char&, int&, float&>
+auto data = view.get_ref_tuple( vllt::table_index_t{0} ); //returns std::tuple<const double&, const char&, int&, float&>
 ```
 In the above code the result variable data is a tuple of type *std::tuple<const double&, const char&, int&, float&>*. Accessing the single components can be done with the *std::get<>()* function. The template argument is either an integer number or the correct types:
 ```c
@@ -154,8 +154,8 @@ view1.push_back(0.0, 0.0f, 0, 'a', std::string("Hello1")); //type ordering of ta
 auto view2 = table.view<vllt::VlltWrite>(); //pushback-only view does not interfere with others
 view2.push_back(1.0, 1.0f, 1, 'b', std::string("Hello2")); //type ordering of table types!
 
-auto data1 = view1.get( vllt::table_index_t{0} ); //returns std::tuple<double&, float, int&, char&, std::string&>
-//auto data2 = view2.get( vllt::table_index_t{0} ); //compile error
+auto data1 = view1.get_ref_tuple( vllt::table_index_t{0} ); //returns std::tuple<double&, float, int&, char&, std::string&>
+//auto data2 = view2.get_ref_tuple( vllt::table_index_t{0} ); //compile error
 ```
 Care must be taken when accessing the data. Using only auto generats the base type, and copying it creates a copy of the data. The new copy can be changed irrespective of whether the reference was const or not. 
 Using *decltype(auto)* creates a copy of the *reference*, and also a const qualifier with it if there is one!
@@ -193,8 +193,25 @@ You can use iterators and range based for loops. Care must be taken to use declt
 	}
 }
 ```
+## Dynamic Polymorphism
+If you want to combine multiple static tables to achieve dynamic polymorphism, e.g., for an entity component system, you can call *get_ptr_vector* instead of *get_ref_tuple()*. This results in a *std::vector<std::any>* holding non-const or const pointers to the components of a row. *std::any* stores typed values, in this case, pointers, accessing to the stored values is done with *std::any_cast*. You can query the type of the *std::any* value by calling *type()*. Dynamic polymorphism is achieved by using *vllt::VlltStaticTableViewBase* pointers, which denote the common base class for all views. The base class also emits generic iterators with its *begin()* and *end()* methods and can be used for range based loops:
+```c
+auto types = table.get_types();
+auto view = table.view<double, float, vllt::VlltWrite, int, char, std::string>();
+vllt::VlltStaticTableViewBase* view2 = &view; // Dynamic polymorphism is here !!!!
+auto p = view2->get_ptr_vector(vllt::table_index_t{0}); //std::any container
+std::cout << "Types: " << p[0].type().name() << " " << p[1].type().name() << " " << p[2].type().name() << " " << p[3].type().name() << " " << p[4].type().name() << std::endl;
 
-
+for( auto p : *view2 ) { //range based loop, returns std::vector<std::any> holding pointers!
+	auto *p0t = &p[0].type();
+	auto p0n = p[0].type().name();
+	std::cout << "Data: " << *std::any_cast<double const *>(p[0]) << " " << *std::any_cast<float const *>(p[1]) << " " << *std::any_cast<int *>(p[2]) << " " << *std::any_cast<char *>(p[3]) << " " << *std::any_cast<std::string *>(p[4]) << std::endl;
+	*std::any_cast<int *>(p[2]) = *std::any_cast<int *>(p[2]) * 2;
+}
+for( auto p : *view2 ) { 
+	std::cout << "Data: " << *std::any_cast<double const *>(p[0]) << " " << *std::any_cast<float const *>(p[1]) << " " << *std::any_cast<int *>(p[2]) << " " << *std::any_cast<char *>(p[3]) << " " << *std::any_cast<std::string *>(p[4]) << std::endl;
+}
+```
 
 ## VlltStack
 
