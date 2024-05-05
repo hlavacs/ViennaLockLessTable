@@ -120,8 +120,10 @@ namespace vllt {
 
 	//---------------------------------------------------------------------------------------------------
 
-	constexpr size_t REF_ARRAY_SIZE = 32; ///< Maximum size of optimzation for return value
-	using ptr_array_t = std::variant< std::array<std::any, REF_ARRAY_SIZE>, std::vector<std::any> >;
+	#ifndef VLLT_MAX_NUMBER_OF_COLUMNS
+		#define VLLT_MAX_NUMBER_OF_COLUMNS 16
+	#endif
+	using ptr_array_t = std::variant< std::array<std::any, VLLT_MAX_NUMBER_OF_COLUMNS>, std::vector<std::any> >;
 
 
 	//---------------------------------------------------------------------------------------------------
@@ -151,6 +153,7 @@ namespace vllt {
 
 	protected:
 		static_assert(std::is_default_constructible_v<DATA>, "Your components are not default constructible!");
+		static_assert(vtll::size<DATA>::value > 0, "You need at least one component in your table!");
 
 		const size_t NUMBITS1 = 44; ///< Number of bits for the index of the first item in the stack
 		using block_idx_t = vsty::strong_type_t<uint64_t, vsty::counter<>>; ///< Strong integer type for indexing blocks, 0 to size map - 1
@@ -178,7 +181,12 @@ namespace vllt {
 		/// \brief Constructor of class VlltStaticTable
 		/// \param pmr Memory resource for allocating blocks
 		VlltStaticTable(std::pmr::memory_resource* pmr = std::pmr::new_delete_resource()) noexcept
-			: m_alloc{ pmr }, m_block_map{ nullptr } {};
+			: m_alloc{ pmr }, m_block_map{ nullptr } {
+			if(vtll::size<DATA>::value > VLLT_MAX_NUMBER_OF_COLUMNS) 
+				std::cout << "Number of table columns " 
+					<< vtll::size<DATA>::value << " is larger than VLLT_MAX_NUMBER_OF_COLUMNS " << VLLT_MAX_NUMBER_OF_COLUMNS 
+					<< ", increase VLLT_MAX_NUMBER_OF_COLUMNS to at least " << vtll::size<DATA>::value << "!" << std::endl;
+		};
 
 		/// Return the number of rows in the table.
 		/// \returns The number of rows in the table.
@@ -776,8 +784,8 @@ namespace vllt {
 			ptr_array_t ptrs;
 			std::any *ptr = nullptr;
 
-			if constexpr (vtll::size<READ>::value + vtll::size<WRITE>::value <= REF_ARRAY_SIZE ) {
-				ptrs = std::array<std::any, REF_ARRAY_SIZE>{};
+			if constexpr (vtll::size<READ>::value + vtll::size<WRITE>::value <= VLLT_MAX_NUMBER_OF_COLUMNS ) {
+				ptrs = std::array<std::any, VLLT_MAX_NUMBER_OF_COLUMNS>{};
 				ptr = std::get<0>(ptrs).data();
 			} else {
 				ptrs = std::vector<std::any>{ vtll::size<READ>::value + vtll::size<WRITE>::value };
