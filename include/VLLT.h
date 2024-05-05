@@ -120,6 +120,12 @@ namespace vllt {
 
 	//---------------------------------------------------------------------------------------------------
 
+	constexpr size_t REF_ARRAY_SIZE = 32; ///< Maximum size of optimzation for return value
+	using ptr_array_t = std::variant< std::array<std::any, REF_ARRAY_SIZE>, std::vector<std::any> >;
+
+
+	//---------------------------------------------------------------------------------------------------
+
 
 	/// VlltStaticTable is the base class for some classes, enabling management of tables that can be appended in parallel.
 	/// \tparam DATA Types of the table.
@@ -529,8 +535,6 @@ namespace vllt {
 	//---------------------------------------------------------------------------------------------------
 	//Accessor fucntions to return values from view and iterator
 
-	constexpr size_t REF_ARRAY_SIZE = 32; ///< Maximum size of the iterator
-	using ptr_array_t = std::variant< std::array<std::any, REF_ARRAY_SIZE>, std::vector<std::any> >;
 
 	/// \brief Get a pointer to a component of a row.
 	/// \param[in] ptrs Pointers to the components of a row.
