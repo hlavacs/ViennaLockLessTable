@@ -38,6 +38,11 @@ namespace vllt {
 
 	//---------------------------------------------------------------------------------------------------
 
+	#ifndef VLLT_MAX_NUMBER_OF_COLUMNS
+		#define VLLT_MAX_NUMBER_OF_COLUMNS 16
+	#endif
+	using ptr_array_t = std::variant< std::array<std::any, VLLT_MAX_NUMBER_OF_COLUMNS>, std::vector<std::any> >;
+
 	using table_index_t = vsty::strong_type_t<uint64_t, vsty::counter<>, std::integral_constant<uint64_t, std::numeric_limits<uint64_t>::max()>>;///< Strong integer type for indexing rows, 0 to number rows - 1
 	using table_diff_t  = vsty::strong_type_t<int64_t, vsty::counter<>, std::integral_constant<int64_t, std::numeric_limits<int64_t>::max()>>;
 	auto operator+(table_index_t lhs, table_diff_t rhs) { return table_index_t{ lhs.value() + rhs.value() }; }
@@ -48,11 +53,11 @@ namespace vllt {
 	const int VLLT_SYNC_PUSHBACK = 128;		///< relaxed sync, views with pushback are allowed
 	enum class sync_t {
 		VLLT_SYNC_EXTERNAL = 0,		///< sync is done externally
-		VLLT_SYNC_EXTERNAL_PUSHBACK = VLLT_SYNC_EXTERNAL | VLLT_SYNC_PUSHBACK,	///< sync is done externally
+		VLLT_SYNC_EXTERNAL_PUSHBACK = VLLT_SYNC_EXTERNAL | VLLT_SYNC_PUSHBACK,	///< sync is done externally, views with pushback only are allowed
 		VLLT_SYNC_INTERNAL = 1,		///< full internal sync
-		VLLT_SYNC_INTERNAL_PUSHBACK = VLLT_SYNC_INTERNAL | VLLT_SYNC_PUSHBACK,	///< relaxed internal sync, can add rows in parallel through the table
+		VLLT_SYNC_INTERNAL_PUSHBACK = VLLT_SYNC_INTERNAL | VLLT_SYNC_PUSHBACK,	///< internal sync, can add rows in parallel by pushback only views
 		VLLT_SYNC_DEBUG = 3,		///< debugging full internal sync - error if violation
-		VLLT_SYNC_DEBUG_PUSHBACK = VLLT_SYNC_DEBUG | VLLT_SYNC_PUSHBACK	///< debugging relaxed internal sync - error if violation
+		VLLT_SYNC_DEBUG_PUSHBACK = VLLT_SYNC_DEBUG | VLLT_SYNC_PUSHBACK	///< debugging relaxed internal sync - error if violation, pushback only views allowed
 	};
 
 	/// Tag for template parameter list to indicate that the view has write access
@@ -116,14 +121,6 @@ namespace vllt {
 	// A VIEW that satisfies this concept is the owner of the table and can add, pop, erase, and change anything
 	template<typename DATA, typename WRITE, typename WRITELIST>
 	concept VlltOwner = (VlltWriteAll<DATA, WRITE> && !VlltOnlyPushback<WRITELIST>);
-
-
-	//---------------------------------------------------------------------------------------------------
-
-	#ifndef VLLT_MAX_NUMBER_OF_COLUMNS
-		#define VLLT_MAX_NUMBER_OF_COLUMNS 16
-	#endif
-	using ptr_array_t = std::variant< std::array<std::any, VLLT_MAX_NUMBER_OF_COLUMNS>, std::vector<std::any> >;
 
 
 	//---------------------------------------------------------------------------------------------------
@@ -624,20 +621,22 @@ namespace vllt {
 	/// \brief Base class for a iterator to a view.
 	class VtllStaticIteratorBase {
 		friend class VtllStaticIteratorBaseWrapper;
-		virtual inline auto get() -> ptr_array_t { return {};}; ///< Get pointers to the components of a row.
-	    virtual inline auto not_equal(const VtllStaticIteratorBase& rhs) -> bool { return true; }; ///< Dereference operator
-    	virtual inline auto plusplus() -> VtllStaticIteratorBase& { return *this; }; ///< Prefix increment operator
+		virtual inline auto get() -> ptr_array_t = 0 ; ///< Get pointers to the components of a row.
+	    virtual inline auto not_equal(const VtllStaticIteratorBase& rhs) -> bool = 0; ///< Dereference operator
+    	virtual inline auto plusplus() -> VtllStaticIteratorBase& = 0; ///< Prefix increment operator
 	};
 
 
-	/// \brief Wrapper for a iterator to a view.
+	/// \brief Wrapper for a iterator to a view. Essentially this class acts as an iterator
+	/// in the dynamic polymorphim case. It provides enough space for an actual iterator to be stored in m_data.
+	/// This avoids unnessecary dynamic memory allocation.
 	class VtllStaticIteratorBaseWrapper {
 	public:
     	using iterator_category = std::forward_iterator_tag ; ///< Type of the iterator category
-		static const size_t wrappersize = 32; ///< Size of the iterator
+		static const size_t WRAPPERSIZE = 32; ///< Size of the iterator, increase if necessary
 
 		VtllStaticIteratorBaseWrapper( const VtllStaticIteratorBase& b, size_t sz) { 
-			assert(sz <= wrappersize);
+			assert(sz <= WRAPPERSIZE);	///< Make sure that the iterator fits into the wrapper - increase WRAPPERSIZE if fail
 			memcpy(m_data.data(), (const void*)&b, sz); 
 		};
 
@@ -647,7 +646,7 @@ namespace vllt {
 
 	private:
 		VtllStaticIteratorBase* get_iteratorbase() { return (VtllStaticIteratorBase*)(m_data.data()); };
-		std::array<uint8_t, wrappersize> m_data;
+		std::array<uint8_t, WRAPPERSIZE> m_data; //actual iterator is stored here
 	};
 
 
@@ -780,7 +779,7 @@ namespace vllt {
 		/// \brief Get a vector with pointers to all components of an entry.
 		/// \param[in] n Index to the entry.
 		/// \returns a vector with pointers to all components of entry n.
-		virtual auto get( table_index_t n) -> ptr_array_t {
+		virtual inline auto get( table_index_t n) -> ptr_array_t override {
 			ptr_array_t ptrs;
 			std::any *ptr = nullptr;
 
@@ -810,11 +809,11 @@ namespace vllt {
 
 		/// \brief Create an iterator to the beginning of the table.
 		/// \returns  Iterator to the beginning of the table.
-		virtual inline auto begin_p() -> VtllStaticIteratorBaseWrapper { return VtllStaticIteratorBaseWrapper( begin(), sizeof(iterator_t) ); }; 
+		virtual inline auto begin_p() -> VtllStaticIteratorBaseWrapper override { return VtllStaticIteratorBaseWrapper( begin(), sizeof(iterator_t) ); }; 
 		
 		/// \brief Create an iterator to the end of the table.
 		/// \returns  Iterator to the end of the table.
-		virtual inline auto end_p() -> VtllStaticIteratorBaseWrapper { return VtllStaticIteratorBaseWrapper( end(), sizeof(iterator_t) ); }; 
+		virtual inline auto end_p() -> VtllStaticIteratorBaseWrapper override { return VtllStaticIteratorBaseWrapper( end(), sizeof(iterator_t) ); }; 
 
 		table_type& m_table; ///< Reference to the table
 	};
@@ -882,9 +881,9 @@ namespace vllt {
 		}
 
 	private:
-		virtual auto get() -> ptr_array_t { return m_view.get(m_n); }; ///< Get pointers to the components of a row.
-	    virtual auto not_equal(const VtllStaticIteratorBase& rhs) -> bool { return *this != dynamic_cast<const VtllStaticIterator&>(rhs);}
-    	virtual auto plusplus() -> VtllStaticIteratorBase& { ++m_n;; return *this; }
+		virtual inline auto get() -> ptr_array_t override { return m_view.get(m_n); }; ///< Get pointers to the components of a row.
+	    virtual inline auto not_equal(const VtllStaticIteratorBase& rhs) -> bool override { return *this != dynamic_cast<const VtllStaticIterator&>(rhs);}
+    	virtual inline auto plusplus() -> VtllStaticIteratorBase& override { ++m_n;; return *this; }
 
 		table_index_t m_n;
 		view_type& m_view;
@@ -936,14 +935,6 @@ namespace vllt {
 		table_type_t m_table; ///< the table used by the stack
 		view_type_t m_view = m_table.view(); ///< view to the table
 	};
-
-
-
-	//---------------------------------------------------------------------------------------------------
-
-
-
-	//---------------------------------------------------------------------------------------------------
 
 
 

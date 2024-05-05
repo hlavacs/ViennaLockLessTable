@@ -30,7 +30,11 @@ For configurng and building either run build.cmd on Windows, or use
 
 ## Using VLLT
 
-VLLT is a header-only C++ library. Simply include VLLT.h into your C++ project. It uses strong types from VSTY mainly for indexing into the table (vsty::table_index_t, vsty::table_diff_t) and type lists (vtll::tl<>) and selected compile time type list algorithms from VTLL. 
+VLLT is a header-only C++ library. Simply include VLLT.h into your C++ project. It uses strong types from VSTY mainly for indexing into the table (*vsty::table_index_t*, *vsty::table_diff_t*) and type lists (*vtll::tl<>*) and selected compile time type list algorithms from VTLL. You can change the global constant *VLLT_MAX_NUMBER_OF_COLUMNS* by using *#define* as shown below. This should be set to the maximum number of columns that you use in a table. The default value is 16, but you can override it as shown. If you use tables with larger numbers of columns, then each table with a larger number will output a warning, and the table will use a *std::vector* instead of a pre-allocated *std::array*, requiring heap allocation and being thus less efficient.
+```c
+#define VLLT_MAX_NUMBER_OF_COLUMNS 32 //default is 16
+#include <VLLT.h>
+```
 
 
 ## The VLLT API
