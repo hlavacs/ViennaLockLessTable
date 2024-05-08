@@ -43,6 +43,7 @@ namespace vllt {
 	#endif
 	using ptr_array_t = std::variant< std::array<std::any, VLLT_MAX_NUMBER_OF_COLUMNS>, std::vector<std::any> >;
 
+	using component_index_t = vsty::strong_type_t<uint64_t, vsty::counter<>, std::integral_constant<uint64_t, std::numeric_limits<uint64_t>::max()>>;///< Strong integer type for indexing components, 0 to number components - 1
 	using table_index_t = vsty::strong_type_t<uint64_t, vsty::counter<>, std::integral_constant<uint64_t, std::numeric_limits<uint64_t>::max()>>;///< Strong integer type for indexing rows, 0 to number rows - 1
 	using table_diff_t  = vsty::strong_type_t<int64_t, vsty::counter<>, std::integral_constant<int64_t, std::numeric_limits<int64_t>::max()>>;
 	auto operator+(table_index_t lhs, table_diff_t rhs) { return table_index_t{ lhs.value() + rhs.value() }; }
@@ -62,6 +63,12 @@ namespace vllt {
 
 	/// Tag for template parameter list to indicate that the view has write access
 	struct VlltWrite {};		///< Types before this tag have read access, types after this tag have write access
+
+	template<sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR>
+	class VlltTable;
+
+	template<sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
+	class VlltTableView;
 
 	/// Concept demanding that types of a table must be unique
 	template<typename DATA>
@@ -121,6 +128,187 @@ namespace vllt {
 	// A VIEW that satisfies this concept is the owner of the table and can add, pop, erase, and change anything
 	template<typename DATA, typename WRITE, typename WRITELIST>
 	concept VlltOwner = (VlltWriteAll<DATA, WRITE> && !VlltOnlyPushback<WRITELIST>);
+
+
+	//---------------------------------------------------------------------------------------------------
+	//Accessor fucntions to return values from view and iterator
+
+
+	/// \brief Get a pointer to a component of a row.
+	/// \param[in] ptrs Pointers to the components of a row.
+	/// \returns Pointer to the component.
+	template<typename T>
+		requires std::is_pointer_v<T>
+	auto get( const ptr_array_t& ptrs ) {
+		if (ptrs.index() == 0) {
+			for( decltype(auto) a : std::get<0>(ptrs)) {
+				if (a.has_value() && a.type() == typeid(T)) return std::any_cast<T>(a);
+			}
+			assert(false);
+		}
+		for( decltype(auto) a : std::get<1>(ptrs)) {
+			if (a.has_value() && a.type() == typeid(T)) return std::any_cast<T>(a);
+		}
+		assert(false);
+		return T{};
+	}
+
+	/// \brief Get a reference to a component of a row.
+	/// \param[in] ptrs Pointers to the components of a row.
+	/// \returns Reference to the component.
+	template<typename T>
+		requires std::is_reference_v<T>
+	auto& get( const ptr_array_t& ptrs ) {
+		return *get<std::remove_reference_t<T>*>(ptrs);
+	}
+
+	/// \brief Get a value to a component of a row.
+	/// \param[in] ptrs Pointers to the components of a row.
+	/// \returns Value of the component.
+	template<typename T>
+		requires (!std::is_reference_v<T> && !std::is_pointer_v<T>)
+	auto& get( const ptr_array_t& ptrs ) {
+		return *get<T*>(ptrs);
+	}
+
+	/// \brief Get a reference to a component of a row. Wrapper for std::get
+	template<typename T>
+	auto& get( const auto& tuple ) {
+		return std::get<T>(tuple);
+	}
+
+	/// \brief Get a reference to a component of a row. Wrapper for std::get
+	/// \tparam T Index of the component.
+	/// \param[in] tuple Tuple holding the components.
+	/// \returns Reference to the component.
+	template<auto T>
+	auto& get( const auto& tuple ) {
+		return std::get<T>(tuple);
+	}
+
+	/// \brief Get the size of the row.
+	/// \param[in] ptrs Pointers to the components of a row.
+	/// \returns Size of the row.
+	size_t size(const ptr_array_t& ptrs) {
+		if( ptrs.index() == 1 ) return std::get<1>(ptrs).size();
+		size_t i = 0;
+		for( decltype(auto) a : std::get<0>(ptrs)) {
+			if (!a.has_value()) return i;
+			i++;
+		}
+		return i;
+	}
+
+	/// \brief Get the std:any that is storing the component pointer.
+	/// \param[in] ptrs Pointers to the components of a row.
+	/// \param[in] idx Index of the component.
+	/// \returns std::any that is storing the component pointer.
+	auto any( const ptr_array_t& ptr, size_t idx ) {
+		return ptr.index() == 0 ? std::get<0>(ptr)[idx] : std::get<1>(ptr)[idx];
+	}
+
+	//---------------------------------------------------------------------------------------------------
+
+	template<sync_t SYNC = sync_t::VLLT_SYNC_EXTERNAL, size_t N0 = 1 << 5, bool ROW = false, size_t MINSLOTS = 16, bool FAIR = false>
+	class VlltTable {
+		template<sync_t X0, size_t X1, bool X2, size_t X3, bool X4, typename X5, typename X6>
+		friend class VlltTableView;
+
+		struct VlltTableTypes {
+			std::type_info* m_type_info;
+			std::size_t m_type_index;
+			std::size_t m_type_size;
+		};
+		using table_types_t = std::vector<VlltTableTypes>;
+
+		table_types_t m_types;
+
+	public:
+		VlltTable(table_types_t types, std::pmr::memory_resource* pmr = std::pmr::new_delete_resource()) noexcept : m_types{ types }, { pmr } {
+			if(types.size() > VLLT_MAX_NUMBER_OF_COLUMNS) 
+				std::cout << "Number of table columns " 
+					<< types.size() << " is larger than VLLT_MAX_NUMBER_OF_COLUMNS " << VLLT_MAX_NUMBER_OF_COLUMNS 
+					<< ", increase VLLT_MAX_NUMBER_OF_COLUMNS to at least " << types.size() << "!" << std::endl;
+		};
+
+		/// Return the number of rows in the table.
+		/// \returns The number of rows in the table.
+		inline auto size() noexcept {
+			return 0;
+			//auto size = m_size_cnt.load();
+			//auto s1 = table_index_t{ table_size(size) + table_diff(size) };
+			//auto s2 = table_size(size);
+			//return std::min(s1, s2);
+ 		}
+
+		inline auto view(std::vector<const std::type_index> types) noexcept;
+
+		friend bool operator==(const VlltTable& lhs, const VlltTable& rhs) noexcept { return &lhs == &rhs; }
+
+		auto types() -> std::vector<const std::type_info*> {
+			return m_types; 
+		}; 
+
+	private:
+
+		/// \brief Add a new row to the table.
+		/// \param data Data for the new row.
+		/// \returns Index of the new row.
+		template<typename... Cs>
+		inline auto push_back_p( Cs&&... data ) noexcept -> table_index_t;
+ 
+		//-------------------------------------------------------------------------------------------
+		//read data
+
+		inline auto get_component_ptr(table_index_t n, size_t component_index) noexcept  {
+			//if constexpr (ROW) { return &std::get<I>((*block_ptr)[n & BIT_MASK]); }
+			//else { return &std::get<I>(*block_ptr)[n & BIT_MASK]; }
+		}
+
+		template<typename Ts>
+		inline auto get_ptr_array(table_index_t n) noexcept -> ptr_array_t;	
+
+		//-------------------------------------------------------------------------------------------
+		//erase data
+
+		//inline auto pop_back(table_index_t* idx = nullptr) noexcept -> tuple_value_t; ///< Remove the last row, call destructor on components
+		inline auto clear() noexcept; ///< Set the number if rows to zero - effectively clear the table, call destructors
+		inline auto swap(auto src, auto dst) noexcept -> void;	///< Swap contents of two rows
+		inline auto swap(table_index_t isrc, table_index_t idst) noexcept -> void {swap( get_ref_tuple<DATA>(isrc), get_ref_tuple<DATA>(idst) );}	///< Swap contents of two rows
+		//inline auto erase(table_index_t n1) -> tuple_value_t; ///< Remove a row, call destructor on components
+
+		//-------------------------------------------------------------------------------------------
+		//manage data
+
+		inline auto max_size() noexcept -> size_t {
+			auto size = m_size_cnt.load();
+			return std::max(static_cast<decltype(table_size(size))>(table_size(size) + table_diff(size)), table_size(size));
+		}
+
+		//static inline auto block_idx(table_index_t n) -> block_idx_t { return block_idx_t{ (n.value() >> L) }; }
+		//inline auto resize(table_index_t slot) -> block_ptr_t; ///< If the map of blocks is too small, allocate a larger one and copy the previous block pointers into it.
+
+		//std::array<std::shared_timed_mutex, vtll::size<DATA>::value> m_access_mutex;
+		//std::pmr::polymorphic_allocator<block_t> m_alloc; ///< Allocator for the table
+
+		//alignas(64) std::atomic<std::shared_ptr<block_map_t>> m_block_map{nullptr};///< Atomic shared ptr to the map of blocks
+
+		//table_index_t table_size(slot_size_t size) { return table_index_t{ size.get_bits(0, NUMBITS1) }; }	
+		//table_diff_t  table_diff(slot_size_t size) { return table_diff_t{ (int64_t)size.get_bits_signed(NUMBITS1) }; }
+		//alignas(64) size_cnt_t m_size_cnt{ slot_size_t{ table_index_t{ 0 }, table_diff_t{0}, NUMBITS1 } };	///< Next slot and size as atomic
+		//alignas(64) std::atomic<uint64_t> m_starving{0}; ///< prevent one operation to starve the other: -1...pulls are starving 1...pushes are starving
+	};
+
+
+	/// Used for accessing a table.
+	template<sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
+	class VlltTableView {
+	public:
+		VlltTableView(VlltTable<SYNC, N0, ROW, MINSLOTS, FAIR>& table ) : m_table{ table } {};
+
+	private:
+		VlltTable<SYNC, N0, ROW, MINSLOTS, FAIR>& m_table;
+	};
 
 
 	//---------------------------------------------------------------------------------------------------
@@ -214,7 +402,7 @@ namespace vllt {
 			return types; 
 		}; 
 
-	protected:
+	private:
 
 		/// \brief Add a new row to the table.
 		/// \param data Data for the new row.
@@ -537,82 +725,6 @@ namespace vllt {
 	}
 
 
-	//---------------------------------------------------------------------------------------------------
-	//Accessor fucntions to return values from view and iterator
-
-
-	/// \brief Get a pointer to a component of a row.
-	/// \param[in] ptrs Pointers to the components of a row.
-	/// \returns Pointer to the component.
-	template<typename T>
-		requires std::is_pointer_v<T>
-	auto get( const ptr_array_t& ptrs ) {
-		if (ptrs.index() == 0) {
-			for( decltype(auto) a : std::get<0>(ptrs)) {
-				if (a.has_value() && a.type() == typeid(T)) return std::any_cast<T>(a);
-			}
-			assert(false);
-		}
-		for( decltype(auto) a : std::get<1>(ptrs)) {
-			if (a.has_value() && a.type() == typeid(T)) return std::any_cast<T>(a);
-		}
-		assert(false);
-		return T{};
-	}
-
-	/// \brief Get a reference to a component of a row.
-	/// \param[in] ptrs Pointers to the components of a row.
-	/// \returns Reference to the component.
-	template<typename T>
-		requires std::is_reference_v<T>
-	auto& get( const ptr_array_t& ptrs ) {
-		return *get<std::remove_reference_t<T>*>(ptrs);
-	}
-
-	/// \brief Get a value to a component of a row.
-	/// \param[in] ptrs Pointers to the components of a row.
-	/// \returns Value of the component.
-	template<typename T>
-		requires (!std::is_reference_v<T> && !std::is_pointer_v<T>)
-	auto& get( const ptr_array_t& ptrs ) {
-		return *get<T*>(ptrs);
-	}
-
-	/// \brief Get a reference to a component of a row. Wrapper for std::get
-	template<typename T>
-	auto& get( const auto& tuple ) {
-		return std::get<T>(tuple);
-	}
-
-	/// \brief Get a reference to a component of a row. Wrapper for std::get
-	/// \tparam T Index of the component.
-	/// \param[in] tuple Tuple holding the components.
-	/// \returns Reference to the component.
-	template<auto T>
-	auto& get( const auto& tuple ) {
-		return std::get<T>(tuple);
-	}
-
-	/// \brief Get the size of the row.
-	/// \param[in] ptrs Pointers to the components of a row.
-	/// \returns Size of the row.
-	size_t get_size(const ptr_array_t& ptrs) {
-		if( ptrs.index() == 1 ) return std::get<1>(ptrs).size();
-		size_t i = 0;
-		for( decltype(auto) a : std::get<0>(ptrs)) {
-			if (!a.has_value()) return i;
-			i++;
-		}
-		return i;
-	}
-
-	/// \brief Get the std:any that is storing the component pointer.
-	/// \param[in] ptrs Pointers to the components of a row.
-	/// \param[in] idx Index of the component.
-	/// \returns std::any that is storing the component pointer.
-	auto get_any( const ptr_array_t& ptr, size_t idx ) {
-		return ptr.index() == 0 ? std::get<0>(ptr)[idx] : std::get<1>(ptr)[idx];
-	}
 
 	//---------------------------------------------------------------------------------------------------
 	//iterator to a view 

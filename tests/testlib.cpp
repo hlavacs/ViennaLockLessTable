@@ -123,8 +123,8 @@ void functional_test() {
 		auto p = view2->get(vllt::table_index_t{0}); //std::any container
 		
 		std::cout << "Types:";
-		for( size_t i=0; i<vllt::get_size(p); ++i) {
-			auto a = vllt::get_any(p, i);
+		for( size_t i=0; i<vllt::size(p); ++i) {
+			auto a = vllt::any(p, i);
 			std::cout << " " << a.type().name();
 		}
 		std::cout << std::endl;
