@@ -6,8 +6,22 @@
 using namespace std::chrono; 
 
 
-/// @brief 
 void functional_test() {
+	using table_type = vllt::VlltTable<vllt::sync_t::VLLT_SYNC_EXTERNAL_PUSHBACK, 1 << 5>;
+	table_type table{ vllt::table_types_t<int>{} };
+
+
+}
+
+
+
+
+//------------------------------------------------------------------------------------------
+
+
+/*
+/// @brief 
+void functional_test_static() {
 	using types = vtll::tl<double, float, int, char, std::string>;
 	vllt::VlltStaticTable<types, vllt::sync_t::VLLT_SYNC_EXTERNAL_PUSHBACK, 1 << 5> table;
 
@@ -166,7 +180,7 @@ void functional_test() {
 
 
 template<vllt::sync_t SYNC>
-void parallel_test(int num_threads = std::thread::hardware_concurrency() ) {
+void parallel_test_static(int num_threads = std::thread::hardware_concurrency() ) {
 	using types = vtll::tl<double, float, int, char, std::string>;
 	vllt::VlltStaticTable<types, SYNC, 1 << 5, false, 8> table;
 
@@ -232,13 +246,13 @@ void parallel_test(int num_threads = std::thread::hardware_concurrency() ) {
 		std::cout << sizes[i].size() << std::endl;
 	}
 }
-
+*/
 
 
 int main() {
 	std::cout << std::thread::hardware_concurrency() << " Threads" << std::endl;
-	functional_test();
-	parallel_test<vllt::sync_t::VLLT_SYNC_DEBUG_PUSHBACK>( );
+	//functional_test_static();
+	//parallel_test_static<vllt::sync_t::VLLT_SYNC_DEBUG_PUSHBACK>( );
 	return 0;
 }
 

@@ -41,7 +41,29 @@ namespace vllt {
 	#ifndef VLLT_MAX_NUMBER_OF_COLUMNS
 		#define VLLT_MAX_NUMBER_OF_COLUMNS 16
 	#endif
-	using ptr_array_t = std::variant< std::array<std::any, VLLT_MAX_NUMBER_OF_COLUMNS>, std::vector<std::any> >;
+
+
+	//---------------------------------------------------------------------------------------------------
+
+
+	struct VlltTableType {
+		const std::type_info* m_type_info;//pointer to type of the component
+		const std::size_t m_type_size;  	//size of the type
+	};
+
+	template<typename... Ts>
+	struct table_types_t {
+		std::vector<VlltTableType> m_types;
+		table_types_t() { (m_types.emplace_back( &typeid(Ts), sizeof(Ts) ), ... ); }
+	};
+
+	template<>
+	struct table_types_t<void> {
+		std::vector<VlltTableType> m_types;
+		table_types_t() = default;
+		table_types_t( const auto &rhs) { for( const auto& type: rhs.m_types ) m_types.push_back(type); }
+	};
+
 
 	using component_index_t = vsty::strong_type_t<uint64_t, vsty::counter<>, std::integral_constant<uint64_t, std::numeric_limits<uint64_t>::max()>>;///< Strong integer type for indexing components, 0 to number components - 1
 	using table_index_t = vsty::strong_type_t<uint64_t, vsty::counter<>, std::integral_constant<uint64_t, std::numeric_limits<uint64_t>::max()>>;///< Strong integer type for indexing rows, 0 to number rows - 1
@@ -64,11 +86,210 @@ namespace vllt {
 	/// Tag for template parameter list to indicate that the view has write access
 	struct VlltWrite {};		///< Types before this tag have read access, types after this tag have write access
 
-	template<sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR>
+	template<sync_t SYNC, size_t N0, size_t MINSLOTS, bool FAIR>
 	class VlltTable;
 
-	template<sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
+	template<sync_t SYNC, size_t N0, size_t MINSLOTS, bool FAIR>
 	class VlltTableView;
+
+	/// Stack forward declaration
+	template<typename T, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR>
+	class VlltStack;
+
+
+	//---------------------------------------------------------------------------------------------------
+	//accessor functions for void*
+
+	struct typed_void_ptr_t {
+		const std::type_info* m_type_info;	///< Pointer to the type of the component
+		void* m_ptr;	///< Pointer to the component
+	};
+	using ptr_array_void_t = std::variant< std::array<typed_void_ptr_t, VLLT_MAX_NUMBER_OF_COLUMNS>, std::vector<typed_void_ptr_t> >;
+
+
+	template<typename T>
+	auto& get( const ptr_array_void_t& ptrs ) {
+		if (ptrs.index() == 0) {
+			for( decltype(auto) a : std::get<0>(ptrs)) {
+				if (a.m_ptr != nullptr && std::type_index(*a.m_type_info) == std::type_index(typeid(T))) return *((T*)a);
+			}
+			assert(false);
+		}
+		for( decltype(auto) a : std::get<1>(ptrs)) {
+			if (a.m_ptr != nullptr && std::type_index(*a.m_type_info) == std::type_index(typeid(T))) return *((T*)a);
+		}
+		assert(false);
+		return T{};
+	}
+
+
+	//---------------------------------------------------------------------------------------------------
+	//VlltTable
+
+
+	template<sync_t SYNC = sync_t::VLLT_SYNC_EXTERNAL, size_t N0 = 1 << 5, size_t MINSLOTS = 16, bool FAIR = false>
+	class VlltTable {
+
+		template<sync_t X0, size_t X1, size_t X2, bool X3>
+		friend class VlltTableView;
+
+		static const size_t N = vtll::smallest_pow2_leq_value< N0 >::value;	///< Force N to be power of 2
+		static const size_t L = vtll::index_largest_bit< std::integral_constant<size_t, N> >::value - 1; ///< Index of largest bit in N
+		static const size_t BIT_MASK = N - 1;	///< Bit mask to mask off lower bits to get index inside block
+		static const size_t NUMBITS1 = 44; ///< Number of bits for the index of the first item in the stack
+		static const size_t COMP_ALIGNMENT = 64; ///< Alignment of the components
+
+		using block_idx_t = vsty::strong_type_t<uint64_t, vsty::counter<>>; ///< Strong integer type for indexing blocks, 0 to size map - 1
+		
+		using block_t = uint8_t*; 
+		using block_ptr_t = std::conditional_t< SYNC == sync_t::VLLT_SYNC_EXTERNAL
+								, vsty::strong_type_t<	std::shared_ptr<block_t>, vsty::counter<>> //not atomic
+								, std::atomic<			std::shared_ptr<block_t>> >; ///< Atomic shared pointer to a block
+
+		using block_map_t = std::pmr::vector<block_ptr_t>;
+
+		using block_map_ptr_t = std::conditional_t< SYNC == sync_t::VLLT_SYNC_EXTERNAL
+								, vsty::strong_type_t<	std::shared_ptr<block_map_t>, vsty::counter<>>
+								, std::atomic<			std::shared_ptr<block_map_t>> >; ///< Vector of shared pointers to the blocks
+
+		using slot_size_t = vsty::strong_type_t<uint64_t, vsty::counter<>> ;
+		using size_cnt_t1 = vsty::strong_type_t<slot_size_t, vsty::counter<>> ;
+		using size_cnt_t2 = std::atomic<slot_size_t>;
+		using size_cnt_t = std::conditional_t< SYNC == sync_t::VLLT_SYNC_EXTERNAL, size_cnt_t1, size_cnt_t2 >; ///< Atomic size counter
+
+		//using starving_t = std::atomic<uint64_t>; ///< Indicator for starving, use only for stack
+
+		/*using size_cnt_t = vsty::strong_type_t<uint64_t, vsty::counter<>>;	//no atomic size counter
+		using size_cnt_atomic_t = std::atomic<size_cnt_t>;	//use atomic size counter
+		using starving_t = std::atomic<uint64_t>; ///< Indicator for starving, use only for stack
+
+		using vector_ptr_t = std::vector<void*>;
+		using block_t =  uint8_t*; ///< Memory layout of the table
+
+		using block_ptr_t = std::shared_ptr<block_t>; ///< Shared pointer to a block
+		struct block_map_t {
+			std::pmr::vector<std::atomic<block_ptr_t>> m_blocks;	///< Vector of shared pointers to the blocks
+		};*/
+
+
+	public:
+
+		VlltTable( auto types, std::pmr::memory_resource* pmr = std::pmr::new_delete_resource()) noexcept : m_types{ types }, m_alloc{ pmr } {
+			if(types.m_types.size() > VLLT_MAX_NUMBER_OF_COLUMNS) 
+				std::cout << "Number of table columns " 
+					<< types.m_types.size() << " is larger than VLLT_MAX_NUMBER_OF_COLUMNS " << VLLT_MAX_NUMBER_OF_COLUMNS 
+					<< ", increase VLLT_MAX_NUMBER_OF_COLUMNS to at least " << types.m_types.size() << "!" << std::endl;
+		};
+
+
+		/// Return the number of rows in the table.
+		/// \returns The number of rows in the table.
+		inline auto size() noexcept {
+			auto size = m_size_cnt.load();
+			auto s1 = table_index_t{ table_size(size) + table_diff(size) };
+			auto s2 = table_size(size);
+			return std::min(s1, s2);
+ 		}
+
+		inline auto view(std::vector<const std::type_index> types) noexcept;
+
+		friend bool operator==(const VlltTable& lhs, const VlltTable& rhs) noexcept { return &lhs == &rhs; }
+
+		auto const & types()  {
+			return m_types; 
+		}; 
+
+	private:
+
+		/// \brief Add a new row to the table.
+		/// \param data Data for the new row.
+		/// \returns Index of the new row.
+		template<typename... Cs>
+		inline auto push_back_p( Cs&&... data ) noexcept -> table_index_t;
+ 
+		//-------------------------------------------------------------------------------------------
+		//read data
+
+		inline auto get_component_ptr(table_index_t n, size_t component_index) noexcept  {
+			//if constexpr (ROW) { return &std::get<I>((*block_ptr)[n & BIT_MASK]); }
+			//else { return &std::get<I>(*block_ptr)[n & BIT_MASK]; }
+		}
+
+		template<typename Ts>
+		inline auto get_ptr_array(table_index_t n) noexcept -> ptr_array_void_t;	
+
+		//-------------------------------------------------------------------------------------------
+		//erase data
+
+		//inline auto pop_back(table_index_t* idx = nullptr) noexcept -> tuple_value_t; ///< Remove the last row, call destructor on components
+		inline auto clear() noexcept; ///< Set the number if rows to zero - effectively clear the table, call destructors
+		inline auto swap(auto src, auto dst) noexcept -> void;	///< Swap contents of two rows
+		
+		//inline auto swap(table_index_t isrc, table_index_t idst) noexcept -> void { swap( get_ptr_array(isrc), get_ptr_array(idst) ); }	///< Swap contents of two rows
+
+		//inline auto erase(table_index_t n1) -> tuple_value_t; ///< Remove a row, call destructor on components
+
+		//-------------------------------------------------------------------------------------------
+		//manage data
+
+		inline auto max_size() noexcept -> size_t {
+			auto size = m_size_cnt_atomic.load();
+			return std::max(static_cast<decltype(table_size(size))>(table_size(size) + table_diff(size)), table_size(size));
+		}
+
+		table_index_t table_size(slot_size_t size) { return table_index_t{ size.get_bits(0, NUMBITS1) }; }
+		table_diff_t  table_diff(slot_size_t size) { return table_diff_t{ (int64_t)size.get_bits_signed(NUMBITS1) }; }
+
+		//static inline auto block_idx(table_index_t n) -> block_idx_t { return block_idx_t{ (n.value() >> L) }; }
+		//inline auto resize(table_index_t slot) -> block_ptr_t; ///< If the map of blocks is too small, allocate a larger one and copy the previous block pointers into it.
+
+		//-------------------------------------------------------------------------------------------
+		//state variables
+
+		table_types_t<void> m_types; ///< Types of the table
+
+		std::vector<std::shared_timed_mutex> m_access_mutex; ///< Mutexes for the components
+		std::pmr::polymorphic_allocator<uint8_t> m_alloc; ///< Allocator for the blocks
+
+		alignas(64) block_map_ptr_t m_block_map{nullptr};///< Atomic shared ptr to the map of blocks
+		alignas(64) size_cnt_t m_size_cnt{ slot_size_t{ table_index_t{ 0 }, table_diff_t{0}, NUMBITS1 } };	///< Next slot and size as atomic
+
+		//alignas(64) std::atomic<uint64_t> m_starving{0}; ///< prevent one operation to starve the other: -1...pulls are starving 1...pushes are starving
+	};
+
+
+	/// Used for accessing a table.
+	template<sync_t SYNC, size_t N0, size_t MINSLOTS, bool FAIR>
+	class VlltTableView {
+	public:
+		VlltTableView(VlltTable<SYNC, N0, MINSLOTS, FAIR>& table ) : m_table{ table } {};
+
+	private:
+		VlltTable<SYNC, N0, MINSLOTS, FAIR>& m_table;
+	};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+	//---------------------------------------------------------------------------------------------------
+	//Static Table
+
 
 	/// Concept demanding that types of a table must be unique
 	template<typename DATA>
@@ -104,10 +325,6 @@ namespace vllt {
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITELIST, typename WRITE>
 	class VtllStaticIterator;
 
-	/// Stack forward declaration
-	template<typename T, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR>
-	class VlltStack;
-
 
 	//---------------------------------------------------------------------------------------------------
 
@@ -130,16 +347,36 @@ namespace vllt {
 	concept VlltOwner = (VlltWriteAll<DATA, WRITE> && !VlltOnlyPushback<WRITELIST>);
 
 
-	//---------------------------------------------------------------------------------------------------
-	//Accessor fucntions to return values from view and iterator
 
+
+	//---------------------------------------------------------------------------------------------------
+	//Accessor functions to return values from view and iterator
+
+
+	/// \brief Get a reference to a component of a row. Wrapper for std::get
+	template<typename T>
+	auto& get( const auto& tuple ) {
+		return std::get<T>(tuple);
+	}
+
+	/// \brief Get a reference to a component of a row. Wrapper for std::get
+	/// \tparam T Index of the component.
+	/// \param[in] tuple Tuple holding the components.
+	/// \returns Reference to the component.
+	template<auto T>
+	auto& get( const auto& tuple ) {
+		return std::get<T>(tuple);
+	}
+
+
+	using ptr_array_any_t = std::variant< std::array<std::any, VLLT_MAX_NUMBER_OF_COLUMNS>, std::vector<std::any> >;
 
 	/// \brief Get a pointer to a component of a row.
 	/// \param[in] ptrs Pointers to the components of a row.
 	/// \returns Pointer to the component.
 	template<typename T>
 		requires std::is_pointer_v<T>
-	auto get( const ptr_array_t& ptrs ) {
+	auto get( const ptr_array_any_t& ptrs ) {
 		if (ptrs.index() == 0) {
 			for( decltype(auto) a : std::get<0>(ptrs)) {
 				if (a.has_value() && a.type() == typeid(T)) return std::any_cast<T>(a);
@@ -158,7 +395,7 @@ namespace vllt {
 	/// \returns Reference to the component.
 	template<typename T>
 		requires std::is_reference_v<T>
-	auto& get( const ptr_array_t& ptrs ) {
+	auto& get( const ptr_array_any_t& ptrs ) {
 		return *get<std::remove_reference_t<T>*>(ptrs);
 	}
 
@@ -167,29 +404,16 @@ namespace vllt {
 	/// \returns Value of the component.
 	template<typename T>
 		requires (!std::is_reference_v<T> && !std::is_pointer_v<T>)
-	auto& get( const ptr_array_t& ptrs ) {
+	auto& get( const ptr_array_any_t& ptrs ) {
 		return *get<T*>(ptrs);
 	}
 
-	/// \brief Get a reference to a component of a row. Wrapper for std::get
-	template<typename T>
-	auto& get( const auto& tuple ) {
-		return std::get<T>(tuple);
-	}
 
-	/// \brief Get a reference to a component of a row. Wrapper for std::get
-	/// \tparam T Index of the component.
-	/// \param[in] tuple Tuple holding the components.
-	/// \returns Reference to the component.
-	template<auto T>
-	auto& get( const auto& tuple ) {
-		return std::get<T>(tuple);
-	}
 
 	/// \brief Get the size of the row.
 	/// \param[in] ptrs Pointers to the components of a row.
 	/// \returns Size of the row.
-	size_t size(const ptr_array_t& ptrs) {
+	size_t size(const ptr_array_any_t& ptrs) {
 		if( ptrs.index() == 1 ) return std::get<1>(ptrs).size();
 		size_t i = 0;
 		for( decltype(auto) a : std::get<0>(ptrs)) {
@@ -203,112 +427,10 @@ namespace vllt {
 	/// \param[in] ptrs Pointers to the components of a row.
 	/// \param[in] idx Index of the component.
 	/// \returns std::any that is storing the component pointer.
-	auto any( const ptr_array_t& ptr, size_t idx ) {
+	auto any( const ptr_array_any_t& ptr, size_t idx ) {
 		return ptr.index() == 0 ? std::get<0>(ptr)[idx] : std::get<1>(ptr)[idx];
 	}
 
-	//---------------------------------------------------------------------------------------------------
-
-	template<sync_t SYNC = sync_t::VLLT_SYNC_EXTERNAL, size_t N0 = 1 << 5, bool ROW = false, size_t MINSLOTS = 16, bool FAIR = false>
-	class VlltTable {
-		template<sync_t X0, size_t X1, bool X2, size_t X3, bool X4, typename X5, typename X6>
-		friend class VlltTableView;
-
-		struct VlltTableTypes {
-			std::type_info* m_type_info;
-			std::size_t m_type_index;
-			std::size_t m_type_size;
-		};
-		using table_types_t = std::vector<VlltTableTypes>;
-
-		table_types_t m_types;
-
-	public:
-		VlltTable(table_types_t types, std::pmr::memory_resource* pmr = std::pmr::new_delete_resource()) noexcept : m_types{ types }, { pmr } {
-			if(types.size() > VLLT_MAX_NUMBER_OF_COLUMNS) 
-				std::cout << "Number of table columns " 
-					<< types.size() << " is larger than VLLT_MAX_NUMBER_OF_COLUMNS " << VLLT_MAX_NUMBER_OF_COLUMNS 
-					<< ", increase VLLT_MAX_NUMBER_OF_COLUMNS to at least " << types.size() << "!" << std::endl;
-		};
-
-		/// Return the number of rows in the table.
-		/// \returns The number of rows in the table.
-		inline auto size() noexcept {
-			return 0;
-			//auto size = m_size_cnt.load();
-			//auto s1 = table_index_t{ table_size(size) + table_diff(size) };
-			//auto s2 = table_size(size);
-			//return std::min(s1, s2);
- 		}
-
-		inline auto view(std::vector<const std::type_index> types) noexcept;
-
-		friend bool operator==(const VlltTable& lhs, const VlltTable& rhs) noexcept { return &lhs == &rhs; }
-
-		auto types() -> std::vector<const std::type_info*> {
-			return m_types; 
-		}; 
-
-	private:
-
-		/// \brief Add a new row to the table.
-		/// \param data Data for the new row.
-		/// \returns Index of the new row.
-		template<typename... Cs>
-		inline auto push_back_p( Cs&&... data ) noexcept -> table_index_t;
- 
-		//-------------------------------------------------------------------------------------------
-		//read data
-
-		inline auto get_component_ptr(table_index_t n, size_t component_index) noexcept  {
-			//if constexpr (ROW) { return &std::get<I>((*block_ptr)[n & BIT_MASK]); }
-			//else { return &std::get<I>(*block_ptr)[n & BIT_MASK]; }
-		}
-
-		template<typename Ts>
-		inline auto get_ptr_array(table_index_t n) noexcept -> ptr_array_t;	
-
-		//-------------------------------------------------------------------------------------------
-		//erase data
-
-		//inline auto pop_back(table_index_t* idx = nullptr) noexcept -> tuple_value_t; ///< Remove the last row, call destructor on components
-		inline auto clear() noexcept; ///< Set the number if rows to zero - effectively clear the table, call destructors
-		inline auto swap(auto src, auto dst) noexcept -> void;	///< Swap contents of two rows
-		inline auto swap(table_index_t isrc, table_index_t idst) noexcept -> void {swap( get_ref_tuple<DATA>(isrc), get_ref_tuple<DATA>(idst) );}	///< Swap contents of two rows
-		//inline auto erase(table_index_t n1) -> tuple_value_t; ///< Remove a row, call destructor on components
-
-		//-------------------------------------------------------------------------------------------
-		//manage data
-
-		inline auto max_size() noexcept -> size_t {
-			auto size = m_size_cnt.load();
-			return std::max(static_cast<decltype(table_size(size))>(table_size(size) + table_diff(size)), table_size(size));
-		}
-
-		//static inline auto block_idx(table_index_t n) -> block_idx_t { return block_idx_t{ (n.value() >> L) }; }
-		//inline auto resize(table_index_t slot) -> block_ptr_t; ///< If the map of blocks is too small, allocate a larger one and copy the previous block pointers into it.
-
-		//std::array<std::shared_timed_mutex, vtll::size<DATA>::value> m_access_mutex;
-		//std::pmr::polymorphic_allocator<block_t> m_alloc; ///< Allocator for the table
-
-		//alignas(64) std::atomic<std::shared_ptr<block_map_t>> m_block_map{nullptr};///< Atomic shared ptr to the map of blocks
-
-		//table_index_t table_size(slot_size_t size) { return table_index_t{ size.get_bits(0, NUMBITS1) }; }	
-		//table_diff_t  table_diff(slot_size_t size) { return table_diff_t{ (int64_t)size.get_bits_signed(NUMBITS1) }; }
-		//alignas(64) size_cnt_t m_size_cnt{ slot_size_t{ table_index_t{ 0 }, table_diff_t{0}, NUMBITS1 } };	///< Next slot and size as atomic
-		//alignas(64) std::atomic<uint64_t> m_starving{0}; ///< prevent one operation to starve the other: -1...pulls are starving 1...pushes are starving
-	};
-
-
-	/// Used for accessing a table.
-	template<sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR, typename READ, typename WRITE>
-	class VlltTableView {
-	public:
-		VlltTableView(VlltTable<SYNC, N0, ROW, MINSLOTS, FAIR>& table ) : m_table{ table } {};
-
-	private:
-		VlltTable<SYNC, N0, ROW, MINSLOTS, FAIR>& m_table;
-	};
 
 
 	//---------------------------------------------------------------------------------------------------
@@ -733,7 +855,7 @@ namespace vllt {
 	/// \brief Base class for a iterator to a view.
 	class VtllStaticIteratorBase {
 		friend class VtllStaticIteratorBaseWrapper;
-		virtual inline auto get() -> ptr_array_t = 0 ; ///< Get pointers to the components of a row.
+		virtual inline auto get() -> ptr_array_any_t = 0 ; ///< Get pointers to the components of a row.
 	    virtual inline auto not_equal(const VtllStaticIteratorBase& rhs) -> bool = 0; ///< Dereference operator
     	virtual inline auto plusplus() -> VtllStaticIteratorBase& = 0; ///< Prefix increment operator
 	};
@@ -752,7 +874,7 @@ namespace vllt {
 			memcpy(m_data.data(), (const void*)&b, sz); 
 		};
 
-	    ptr_array_t operator*() { return get_iteratorbase()->get(); }; ///< Dereference operator
+	    ptr_array_any_t operator*() { return get_iteratorbase()->get(); }; ///< Dereference operator
 		auto operator!=(VtllStaticIteratorBaseWrapper& rhs) -> bool { return get_iteratorbase()->not_equal( *rhs.get_iteratorbase() ); };
 		VtllStaticIteratorBase& operator++() { return get_iteratorbase()->plusplus(); }; ///< Prefix increment operator
 
@@ -768,7 +890,7 @@ namespace vllt {
 	/// \brief Base class for a view to a table.
 	class VlltStaticTableViewBase {
 	public:
-		virtual inline auto get(table_index_t idx) -> ptr_array_t = 0; ///< Get pointers to the components of a row.
+		virtual inline auto get(table_index_t idx) -> ptr_array_any_t = 0; ///< Get pointers to the components of a row.
 		inline auto begin() -> VtllStaticIteratorBaseWrapper { return begin_p(); }; ///< Get an iterator to the first row.
 		inline auto end() -> VtllStaticIteratorBaseWrapper { return end_p(); }; ///< Get an iterator to the first row.
 	private:
@@ -891,8 +1013,8 @@ namespace vllt {
 		/// \brief Get a vector with pointers to all components of an entry.
 		/// \param[in] n Index to the entry.
 		/// \returns a vector with pointers to all components of entry n.
-		virtual inline auto get( table_index_t n) -> ptr_array_t override {
-			ptr_array_t ptrs;
+		virtual inline auto get( table_index_t n) -> ptr_array_any_t override {
+			ptr_array_any_t ptrs;
 			std::any *ptr = nullptr;
 
 			if constexpr (vtll::size<READ>::value + vtll::size<WRITE>::value <= VLLT_MAX_NUMBER_OF_COLUMNS ) {
@@ -993,7 +1115,7 @@ namespace vllt {
 		}
 
 	private:
-		virtual inline auto get() -> ptr_array_t override { return m_view.get(m_n); }; ///< Get pointers to the components of a row.
+		virtual inline auto get() -> ptr_array_any_t override { return m_view.get(m_n); }; ///< Get pointers to the components of a row.
 	    virtual inline auto not_equal(const VtllStaticIteratorBase& rhs) -> bool override { return *this != dynamic_cast<const VtllStaticIterator&>(rhs);}
     	virtual inline auto plusplus() -> VtllStaticIteratorBase& override { ++m_n;; return *this; }
 
