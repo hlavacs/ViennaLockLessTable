@@ -45,23 +45,27 @@ namespace vllt {
 
 	//---------------------------------------------------------------------------------------------------
 
-
-	struct VlltTableType {
-		const std::type_info* m_type_info;//pointer to type of the component
+	/// \brief A vector of types of a table
+	struct VlltColumnType {
+		const std::type_info* m_type_info;//pointer to type of the column
 		const std::size_t m_type_size;  	//size of the type
 	};
 
+	/// \brief Construct from a variadic type list
 	template<typename... Ts>
-	struct table_types_t {
-		std::vector<VlltTableType> m_types;
-		table_types_t() { (m_types.emplace_back( &typeid(Ts), sizeof(Ts) ), ... ); }
+	struct VlltColumnTypes {
+		std::vector<VlltColumnType> m_types;
+		VlltColumnTypes() { (m_types.emplace_back( &typeid(Ts), sizeof(Ts) ), ... ); }
 	};
 
+	/// \brief Construct from a vector of types
 	template<>
-	struct table_types_t<void> {
-		std::vector<VlltTableType> m_types;
-		table_types_t() = default;
-		table_types_t( const auto &rhs) { for( const auto& type: rhs.m_types ) m_types.push_back(type); }
+	struct VlltColumnTypes<void> {
+		std::vector<VlltColumnType> m_types;
+		VlltColumnTypes() = default;
+		VlltColumnTypes( const auto &rhs) { 
+			m_types.reserve(rhs.m_types.size()); 
+			for( const auto& type: rhs.m_types ) m_types.push_back(type); }
 	};
 
 
@@ -74,7 +78,7 @@ namespace vllt {
 
 	/// Syncronization type for the table
 	const int VLLT_SYNC_PUSHBACK = 128;		///< relaxed sync, views with pushback are allowed
-	enum class sync_t {
+	enum class sync_t : int {
 		VLLT_SYNC_EXTERNAL = 0,		///< sync is done externally
 		VLLT_SYNC_EXTERNAL_PUSHBACK = VLLT_SYNC_EXTERNAL | VLLT_SYNC_PUSHBACK,	///< sync is done externally, views with pushback only are allowed
 		VLLT_SYNC_INTERNAL = 1,		///< full internal sync
@@ -100,26 +104,63 @@ namespace vllt {
 	//---------------------------------------------------------------------------------------------------
 	//accessor functions for void*
 
-	struct typed_void_ptr_t {
-		const std::type_info* m_type_info;	///< Pointer to the type of the component
-		void* m_ptr;	///< Pointer to the component
-	};
-	using ptr_array_void_t = std::variant< std::array<typed_void_ptr_t, VLLT_MAX_NUMBER_OF_COLUMNS>, std::vector<typed_void_ptr_t> >;
 
+	/// \brief A collection of pointers to components of a row.
+	class VlltComponentPtrs {
+	public:
+		struct typed_void_ptr_t { ///< \brief A component pointer together with its type.
+			const std::type_info* m_type_info;	///< Pointer to the type of the component
+			void* m_ptr;	///< Pointer to the component
+		};	
 
-	template<typename T>
-	auto& get( const ptr_array_void_t& ptrs ) {
-		if (ptrs.index() == 0) {
-			for( decltype(auto) a : std::get<0>(ptrs)) {
-				if (a.m_ptr != nullptr && std::type_index(*a.m_type_info) == std::type_index(typeid(T))) return *((T*)a);
+		using container_type = std::variant< std::array<typed_void_ptr_t, VLLT_MAX_NUMBER_OF_COLUMNS>, std::vector<typed_void_ptr_t> >;
+
+		/// \brief Get a pointer to a component of a row.
+		/// \returns Pointer to the component.
+		template<typename T, size_t I>
+		T* get() {
+			for( decltype(auto) a : std::get<I>(m_typed_ptrs)) {
+				if (std::type_index(*a.m_type_info) == std::type_index(typeid(T))) return (T*)a.m_ptr;
 			}
-			assert(false);
+			return nullptr; 
 		}
-		for( decltype(auto) a : std::get<1>(ptrs)) {
-			if (a.m_ptr != nullptr && std::type_index(*a.m_type_info) == std::type_index(typeid(T))) return *((T*)a);
+
+		/// \brief Add a new component pointer to the collection.
+		/// \param[in] ptr Pointer to the component.
+		template<typename T>
+		void put(T* ptr) {
+			if( m_typed_ptrs.index() == 0 ) {
+				if( m_size < VLLT_MAX_NUMBER_OF_COLUMNS) {
+					std::get<0>(m_typed_ptrs)[m_size++] = { &typeid(T), ptr};
+				} else {
+					std::vector<typed_void_ptr_t> new_ptrs;
+					new_ptrs.reserve(VLLT_MAX_NUMBER_OF_COLUMNS + 1);
+					for( size_t i = 0; i < m_size; ++i ) new_ptrs.push_back(std::get<0>(m_typed_ptrs)[i]);
+					m_typed_ptrs = new_ptrs;
+				}
+			} else {
+				std::get<1>(m_typed_ptrs).push_back( { &typeid(T), ptr} );
+			}
 		}
-		assert(false);
-		return T{};
+
+		/// \brief Check if a component type of a row exists.
+		template<typename T>
+		bool exists() {
+			auto b = m_typed_ptrs.index() == 0 ? get<T, 0>() : get<T, 1>();
+			return b != nullptr;
+		}
+
+	private:
+		container_type m_typed_ptrs = std::array<typed_void_ptr_t, VLLT_MAX_NUMBER_OF_COLUMNS>{};	///< Collection of pointers to components of a row
+		size_t m_size = 0;	///< Number of pointers in the collection	
+	};
+
+
+	/// \brief Get a pointer to a component of a row.
+	template<typename T>
+	T& get( const VlltComponentPtrs& ptrs ) {
+		assert(ptrs.exists<T>());
+		return ptrs.m_typed_ptrs.index() == 0 ? *ptrs.get<T, 0>() : *ptrs.get<T, 1>(); 
 	}
 
 
@@ -141,36 +182,16 @@ namespace vllt {
 
 		using block_idx_t = vsty::strong_type_t<uint64_t, vsty::counter<>>; ///< Strong integer type for indexing blocks, 0 to size map - 1
 		
-		using block_t = uint8_t*; 
-		using block_ptr_t = std::conditional_t< SYNC == sync_t::VLLT_SYNC_EXTERNAL
-								, vsty::strong_type_t<	std::shared_ptr<block_t>, vsty::counter<>> //not atomic
-								, std::atomic<			std::shared_ptr<block_t>> >; ///< Atomic shared pointer to a block
+		using block_t = uint8_t*; ///< Memory blob containing a block
 
-		using block_map_t = std::pmr::vector<block_ptr_t>;
+		template<typename T>	///< Non-Atomic or Atomic container
+		using type_container_t = std::conditional_t< !(static_cast<int>(SYNC) & VLLT_SYNC_PUSHBACK), vsty::strong_type_t<T, vsty::counter<>>, std::atomic<T> >; 
 
-		using block_map_ptr_t = std::conditional_t< SYNC == sync_t::VLLT_SYNC_EXTERNAL
-								, vsty::strong_type_t<	std::shared_ptr<block_map_t>, vsty::counter<>>
-								, std::atomic<			std::shared_ptr<block_map_t>> >; ///< Vector of shared pointers to the blocks
-
-		using slot_size_t = vsty::strong_type_t<uint64_t, vsty::counter<>> ;
-		using size_cnt_t1 = vsty::strong_type_t<slot_size_t, vsty::counter<>> ;
-		using size_cnt_t2 = std::atomic<slot_size_t>;
-		using size_cnt_t = std::conditional_t< SYNC == sync_t::VLLT_SYNC_EXTERNAL, size_cnt_t1, size_cnt_t2 >; ///< Atomic size counter
-
-		//using starving_t = std::atomic<uint64_t>; ///< Indicator for starving, use only for stack
-
-		/*using size_cnt_t = vsty::strong_type_t<uint64_t, vsty::counter<>>;	//no atomic size counter
-		using size_cnt_atomic_t = std::atomic<size_cnt_t>;	//use atomic size counter
-		using starving_t = std::atomic<uint64_t>; ///< Indicator for starving, use only for stack
-
-		using vector_ptr_t = std::vector<void*>;
-		using block_t =  uint8_t*; ///< Memory layout of the table
-
-		using block_ptr_t = std::shared_ptr<block_t>; ///< Shared pointer to a block
-		struct block_map_t {
-			std::pmr::vector<std::atomic<block_ptr_t>> m_blocks;	///< Vector of shared pointers to the blocks
-		};*/
-
+		using block_ptr_t = type_container_t<std::shared_ptr<block_t>>; ///< Shared pointer to a block
+		using block_map_t = std::pmr::vector<block_ptr_t>; ///< Vector of shared pointers to the blocks
+		using block_map_ptr_t = type_container_t<std::shared_ptr<block_map_t>>; //< Shared Ptr to block map
+		using slot_size_t = vsty::strong_type_t<uint64_t, vsty::counter<>> ; //combination of size and difference
+		using size_cnt_t = type_container_t<slot_size_t>; ///< size counter
 
 	public:
 
@@ -216,7 +237,7 @@ namespace vllt {
 		}
 
 		template<typename Ts>
-		inline auto get_ptr_array(table_index_t n) noexcept -> ptr_array_void_t;	
+		inline auto get_component_ptrs(table_index_t n) noexcept -> VlltComponentPtrs;	
 
 		//-------------------------------------------------------------------------------------------
 		//erase data
@@ -246,7 +267,7 @@ namespace vllt {
 		//-------------------------------------------------------------------------------------------
 		//state variables
 
-		table_types_t<void> m_types; ///< Types of the table
+		VlltColumnTypes<void> m_types; ///< Types of the table
 
 		std::vector<std::shared_timed_mutex> m_access_mutex; ///< Mutexes for the components
 		std::pmr::polymorphic_allocator<uint8_t> m_alloc; ///< Allocator for the blocks
@@ -352,7 +373,6 @@ namespace vllt {
 	//---------------------------------------------------------------------------------------------------
 	//Accessor functions to return values from view and iterator
 
-
 	/// \brief Get a reference to a component of a row. Wrapper for std::get
 	template<typename T>
 	auto& get( const auto& tuple ) {
@@ -367,7 +387,6 @@ namespace vllt {
 	auto& get( const auto& tuple ) {
 		return std::get<T>(tuple);
 	}
-
 
 	using ptr_array_any_t = std::variant< std::array<std::any, VLLT_MAX_NUMBER_OF_COLUMNS>, std::vector<std::any> >;
 
@@ -389,6 +408,7 @@ namespace vllt {
 		assert(false);
 		return T{};
 	}
+
 
 	/// \brief Get a reference to a component of a row.
 	/// \param[in] ptrs Pointers to the components of a row.

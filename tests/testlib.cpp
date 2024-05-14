@@ -8,7 +8,9 @@ using namespace std::chrono;
 
 void functional_test() {
 	using table_type = vllt::VlltTable<vllt::sync_t::VLLT_SYNC_EXTERNAL_PUSHBACK, 1 << 5>;
-	table_type table{ vllt::table_types_t<int>{} };
+	table_type table{ vllt::VlltColumnTypes<double, float, int, char, std::string>{} };
+
+	
 
 
 }
