@@ -123,13 +123,10 @@ namespace vllt {
 		using container_type = std::variant< std::array<typed_void_ptr_t, VLLT_MAX_NUMBER_OF_COLUMNS>, std::vector<typed_void_ptr_t> >;
 
 		/// \brief Get a pointer to a component of a row.
-		/// \returns Pointer to the component.
-		template<typename T, size_t I>
-		T* get() {
-			for( decltype(auto) a : std::get<I>(m_typed_ptrs)) {
-				if (std::type_index(*a.m_type_info) == std::type_index(typeid(T))) return (T*)a.m_ptr;
-			}
-			return nullptr; 
+		template<typename T>
+		T& get( const VlltComponentPtrs& ptrs ) {
+			assert(exists<T>());
+			return m_typed_ptrs.index() == 0 ? *get_ptr<T, 0>() : *get_ptr<T, 1>(); 
 		}
 
 		/// \brief Add a new component pointer to the collection.
@@ -158,6 +155,16 @@ namespace vllt {
 		}
 
 	private:
+		/// \brief Get a pointer to a component of a row.
+		/// \returns Pointer to the component.
+		template<typename T, size_t I>
+		T* get_ptr() {
+			for( decltype(auto) a : std::get<I>(m_typed_ptrs)) {
+				if (std::type_index(*a.m_type_info) == std::type_index(typeid(T))) return (T*)a.m_ptr;
+			}
+			return nullptr; 
+		}
+
 		container_type m_typed_ptrs = std::array<typed_void_ptr_t, VLLT_MAX_NUMBER_OF_COLUMNS>{};	///< Collection of pointers to components of a row
 		size_t m_size = 0;	///< Number of pointers in the collection	
 	};
@@ -166,8 +173,7 @@ namespace vllt {
 	/// \brief Get a pointer to a component of a row.
 	template<typename T>
 	T& get( const VlltComponentPtrs& ptrs ) {
-		assert(ptrs.exists<T>());
-		return ptrs.m_typed_ptrs.index() == 0 ? *ptrs.get<T, 0>() : *ptrs.get<T, 1>(); 
+		return ptrs.get<T>(); 
 	}
 
 
