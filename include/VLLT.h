@@ -74,6 +74,10 @@ namespace vllt {
 			for( const auto& type: rhs.m_types ) m_types.push_back(type); }
 	};
 
+	bool operator== (const VlltColumnTypes<void>& ct1, const VlltColumnTypes<void>& ct2) { 
+		return ct1.m_types == ct2.m_types; 
+	}
+
 
 	using component_index_t = vsty::strong_type_t<uint64_t, vsty::counter<>, std::integral_constant<uint64_t, std::numeric_limits<uint64_t>::max()>>;///< Strong integer type for indexing components, 0 to number components - 1
 	using table_index_t = vsty::strong_type_t<uint64_t, vsty::counter<>, std::integral_constant<uint64_t, std::numeric_limits<uint64_t>::max()>>;///< Strong integer type for indexing rows, 0 to number rows - 1
@@ -310,17 +314,25 @@ namespace vllt {
 
 	public:
 		inline auto push_back(auto&&... data) noexcept -> table_index_t {
-			return m_table.push_back(std::forward<decltype(data)>(data)...);
+			return m_owner ? m_table.push_back(std::forward<decltype(data)>(data)...) : table_index_t{};
 		}
 
 	private:
-		VlltTableView( VlltTableBase& table, auto&& column_types) : m_table{ table }, m_column_types{column_types} {
-			if( table.m_column_types.m_types == m_column_types.m_types ) m_owner = true;
+		VlltTableView( VlltTableBase& table, auto&& column_types) : m_table{ table } {
+			bool con = true;
+			for( auto& type : column_types.m_types) {
+				if( std::type_index( *type.m_type_info ) == std::type_index( typeid(VlltWrite) ) ) { con = false; continue; }
+				if( con )
+					m_column_types.m_types.emplace_back( type.m_type_info_const, type.m_type_info_const, type.m_type_size );
+				else 
+					m_column_types.m_types.emplace_back( type.m_type_info,       type.m_type_info_const, type.m_type_size );
+			}
+			if( table.m_column_types == m_column_types ) m_owner = true;
 		};
 
 		bool m_owner{false};
 		VlltTableBase& m_table;
-		const VlltColumnTypes<void> m_column_types;
+		VlltColumnTypes<void> m_column_types;
 	};
 
 
