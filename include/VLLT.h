@@ -48,14 +48,20 @@ namespace vllt {
 	/// \brief A vector of types of a table
 	struct VlltColumnType {
 		const std::type_info* m_type_info;//pointer to type of the column
+		const std::type_info* m_type_info_const;//pointer to const type of the column
 		const std::size_t m_type_size;  	//size of the type
 	};
+
+	bool operator== (const VlltColumnType& ct1, const VlltColumnType& ct2) { 
+		return std::type_index( *ct1.m_type_info ) == std::type_index( *ct2.m_type_info ); 
+	}
+
 
 	/// \brief Construct from a variadic type list
 	template<typename... Ts>
 	struct VlltColumnTypes {
 		std::vector<VlltColumnType> m_types;
-		VlltColumnTypes() { (m_types.emplace_back( &typeid(Ts), sizeof(Ts) ), ... ); }
+		VlltColumnTypes() { (m_types.emplace_back( &typeid(Ts), &typeid(const Ts), sizeof(Ts) ), ... ); }
 	};
 
 	/// \brief Construct from a vector of types
@@ -83,22 +89,19 @@ namespace vllt {
 		VLLT_SYNC_EXTERNAL_PUSHBACK = VLLT_SYNC_EXTERNAL | VLLT_SYNC_PUSHBACK,	///< sync is done externally, views with pushback only are allowed
 		VLLT_SYNC_INTERNAL = 1,		///< full internal sync
 		VLLT_SYNC_INTERNAL_PUSHBACK = VLLT_SYNC_INTERNAL | VLLT_SYNC_PUSHBACK,	///< internal sync, can add rows in parallel by pushback only views
-		VLLT_SYNC_DEBUG = 3,		///< debugging full internal sync - error if violation
+		VLLT_SYNC_DEBUG = 2,		///< debugging full internal sync - error if violation
 		VLLT_SYNC_DEBUG_PUSHBACK = VLLT_SYNC_DEBUG | VLLT_SYNC_PUSHBACK	///< debugging relaxed internal sync - error if violation, pushback only views allowed
 	};
 
 	/// Tag for template parameter list to indicate that the view has write access
 	struct VlltWrite {};		///< Types before this tag have read access, types after this tag have write access
 
+	class VlltTableBase;
+
 	template<sync_t SYNC, size_t N0, size_t MINSLOTS, bool FAIR>
 	class VlltTable;
 
-	template<sync_t SYNC, size_t N0, size_t MINSLOTS, bool FAIR>
 	class VlltTableView;
-
-	/// Stack forward declaration
-	template<typename T, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR>
-	class VlltStack;
 
 
 	//---------------------------------------------------------------------------------------------------
@@ -145,7 +148,7 @@ namespace vllt {
 
 		/// \brief Check if a component type of a row exists.
 		template<typename T>
-		bool exists() {
+		auto exists() -> bool {
 			auto b = m_typed_ptrs.index() == 0 ? get<T, 0>() : get<T, 1>();
 			return b != nullptr;
 		}
@@ -168,10 +171,36 @@ namespace vllt {
 	//VlltTable
 
 
-	template<sync_t SYNC = sync_t::VLLT_SYNC_EXTERNAL, size_t N0 = 1 << 5, size_t MINSLOTS = 16, bool FAIR = false>
-	class VlltTable {
 
-		template<sync_t X0, size_t X1, size_t X2, bool X3>
+	class VlltTableBase {
+		friend class VlltTableView;
+
+	public:
+		VlltTableBase(auto&  ctypes, sync_t sync = sync_t::VLLT_SYNC_EXTERNAL) noexcept : m_column_types{ ctypes }, m_sync{sync} {};
+		VlltTableBase(auto&& ctypes, sync_t sync = sync_t::VLLT_SYNC_EXTERNAL) noexcept : m_column_types{ ctypes }, m_sync{sync} {};
+
+		virtual inline auto size() noexcept -> uint64_t = 0;
+		inline auto const & types() noexcept { return m_column_types; };
+
+		inline auto view( auto&& types ) noexcept { 
+			return VlltTableView{ *this, std::forward<decltype(types)>(types) };
+		};
+
+	private:
+
+		inline auto push_back(auto&&... data) noexcept -> table_index_t {
+			return {};
+		}
+
+		const sync_t m_sync; ///< Synchronization type of the table
+		const VlltColumnTypes<void> m_column_types; ///< Types of the table
+	};
+
+
+
+	template<sync_t SYNC = sync_t::VLLT_SYNC_EXTERNAL, size_t N0 = 1 << 5, size_t MINSLOTS = 16, bool FAIR = false>
+	class VlltTable : public VlltTableBase {
+
 		friend class VlltTableView;
 
 		static const size_t N = vtll::smallest_pow2_leq_value< N0 >::value;	///< Force N to be power of 2
@@ -195,30 +224,24 @@ namespace vllt {
 
 	public:
 
-		VlltTable( auto types, std::pmr::memory_resource* pmr = std::pmr::new_delete_resource()) noexcept : m_types{ types }, m_alloc{ pmr } {
-			if(types.m_types.size() > VLLT_MAX_NUMBER_OF_COLUMNS) 
-				std::cout << "Number of table columns " 
-					<< types.m_types.size() << " is larger than VLLT_MAX_NUMBER_OF_COLUMNS " << VLLT_MAX_NUMBER_OF_COLUMNS 
-					<< ", increase VLLT_MAX_NUMBER_OF_COLUMNS to at least " << types.m_types.size() << "!" << std::endl;
-		};
+		VlltTable( auto& types, std::pmr::memory_resource* pmr = std::pmr::new_delete_resource()) noexcept 
+			: VlltTableBase(types, SYNC), m_alloc{ pmr } {};
 
+		VlltTable( auto&& types, std::pmr::memory_resource* pmr = std::pmr::new_delete_resource()) noexcept 
+			: VlltTableBase(std::forward<decltype(types)>(types), SYNC), m_alloc{ pmr } {};
 
 		/// Return the number of rows in the table.
 		/// \returns The number of rows in the table.
-		inline auto size() noexcept {
+		inline auto size() noexcept -> uint64_t {
 			auto size = m_size_cnt.load();
 			auto s1 = table_index_t{ table_size(size) + table_diff(size) };
 			auto s2 = table_size(size);
 			return std::min(s1, s2);
  		}
 
-		inline auto view(std::vector<const std::type_index> types) noexcept;
 
 		friend bool operator==(const VlltTable& lhs, const VlltTable& rhs) noexcept { return &lhs == &rhs; }
 
-		auto const & types()  {
-			return m_types; 
-		}; 
 
 	private:
 
@@ -267,7 +290,6 @@ namespace vllt {
 		//-------------------------------------------------------------------------------------------
 		//state variables
 
-		VlltColumnTypes<void> m_types; ///< Types of the table
 
 		std::vector<std::shared_timed_mutex> m_access_mutex; ///< Mutexes for the components
 		std::pmr::polymorphic_allocator<uint8_t> m_alloc; ///< Allocator for the blocks
@@ -279,14 +301,26 @@ namespace vllt {
 	};
 
 
-	/// Used for accessing a table.
-	template<sync_t SYNC, size_t N0, size_t MINSLOTS, bool FAIR>
+
+
+	/// \brief Used for accessing a table.
 	class VlltTableView {
+
+		friend class VlltTableBase;
+
 	public:
-		VlltTableView(VlltTable<SYNC, N0, MINSLOTS, FAIR>& table ) : m_table{ table } {};
+		inline auto push_back(auto&&... data) noexcept -> table_index_t {
+			return m_table.push_back(std::forward<decltype(data)>(data)...);
+		}
 
 	private:
-		VlltTable<SYNC, N0, MINSLOTS, FAIR>& m_table;
+		VlltTableView( VlltTableBase& table, auto&& column_types) : m_table{ table }, m_column_types{column_types} {
+			if( table.m_column_types.m_types == m_column_types.m_types ) m_owner = true;
+		};
+
+		bool m_owner{false};
+		VlltTableBase& m_table;
+		const VlltColumnTypes<void> m_column_types;
 	};
 
 
