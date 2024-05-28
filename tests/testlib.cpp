@@ -13,10 +13,36 @@ void functional_test() {
 	auto types = table.types();
 
 	{
-		auto view = table.view( vllt::VlltColumnTypes<vllt::VlltWrite>{} );
+		auto view = table.view_base( vllt::VlltColumnTypes<vllt::VlltWrite>{} );
 		for( int i = 0; i < 100; i++ ) {
 			view.push_back((double)i, (float)i, i, 'a', std::string("Hello")); //inserting new rows always in order of the table types!
 		}
+	}
+
+		{
+		auto view = table.view<double, char, vllt::VlltWrite, int, float>();
+		auto data = view.get_ref_tuple( vllt::table_index_t{0} );
+
+		std::cout << "Data: " << vllt::get<const double&>(data) << " " << vllt::get<const char&>(data) 
+				  << " " << vllt::get<int&>(data) << " " << vllt::get<float&>(data) << " " << std::endl;
+
+		auto d0 = vllt::get<0>(data); //copy of the data (double), not a reference
+		d0 = 3.0; //change the copy, not the value in the table
+
+		decltype(auto) d1 = vllt::get<1>(data); //const reference!
+		//d1 = 'U';  //compile error
+
+		decltype(auto) d2 = vllt::get<2>(data); //reference
+		d2 = 3;	//change the value in the table
+
+		auto d3 = vllt::get<3>(data); //copy of the data (int)
+		d3 = 3.0f;	//change the copy, not the value in the table
+
+		std::cout << "Data: " << vllt::get<0>(data) //unchanged
+				  << " " << vllt::get<1>(data)
+				  << " " << vllt::get<2>(data) //changed to new value
+				  << " " << vllt::get<3>(data) << " "  << std::endl; //unchanged
+
 	}
 
 }
@@ -27,7 +53,7 @@ void functional_test() {
 //------------------------------------------------------------------------------------------
 
 
-/*
+
 /// @brief 
 void functional_test_static() {
 	using types = vtll::tl<double, float, int, char, std::string>;
@@ -254,11 +280,12 @@ void parallel_test_static(int num_threads = std::thread::hardware_concurrency() 
 		std::cout << sizes[i].size() << std::endl;
 	}
 }
-*/
+
 
 
 int main() {
 	std::cout << std::thread::hardware_concurrency() << " Threads" << std::endl;
+	functional_test();
 	//functional_test_static();
 	//parallel_test_static<vllt::sync_t::VLLT_SYNC_DEBUG_PUSHBACK>( );
 	return 0;

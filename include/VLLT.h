@@ -44,6 +44,7 @@ namespace vllt {
 
 
 	//---------------------------------------------------------------------------------------------------
+	//VlltColumnTypes
 
 	/// \brief A vector of types of a table
 	struct VlltColumnType {
@@ -56,37 +57,38 @@ namespace vllt {
 		return std::type_index( *ct1.m_type_info ) == std::type_index( *ct2.m_type_info ); 
 	}
 
-
-	/// \brief Construct from a variadic type list
-	template<typename... Ts>
-	struct VlltColumnTypes {
-		std::vector<VlltColumnType> m_types;
-		VlltColumnTypes() { (m_types.emplace_back( &typeid(Ts), &typeid(const Ts), sizeof(Ts) ), ... ); }
-	};
-
 	/// \brief Construct from a vector of types
-	template<>
-	struct VlltColumnTypes<void> {
+	struct VlltColumnTypesBase {
 		std::vector<VlltColumnType> m_types;
-		VlltColumnTypes() = default;
-		VlltColumnTypes( const auto &rhs) { 
+		VlltColumnTypesBase() = default;
+		VlltColumnTypesBase( const auto &rhs) { 
 			m_types.reserve(rhs.m_types.size()); 
 			for( const auto& type: rhs.m_types ) m_types.push_back(type); }
 	};
 
-	bool operator== (const VlltColumnTypes<void>& ct1, const VlltColumnTypes<void>& ct2) { 
+	/// \brief Construct from a variadic type list
+	template<typename... Ts>
+	struct VlltColumnTypes : public VlltColumnTypesBase {
+		VlltColumnTypes() { (m_types.emplace_back( &typeid(Ts), &typeid(const Ts), sizeof(Ts) ), ... ); }
+	};
+
+	bool operator== (const VlltColumnTypesBase& ct1, const VlltColumnTypesBase& ct2) { 
 		return ct1.m_types == ct2.m_types; 
 	}
 
+
+	//---------------------------------------------------------------------------------------------------
+	//Strong types
 
 	using component_index_t = vsty::strong_type_t<uint64_t, vsty::counter<>, std::integral_constant<uint64_t, std::numeric_limits<uint64_t>::max()>>;///< Strong integer type for indexing components, 0 to number components - 1
 	using table_index_t = vsty::strong_type_t<uint64_t, vsty::counter<>, std::integral_constant<uint64_t, std::numeric_limits<uint64_t>::max()>>;///< Strong integer type for indexing rows, 0 to number rows - 1
 	using table_diff_t  = vsty::strong_type_t<int64_t, vsty::counter<>, std::integral_constant<int64_t, std::numeric_limits<int64_t>::max()>>;
 	auto operator+(table_index_t lhs, table_diff_t rhs) { return table_index_t{ lhs.value() + rhs.value() }; }
 
-	//---------------------------------------------------------------------------------------------------
 
+	//---------------------------------------------------------------------------------------------------
 	/// Syncronization type for the table
+
 	const int VLLT_SYNC_PUSHBACK = 128;		///< relaxed sync, views with pushback are allowed
 	enum class sync_t : int {
 		VLLT_SYNC_EXTERNAL = 0,		///< sync is done externally
@@ -105,12 +107,14 @@ namespace vllt {
 	template<sync_t SYNC, size_t N0, size_t MINSLOTS, bool FAIR>
 	class VlltTable;
 
+	class VlltTableViewBase;
+
+	template<typename... Ts>
 	class VlltTableView;
 
 
 	//---------------------------------------------------------------------------------------------------
 	//accessor functions for void*
-
 
 	/// \brief A collection of pointers to components of a row.
 	class VlltComponentPtrs {
@@ -180,10 +184,8 @@ namespace vllt {
 	//---------------------------------------------------------------------------------------------------
 	//VlltTable
 
-
-
 	class VlltTableBase {
-		friend class VlltTableView;
+		friend class VlltTableViewBase;
 
 	public:
 		VlltTableBase(auto&  ctypes, sync_t sync = sync_t::VLLT_SYNC_EXTERNAL) noexcept : m_column_types{ ctypes }, m_sync{sync} {};
@@ -192,8 +194,13 @@ namespace vllt {
 		virtual inline auto size() noexcept -> uint64_t = 0;
 		inline auto const & types() noexcept { return m_column_types; };
 
-		inline auto view( auto&& types ) noexcept { 
-			return VlltTableView{ *this, std::forward<decltype(types)>(types) };
+		inline auto view_base( auto&& types ) noexcept { 
+			return VlltTableViewBase{ *this, std::forward<decltype(types)>(types) };
+		};
+
+		template<typename... Ts>
+		inline auto view() noexcept { 
+			return VlltTableView<Ts...>{ *this };
 		};
 
 	private:
@@ -203,7 +210,7 @@ namespace vllt {
 		}
 
 		const sync_t m_sync; ///< Synchronization type of the table
-		const VlltColumnTypes<void> m_column_types; ///< Types of the table
+		const VlltColumnTypesBase m_column_types; ///< Types of the table
 	};
 
 
@@ -211,7 +218,7 @@ namespace vllt {
 	template<sync_t SYNC = sync_t::VLLT_SYNC_EXTERNAL, size_t N0 = 1 << 5, size_t MINSLOTS = 16, bool FAIR = false>
 	class VlltTable : public VlltTableBase {
 
-		friend class VlltTableView;
+		friend class VlltTableViewBase;
 
 		static const size_t N = vtll::smallest_pow2_leq_value< N0 >::value;	///< Force N to be power of 2
 		static const size_t L = vtll::index_largest_bit< std::integral_constant<size_t, N> >::value - 1; ///< Index of largest bit in N
@@ -249,8 +256,9 @@ namespace vllt {
 			return std::min(s1, s2);
  		}
 
-
 		friend bool operator==(const VlltTable& lhs, const VlltTable& rhs) noexcept { return &lhs == &rhs; }
+
+
 
 
 	private:
@@ -311,20 +319,14 @@ namespace vllt {
 	};
 
 
+	//---------------------------------------------------------------------------------------------------
+	//VlltTableView
 
-
-	/// \brief Used for accessing a table.
-	class VlltTableView {
-
+	class VlltTableViewBase {
 		friend class VlltTableBase;
 
-	public:
-		inline auto push_back(auto&&... data) noexcept -> table_index_t {
-			return m_owner ? m_table.push_back(std::forward<decltype(data)>(data)...) : table_index_t{};
-		}
-
 	private:
-		VlltTableView( VlltTableBase& table, auto&& column_types) : m_table{ table } {
+		VlltTableViewBase( VlltTableBase& table, auto&& column_types) : m_table{ table } {
 			bool con = true;
 			for( auto& type : column_types.m_types) {
 				if( std::type_index( *type.m_type_info ) == std::type_index( typeid(VlltWrite) ) ) { con = false; continue; }
@@ -336,10 +338,132 @@ namespace vllt {
 			if( table.m_column_types == m_column_types ) m_owner = true;
 		};
 
+
+	public:
+		inline auto push_back(auto&&... data) noexcept -> table_index_t {
+			return m_owner ? m_table.push_back(std::forward<decltype(data)>(data)...) : table_index_t{};
+		}
+
+		/// \brief Get a tuple with refs to all components of an entry.
+		/// \param n Index to the entry.
+		/// \returnss a tuple with refs to all components of entry n.
+		inline decltype(auto) get_ref_tuple(table_index_t n) requires (!VlltOnlyPushback<WRITELIST>) {
+			//if constexpr (vtll::size<READ>::value == 0) return m_table.template get_ref_tuple<WRITE>(n);
+			//else if constexpr (vtll::size<WRITE>::value == 0) return m_table.template get_const_ref_tuple<READ>(n);
+			//else return std::tuple_cat( m_table.template get_const_ref_tuple<READ>(n), m_table.template get_ref_tuple<WRITE>(n) ); 
+		};
+
+		/// \brief Pop last row from the table.
+		/// \returnss Tuple with the data of the last row.
+		inline auto pop_back(table_index_t *idx = nullptr ) noexcept requires VlltOwner<DATA, WRITE, WRITELIST> { 
+		//	return m_table.pop_back(idx); 
+		}; 
+
+		/// \brief Clear the table.
+		inline auto clear() noexcept requires VlltOwner<DATA, WRITE, WRITELIST> { 
+			//return m_table.clear(); 
+		};
+
+		/// \brief Swap the values of two rows.
+		inline auto swap(table_index_t lhs, table_index_t rhs) noexcept -> void requires VlltOwner<DATA, WRITE, WRITELIST> { 
+			//m_table.swap(lhs, rhs); 
+		};	
+		
+		/// \brief Erase a row from the table. Replace it with the last row. Return the values.
+		inline auto erase(table_index_t n) -> tuple_value_t requires VlltOwner<DATA, WRITE, WRITELIST> { return m_table.erase(n); }
+
+		/// \brief Equality comparison operator
+    	friend bool operator==(const VlltStaticTableView& lhs, const VlltStaticTableView& rhs) {
+        	return lhs.m_table == rhs.m_table;
+    	}
+
+		/// \brief Create an iterator to the beginning of the table.
+		/// \returns  Iterator to the beginning of the table.
+		inline auto begin() { 
+			//assert(!VlltOnlyPushback<WRITELIST>); 
+			//return iterator_t(*this, table_index_t{0}); 
+		}
+
+		/// \brief Create an iterator to the end of the table.
+		/// \returns  Iterator to the end of the table.
+		inline auto end() { 
+			//assert(!VlltOnlyPushback<WRITELIST>); 
+			//return iterator_t(*this, table_index_t{size()}); 
+		}
+
+		//---------------------------------------------------------------------------------------------------
+
+		/// \brief Get a vector with pointers to all components of an entry.
+		/// \param[in] n Index to the entry.
+		/// \returns a vector with pointers to all components of entry n.
+		virtual inline auto get( table_index_t n) -> ptr_array_any_t override {
+			/*ptr_array_any_t ptrs;
+			std::any *ptr = nullptr;
+
+			if constexpr (vtll::size<READ>::value + vtll::size<WRITE>::value <= VLLT_MAX_NUMBER_OF_COLUMNS ) {
+				ptrs = std::array<std::any, VLLT_MAX_NUMBER_OF_COLUMNS>{};
+				ptr = std::get<0>(ptrs).data();
+			} else {
+				ptrs = std::vector<std::any>{ vtll::size<READ>::value + vtll::size<WRITE>::value };
+				ptr = std::get<1>(ptrs).data();
+			}
+
+			int j=0;
+			if constexpr (vtll::size<READ>::value > 0) {
+				auto ret = m_table.template get_const_ref_tuple<READ>(n);
+				vtll::static_for<size_t, 0, vtll::size<READ>::value >( [&](auto i) { ptr[j++] = &std::get<i>(ret) ; } );
+			}
+
+			if constexpr (vtll::size<WRITE>::value > 0) {
+				auto ret = m_table.template get_ref_tuple<WRITE>(n);
+				vtll::static_for<size_t, 0, vtll::size<WRITE>::value >( [&](auto i) { ptr[j++] = &std::get<i>(ret) ; } );
+			}
+
+			return ptrs;*/
+		}
+
+
+	protected:
 		bool m_owner{false};
 		VlltTableBase& m_table;
-		VlltColumnTypes<void> m_column_types;
+		VlltColumnTypesBase m_column_types;
 	};
+
+
+	/// \brief Used for accessing a table.
+	template<typename... Ts>
+	class VlltTableView : public VlltTableViewBase {
+	private:
+
+		friend class VlltTableBase;
+
+		VlltTableView( VlltTableBase& table) : VlltTableViewBase{ table } {
+			bool con = true;^^
+			using DATA = vtll::tl<Ts...>;
+			vtll::static_for<size_t, 0, vtll::size<DATA>::value >([&](auto i) {
+				if constexpr( std::is_same_v<vtll::Nth_type<DATA,i>, VlltWrite> ) { con = false; }
+				else {
+					if( con ) m_column_types.m_types.emplace_back( type.m_type_info_const, type.m_type_info_const, type.m_type_size );
+					else m_column_types.m_types.emplace_back( type.m_type_info, type.m_type_info_const, type.m_type_size );
+				}
+			});
+			//if( table.m_column_types == m_column_types ) m_owner = true;
+		};
+
+
+
+
+	};
+
+
+
+
+
+
+
+
+
+
 
 
 
