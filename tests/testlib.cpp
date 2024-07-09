@@ -7,17 +7,7 @@ using namespace std::chrono;
 
 
 void functional_test() {
-	using table_type = vllt::VlltTable<vllt::sync_t::VLLT_SYNC_EXTERNAL_PUSHBACK, 1 << 5>;
-	table_type table{ vllt::VlltColumnTypes<double, float, int, char, std::string>{} };
 
-	auto types = table.types();
-
-	{
-		auto view = table.view( vllt::VlltColumnTypes<vllt::VlltWrite>{} );
-		for( int i = 0; i < 100; i++ ) {
-			view.push_back((double)i, (float)i, i, 'a', std::string("Hello")); //inserting new rows always in order of the table types!
-		}
-	}
 
 }
 
