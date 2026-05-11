@@ -3,7 +3,6 @@
 #include <assert.h>
 #include <algorithm>
 #include <memory_resource>
-#include <shared_mutex>
 #include <optional>
 #include <array>
 #include <stack>
@@ -389,7 +388,7 @@ namespace vllt {
 		static inline auto block_idx(table_index_t n) -> block_idx_t { return block_idx_t{ (n.value() >> L) }; }
 		inline auto resize(table_index_t slot) -> block_ptr_t; ///< If the map of blocks is too small, allocate a larger one and copy the previous block pointers into it.
 
-		std::array<std::shared_timed_mutex, vtll::size<DATA>::value> m_access_mutex;
+		std::array<std::atomic<int32_t>, vtll::size<DATA>::value> m_access_mutex{}; ///< >0 = reader count, -1 = writer active, 0 = free
 		std::pmr::polymorphic_allocator<block_t> m_alloc; ///< Allocator for the table
 
 		alignas(64) std::atomic<std::shared_ptr<block_map_t>> m_block_map{nullptr};///< Atomic shared ptr to the map of blocks
@@ -491,67 +490,58 @@ namespace vllt {
 	/// \returnss Pointer to the block map.
 	template<typename DATA, sync_t SYNC, size_t N0, bool ROW, size_t MINSLOTS, bool FAIR> requires VlltStaticTableConcept<DATA>
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::resize(table_index_t slot) -> block_ptr_t {
-		static std::mutex m;
-
-		//Get a pointer to the block map. If there is none, then allocate a new one.
-		auto map_ptr{ m_block_map.load() };
+		// Lock-free: initialize block map if absent via CAS; loser discards via shared_ptr dtor
+		auto map_ptr = m_block_map.load();
 		if (!map_ptr) {
-			std::scoped_lock lock(m);
-			map_ptr = m_block_map.load();
-			if( !map_ptr ) {
-				map_ptr = std::allocate_shared<block_map_t>( //map has always as many MINSLOTS as its capacity is -> size==capacity
-					m_alloc, block_map_t{ std::pmr::vector<std::atomic<block_ptr_t>>{MINSLOTS, m_alloc} } //create a new map
-				);
-				m_block_map.store( map_ptr );
-			}
-		}
-
-		assert(map_ptr != nullptr); ///< Make sure that the block map is there
-
-		//Make sure that there is enough space in the block map so that blocks are there to hold the new slot.
-		//Because other threads might also do this, we need to run in a loop until we are sure that the new slot is covered.
-		auto idx = block_idx(slot);
-
-		while(1) {
-			if ( idx < map_ptr->m_blocks.size() ) {	//test if the block is already there
-				auto ptr = map_ptr->m_blocks[(size_t)idx].load();
-				if( ptr ) return ptr;	  //yes -> return
-
-				std::scoped_lock lock(m);
-				ptr = map_ptr->m_blocks[(size_t)idx].load();
-				if( ptr ) return ptr;	  //yes -> return
-				map_ptr->m_blocks[(size_t)idx].store( std::allocate_shared<block_t>(m_alloc) ); //no -> get a new block
-				return map_ptr->m_blocks[(size_t)idx].load();
-			}
-
-			std::scoped_lock lock(m);
-
-			map_ptr =  m_block_map.load();
-			if( idx < map_ptr->m_blocks.size() ) {
-				continue;	//another thread increased the size of the map, but the block might not be there, so test again
-			}
-
-			//Allocate a new block map and populate it with empty semgement pointers.
-			auto num_blocks = map_ptr->m_blocks.size();
-			auto new_size = num_blocks << 2; //double the size of the map
-			while( idx >= new_size ) new_size <<= 2; //make sure there are enough slots for the new block
-
-			auto new_map_ptr = std::allocate_shared<block_map_t>( //map has always as many slots as its capacity is -> size==capacity
-				m_alloc, block_map_t{ std::pmr::vector<std::atomic<block_ptr_t>>{new_size, m_alloc} } //increase existing one
+			auto new_map = std::allocate_shared<block_map_t>(
+				m_alloc, block_map_t{ std::pmr::vector<std::atomic<block_ptr_t>>{MINSLOTS, m_alloc} }
 			);
+			std::shared_ptr<block_map_t> expected = nullptr;
+			if (!m_block_map.compare_exchange_strong(expected, new_map))
+				map_ptr = expected;
+			else
+				map_ptr = new_map;
+		}
+		assert(map_ptr != nullptr);
 
-			//Copy the old block pointers into the new map. 
-			for( size_t i = 0; i < num_blocks; ++i ) {
+		auto idx = block_idx(slot);
+		while (true) {
+			if (idx < map_ptr->m_blocks.size()) {
+				auto ptr = map_ptr->m_blocks[(size_t)idx].load();
+				if (ptr) return ptr;
+
+				// Lock-free: optimistically allocate block, install via CAS; loser returns winner's block
+				auto new_block = std::allocate_shared<block_t>(m_alloc);
+				block_ptr_t expected_block = nullptr;
+				if (!map_ptr->m_blocks[(size_t)idx].compare_exchange_strong(expected_block, new_block))
+					return expected_block;
+				return new_block;
+			}
+
+			// Map too small — re-read first; another thread may have already grown it
+			map_ptr = m_block_map.load();
+			if (idx < map_ptr->m_blocks.size()) continue;
+
+			auto old_size = map_ptr->m_blocks.size();
+			auto new_size = old_size << 2;
+			while (idx >= new_size) new_size <<= 2;
+
+			auto new_map = std::allocate_shared<block_map_t>(
+				m_alloc, block_map_t{ std::pmr::vector<std::atomic<block_ptr_t>>{new_size, m_alloc} }
+			);
+			// Copy existing block pointers; fill any gaps with fresh blocks
+			for (size_t i = 0; i < old_size; ++i) {
 				auto ptr = map_ptr->m_blocks[i].load();
-				if( ptr ) new_map_ptr->m_blocks[i].store( ptr );
-				else new_map_ptr->m_blocks[i].store( std::allocate_shared<block_t>(m_alloc) ); //get a new block
+				new_map->m_blocks[i].store(ptr ? ptr : std::allocate_shared<block_t>(m_alloc));
 			}
-			for( size_t i = num_blocks; i <= idx; ++i ) {
-				new_map_ptr->m_blocks[i].store( std::allocate_shared<block_t>(m_alloc) ); //get a new block
-			}
+			for (size_t i = old_size; i <= (size_t)idx; ++i)
+				new_map->m_blocks[i].store(std::allocate_shared<block_t>(m_alloc));
 
-			map_ptr = new_map_ptr; ///<  remember for later	
-			m_block_map.store( map_ptr );
+			// CAS the map pointer; loser retries with the winner's map
+			auto expected_map = map_ptr;
+			if (m_block_map.compare_exchange_strong(expected_map, new_map))
+				return new_map->m_blocks[(size_t)idx].load();
+			map_ptr = expected_map;
 		}
 	}
 
@@ -744,23 +734,44 @@ namespace vllt {
 		friend class VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>; ///< Allow the table to access the view
 
 		/// \brief Constructor of class VlltStaticTableView. This is private because only the table is allowed to create a view.
-		VlltStaticTableView(table_type& table ) : VlltStaticTableViewBase{}, m_table{ table } {	
+		VlltStaticTableView(table_type& table ) : VlltStaticTableViewBase{}, m_table{ table } {
 			if constexpr (SYNC == sync_t::VLLT_SYNC_EXTERNAL || SYNC == sync_t::VLLT_SYNC_EXTERNAL_PUSHBACK) return;
 			if constexpr (VlltOnlyPushback<WRITELIST>) return;
 
 			vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 				[&](auto i) {
-					if constexpr ( vtll::size<READ>::value >0 && vtll::has_type<READ,vtll::Nth_type<DATA,i>>::value ) { 
-						if constexpr (SYNC == sync_t::VLLT_SYNC_DEBUG || SYNC == sync_t::VLLT_SYNC_DEBUG_PUSHBACK) assert(m_table.m_access_mutex[i].try_lock_shared());
-						else m_table.m_access_mutex[i].lock_shared(); 
+					if constexpr ( vtll::size<READ>::value > 0 && vtll::has_type<READ, vtll::Nth_type<DATA,i>>::value ) {
+						if constexpr (SYNC == sync_t::VLLT_SYNC_DEBUG || SYNC == sync_t::VLLT_SYNC_DEBUG_PUSHBACK) {
+							// Debug: assert no writer active, then increment reader count
+							int32_t v = m_table.m_access_mutex[i].load(std::memory_order_acquire);
+							assert(v >= 0);
+							assert(m_table.m_access_mutex[i].compare_exchange_strong(v, v + 1, std::memory_order_acquire));
+						} else {
+							// Spin until no writer (value < 0), then CAS-increment reader count
+							int32_t v = m_table.m_access_mutex[i].load(std::memory_order_acquire);
+							while (true) {
+								while (v < 0) v = m_table.m_access_mutex[i].load(std::memory_order_acquire);
+								if (m_table.m_access_mutex[i].compare_exchange_weak(v, v + 1, std::memory_order_acquire)) break;
+							}
+						}
 					}
-					else if constexpr ( vtll::size<WRITE>::value >0 && vtll::has_type<WRITE,vtll::Nth_type<DATA,i>>::value) { 
-						if constexpr (SYNC == sync_t::VLLT_SYNC_DEBUG || SYNC == sync_t::VLLT_SYNC_DEBUG_PUSHBACK) assert(m_table.m_access_mutex[i].try_lock());
-						else m_table.m_access_mutex[i].lock(); 
+					else if constexpr ( vtll::size<WRITE>::value > 0 && vtll::has_type<WRITE, vtll::Nth_type<DATA,i>>::value ) {
+						if constexpr (SYNC == sync_t::VLLT_SYNC_DEBUG || SYNC == sync_t::VLLT_SYNC_DEBUG_PUSHBACK) {
+							// Debug: assert no readers or writers active, then set writer flag (-1)
+							int32_t expected = 0;
+							assert(m_table.m_access_mutex[i].compare_exchange_strong(expected, int32_t(-1), std::memory_order_acquire));
+						} else {
+							// Spin until counter is 0 (no readers, no writer), then CAS to -1
+							int32_t expected = 0;
+							while (!m_table.m_access_mutex[i].compare_exchange_weak(expected, int32_t(-1), std::memory_order_acquire)) {
+								while (m_table.m_access_mutex[i].load(std::memory_order_relaxed) != 0);
+								expected = 0;
+							}
+						}
 					}
 				}
 			);
-		};	
+		};
 		
 
 	public:
@@ -771,8 +782,12 @@ namespace vllt {
 
 			vtll::static_for<size_t, 0, vtll::size<DATA>::value >(	///< Loop over all components
 				[&](auto i) {
-					if constexpr ( vtll::has_type<READ,vtll::Nth_type<DATA,i>>::value ) { m_table.m_access_mutex[i].unlock_shared(); }
-					else if constexpr ( vtll::has_type<WRITE,vtll::Nth_type<DATA,i>>::value) { m_table.m_access_mutex[i].unlock(); }
+					if constexpr ( vtll::has_type<READ, vtll::Nth_type<DATA,i>>::value ) {
+						m_table.m_access_mutex[i].fetch_sub(1, std::memory_order_release); // decrement reader count
+					}
+					else if constexpr ( vtll::has_type<WRITE, vtll::Nth_type<DATA,i>>::value ) {
+						m_table.m_access_mutex[i].store(0, std::memory_order_release); // clear writer flag
+					}
 				}
 			);
 		};
