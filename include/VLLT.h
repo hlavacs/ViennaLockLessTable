@@ -283,7 +283,7 @@ namespace vllt {
 		static_assert(vtll::size<DATA>::value > 0, "You need at least one component in your table!");
 
 		const size_t NUMBITS1 = 44; ///< Number of bits for the index of the first item in the stack
-		using block_idx_t = vsty::strong_type_t<uint64_t, vsty::counter<>>; ///< Strong integer type for indexing blocks, 0 to size map - 1
+		using block_idx_t = vsty::strong_type_t<uint64_t, (size_t)__COUNTER__>; ///< Strong integer type for indexing blocks, 0 to size map - 1
 
 		static const size_t N = vtll::smallest_pow2_leq_value< N0 >::value;	///< Force N to be power of 2
 		static const size_t L = vtll::index_largest_bit< std::integral_constant<size_t, N> >::value - 1; ///< Index of largest bit in N
@@ -298,8 +298,8 @@ namespace vllt {
 			std::pmr::vector<std::atomic<block_ptr_t>> m_blocks;	///< Vector of shared pointers to the blocks
 		};
 
-		using slot_size_t = vsty::strong_type_t<uint64_t, vsty::counter<>> ;
-		using size_cnt_t1 = vsty::strong_type_t<slot_size_t, vsty::counter<>> ;
+		using slot_size_t = vsty::strong_type_t<uint64_t, (size_t)__COUNTER__> ;
+		using size_cnt_t1 = vsty::strong_type_t<slot_size_t, (size_t)__COUNTER__> ;
 		using size_cnt_t2 = std::atomic<slot_size_t>;
 		using size_cnt_t = std::conditional_t< SYNC == sync_t::VLLT_SYNC_EXTERNAL, size_cnt_t1, size_cnt_t2 >; ///< Atomic size counter
 		using starving_t = std::atomic<uint64_t>; ///< Indicator for starving, use only for stack
@@ -330,9 +330,6 @@ namespace vllt {
 		template<typename... Ts >
 		inline auto view() noexcept;
 
-		/// Return a view to the table that writes to all types.
-		template<>
-		inline auto view<>() noexcept { return VlltStaticTableView<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, vtll::tl<>, DATA>(*this); };
 
 		friend bool operator==(const VlltStaticTable& lhs, const VlltStaticTable& rhs) noexcept { return &lhs == &rhs; }
 
@@ -407,7 +404,9 @@ namespace vllt {
 	inline auto VlltStaticTable<DATA, SYNC, N0, ROW, MINSLOTS, FAIR>::view() noexcept {
 		using parameters = vtll::tl<Ts...>;		///< List of types in the view
 
-		if constexpr (sizeof...(Ts) == 1 && std::is_same_v<vtll::front<parameters>, VlltWrite>) {
+		if constexpr (sizeof...(Ts) == 0) {
+			return VlltStaticTableView<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, vtll::tl<>, DATA>(*this); ///< Full write view
+		} else if constexpr (sizeof...(Ts) == 1 && std::is_same_v<vtll::front<parameters>, VlltWrite>) {
 			static_assert(VlltAllowOnlyPushback<SYNC>, "This table's SYNC option does not allow pushback-only views!");
 			return VlltStaticTableView<DATA, SYNC, N0, ROW, MINSLOTS, FAIR, vtll::tl<>, vtll::tl<VlltWrite>>(*this); ///< Create a pushback only view
 		} else {
